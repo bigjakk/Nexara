@@ -14,6 +14,7 @@ import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNSubnet, useUpdateSDNSubnet } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNSubnet, CreateSDNSubnetRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNSubnetDialogProps {
   clusterId: string;
@@ -26,6 +27,7 @@ export function CreateSDNSubnetDialog({
   vnet,
   initialData,
 }: CreateSDNSubnetDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [subnet, setSubnet] = useState("");
@@ -84,7 +86,7 @@ export function CreateSDNSubnetDialog({
           params: updateParams,
         }),
         {
-          action: `Saving subnet ${initialData.subnet}`,
+          action: t("sdnSubnetActions.saving", { subnet: initialData.subnet }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -93,7 +95,7 @@ export function CreateSDNSubnetDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating subnet ${subnet}`,
+        action: t("sdnSubnetActions.creating", { subnet }),
         onSuccess: () => {
           setOpen(false);
         },

@@ -25,6 +25,7 @@ import {
 } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNVNet, CreateSDNVNetRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNVNetDialogProps {
   clusterId: string;
@@ -35,6 +36,7 @@ export function CreateSDNVNetDialog({
   clusterId,
   initialData,
 }: CreateSDNVNetDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [vnet, setVnet] = useState("");
@@ -92,7 +94,7 @@ export function CreateSDNVNetDialog({
       settle(
         update.mutateAsync({ vnet: initialData.vnet, params: updateParams }),
         {
-          action: `Saving VNet ${initialData.vnet}`,
+          action: t("sdnVNetActions.saving", { vnet: initialData.vnet }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -101,7 +103,7 @@ export function CreateSDNVNetDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating VNet ${vnet}`,
+        action: t("sdnVNetActions.creating", { vnet }),
         onSuccess: () => {
           setOpen(false);
         },

@@ -22,6 +22,7 @@ import type { FirewallTemplate } from "../types/network";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 interface FirewallTemplatesTableProps {
   clusterId: string;
@@ -30,6 +31,7 @@ interface FirewallTemplatesTableProps {
 export function FirewallTemplatesTable({
   clusterId,
 }: FirewallTemplatesTableProps) {
+  const { t } = useTranslation("networks");
   const { data: templates, isLoading } = useFirewallTemplates();
   const deleteTemplate = useDeleteFirewallTemplate();
   const [pendingDelete, setPendingDelete] = useState<FirewallTemplate | null>(
@@ -42,13 +44,13 @@ export function FirewallTemplatesTable({
     <>
       <Panel
         flush
-        title="Templates"
+        title={t("firewallTemplatesTable.templates")}
         aside={
           isLoading
-            ? "Loading..."
+            ? t("firewallTemplatesTable.loading")
             : count === 0
-              ? "Reusable rule sets, shared by every cluster"
-              : `${String(count)} ${count === 1 ? "template" : "templates"}, shared by every cluster`
+              ? t("firewallTemplatesTable.reusableRuleSetsSharedBy")
+              : t("firewallTemplatesTable.templatesShared", { count })
         }
         actions={<CreateTemplateDialog />}
       >
@@ -58,18 +60,20 @@ export function FirewallTemplatesTable({
           </div>
         ) : !templates || templates.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            No firewall templates. Create one to define reusable rule sets.
+            {t("firewallTemplatesTable.noFirewallTemplatesCreateOne")}
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Rules</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead>{t("firewallTemplatesTable.name")}</TableHead>
+                <TableHead>{t("firewallTemplatesTable.description")}</TableHead>
+                <TableHead>{t("firewallTemplatesTable.rules")}</TableHead>
+                <TableHead>{t("firewallTemplatesTable.updated")}</TableHead>
                 <TableHead className="w-0">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">
+                    {t("firewallTemplatesTable.actions")}
+                  </span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -87,8 +91,9 @@ export function FirewallTemplatesTable({
                     {tmpl.description || "-"}
                   </TableCell>
                   <TableCell className="tabular-nums">
-                    {tmpl.rules.length} rule
-                    {tmpl.rules.length !== 1 ? "s" : ""}
+                    {t("firewallTemplatesTable.ruleCount", {
+                      count: tmpl.rules.length,
+                    })}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     <DateTime value={tmpl.updated_at} kind="date" />
@@ -100,7 +105,10 @@ export function FirewallTemplatesTable({
                         template={tmpl}
                       />
                       <Button
-                        aria-label={`Delete template ${tmpl.name}`}
+                        aria-label={t(
+                          "firewallTemplatesTable.deleteTemplateName",
+                          { name: tmpl.name },
+                        )}
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive"
@@ -134,11 +142,18 @@ export function FirewallTemplatesTable({
         onConfirm={(tmpl) => {
           deleteTemplate.mutate(tmpl.id);
         }}
-        title={(tmpl) => `Delete firewall template ${tmpl.name}?`}
-        description={(tmpl) =>
-          `Nexara deletes the template ${tmpl.name} and its ${String(tmpl.rules.length)} rule${tmpl.rules.length !== 1 ? "s" : ""} for every cluster. Rules already applied from it are ordinary Proxmox firewall rules and stay in place. It cannot be undone: to get the template back, create it again.`
+        title={(tmpl) =>
+          t("firewallTemplatesTable.deleteFirewallTemplateName", {
+            name: tmpl.name,
+          })
         }
-        confirmLabel="Delete Template"
+        description={(tmpl) =>
+          t("firewallTemplatesTable.deleteTemplateDescription", {
+            name: tmpl.name,
+            count: tmpl.rules.length,
+          })
+        }
+        confirmLabel={t("firewallTemplatesTable.deleteTemplate")}
       />
     </>
   );

@@ -19,12 +19,14 @@ import { CreateFirewallRuleDialog } from "./CreateFirewallRuleDialog";
 import { ConfirmFirewallRuleDeleteDialog } from "./ConfirmFirewallRuleDeleteDialog";
 import type { FirewallRule } from "../types/network";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
+import { useTranslation } from "react-i18next";
 
 interface FirewallRulesTableProps {
   clusterId: string;
 }
 
 export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
+  const { t } = useTranslation("networks");
   const rulesQuery = useClusterFirewallRules(clusterId);
   const rules = rulesQuery.data;
   const deleteRule = useDeleteClusterFirewallRule(clusterId);
@@ -36,11 +38,16 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
     <>
       <Panel
         flush
-        title="Cluster rules"
+        title={t("firewallRulesTable.clusterRules")}
         aside={
           !rules || rules.length === 0
             ? undefined
-            : `${String(rules.length)} ${rules.length === 1 ? "rule" : "rules"}${disabled > 0 ? `, ${String(disabled)} disabled` : ""}`
+            : disabled > 0
+              ? t("firewallRulesTable.rulesDisabled", {
+                  count: rules.length,
+                  disabled: String(disabled),
+                })
+              : t("firewallRulesTable.rulesCount", { count: rules.length })
         }
         actions={<CreateFirewallRuleDialog clusterId={clusterId} />}
       >
@@ -48,8 +55,8 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
           <div className="px-[18px] pb-1">
             <QueryStateNotice
               query={rulesQuery}
-              subject="the cluster firewall rules"
-              empty="No firewall rules configured."
+              subject={t("firewallRulesTable.theClusterFirewallRules")}
+              empty={t("firewallRulesTable.noFirewallRulesConfigured")}
             />
           </div>
         ) : (
@@ -57,17 +64,19 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12">#</TableHead>
-                <TableHead>Direction</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Protocol</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Destination</TableHead>
-                <TableHead>Port</TableHead>
-                <TableHead>Macro</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Comment</TableHead>
+                <TableHead>{t("firewallRulesTable.direction")}</TableHead>
+                <TableHead>{t("firewallRulesTable.action")}</TableHead>
+                <TableHead>{t("firewallRulesTable.protocol")}</TableHead>
+                <TableHead>{t("firewallRulesTable.source")}</TableHead>
+                <TableHead>{t("firewallRulesTable.destination")}</TableHead>
+                <TableHead>{t("firewallRulesTable.port")}</TableHead>
+                <TableHead>{t("firewallRulesTable.macro")}</TableHead>
+                <TableHead>{t("firewallRulesTable.state")}</TableHead>
+                <TableHead>{t("firewallRulesTable.comment")}</TableHead>
                 <TableHead className="w-0">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">
+                    {t("firewallRulesTable.actions")}
+                  </span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -84,12 +93,14 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                   <TableCell className="font-mono text-[12.5px] font-semibold">
                     {rule.action}
                   </TableCell>
-                  <TableCell>{rule.proto || "any"}</TableCell>
-                  <TableCell className="font-mono text-[12.5px]">
-                    {rule.source || "any"}
+                  <TableCell>
+                    {rule.proto || t("firewallRulesTable.any")}
                   </TableCell>
                   <TableCell className="font-mono text-[12.5px]">
-                    {rule.dest || "any"}
+                    {rule.source || t("firewallRulesTable.any")}
+                  </TableCell>
+                  <TableCell className="font-mono text-[12.5px]">
+                    {rule.dest || t("firewallRulesTable.any")}
                   </TableCell>
                   <TableCell className="font-mono text-[12.5px]">
                     {rule.dport || "-"}
@@ -97,7 +108,9 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                   <TableCell>{rule.macro || "-"}</TableCell>
                   <TableCell>
                     <Badge variant={rule.enable ? "healthy" : "secondary"}>
-                      {rule.enable ? "Enabled" : "Disabled"}
+                      {rule.enable
+                        ? t("firewallRulesTable.enabled")
+                        : t("firewallRulesTable.disabled")}
                     </Badge>
                   </TableCell>
                   <TableCell className="max-w-[200px] truncate text-muted-foreground">
@@ -105,7 +118,9 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                   </TableCell>
                   <TableCell className="py-1 text-right">
                     <Button
-                      aria-label={`Delete rule ${String(rule.pos)}`}
+                      aria-label={t("firewallRulesTable.deleteRulePos", {
+                        pos: String(rule.pos),
+                      })}
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
@@ -132,7 +147,7 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
         onConfirm={(rule) => {
           deleteRule.mutate({ pos: rule.pos, digest: rule.digest });
         }}
-        owner="the cluster"
+        owner={t("firewallRulesTable.theCluster")}
         current={rules}
       />
     </>

@@ -40,6 +40,7 @@ import {
   supportsBondPrimary,
   supportsHashPolicy,
 } from "./interface-fields";
+import { useTranslation } from "react-i18next";
 
 /** Every control is a string while it's being typed; numbers are parsed on
  *  submit so a half-typed MTU doesn't collapse to 0. */
@@ -64,6 +65,7 @@ export function InterfaceFormDialog({
   onOpenChange,
   existing,
 }: InterfaceFormDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = existing !== undefined;
 
   const [iface, setIface] = useState("");
@@ -165,7 +167,7 @@ export function InterfaceFormDialog({
       const cleared = clearedSettings(existing, options, type);
       if (cleared.length > 0) req.delete = cleared;
       settle(update.mutateAsync({ iface: existing.iface, params: req }), {
-        action: `Saving interface ${existing.iface}`,
+        action: t("interfaceFormActions.saving", { iface: existing.iface }),
         onSuccess: () => {
           onOpenChange(false);
         },
@@ -176,7 +178,7 @@ export function InterfaceFormDialog({
 
     const req: CreateNetworkInterfaceRequest = { iface, type, ...options };
     settle(create.mutateAsync(req), {
-      action: `Creating interface ${iface}`,
+      action: t("interfaceFormActions.creating", { iface }),
       onSuccess: () => {
         onOpenChange(false);
       },

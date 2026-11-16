@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import type { FirewallRule } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 /** The rule as its table row shows it, so the operator sees WHICH rule sits at
  *  the position they are about to delete. */
@@ -72,6 +73,7 @@ export function ConfirmFirewallRuleDeleteDialog({
   owner,
   current,
 }: ConfirmFirewallRuleDeleteDialogProps) {
+  const { t } = useTranslation("networks");
   return (
     <ConfirmDeleteDialog
       target={target}
@@ -80,31 +82,34 @@ export function ConfirmFirewallRuleDeleteDialog({
         const now = current?.find((r) => r.pos === rule.pos);
         if (now === undefined || !sameRule(rule, now)) {
           toast.error(
-            `Nothing was deleted: the rule list of ${owner} changed while you were confirming. Check the list and try again.`,
+            t("confirmFirewallRuleDeleteDialog.nothingWasDeletedTheRule", {
+              owner,
+            }),
           );
           return;
         }
         onConfirm(rule);
       }}
-      title={(rule) => `Delete firewall rule #${String(rule.pos)}?`}
+      title={(rule) =>
+        t("confirmFirewallRuleDeleteDialog.deleteFirewallRulePos", {
+          pos: String(rule.pos),
+        })
+      }
       description={(rule) => (
         <>
           <span className="block font-mono text-xs">{ruleSummary(rule)}</span>
           <span className="mt-2 block">
-            Rules are deleted by position — this is position {rule.pos} of the
-            rule list of {owner}. Nexara sends Proxmox a check that the list is
-            unchanged, so if it has changed since this page loaded, nothing is
-            deleted and the list is reloaded. The rules below it move up one
-            position.
+            {t("confirmFirewallRuleDeleteDialog.rulesAreDeletedByPosition", {
+              pos: rule.pos,
+              owner,
+            })}
           </span>
           <span className="mt-2 block">
-            The change is saved at once, with no apply step; the firewall
-            service reads it on its next update, every 10 seconds. It cannot be
-            undone: to get the rule back, create it again.
+            {t("confirmFirewallRuleDeleteDialog.theChangeIsSavedAt")}
           </span>
         </>
       )}
-      confirmLabel="Delete Rule"
+      confirmLabel={t("confirmFirewallRuleDeleteDialog.deleteRule")}
     />
   );
 }

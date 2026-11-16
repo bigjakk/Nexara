@@ -13,6 +13,8 @@ import { WarningCallout } from "@/components/WarningCallout";
 import { Play } from "lucide-react";
 import { useApplyFirewallTemplate } from "../api/network-queries";
 import type { FirewallTemplate } from "../types/network";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 interface ApplyTemplateDialogProps {
   clusterId: string;
@@ -20,7 +22,7 @@ interface ApplyTemplateDialogProps {
 }
 
 function ruleCount(n: number): string {
-  return `${String(n)} rule${n === 1 ? "" : "s"}`;
+  return i18n.t("networks:applyTemplateDialog.ruleCount", { count: n });
 }
 
 /**
@@ -34,6 +36,7 @@ export function ApplyTemplateDialog({
   clusterId,
   template,
 }: ApplyTemplateDialogProps) {
+  const { t } = useTranslation("networks");
   const [open, setOpen] = useState(false);
   const apply = useApplyFirewallTemplate(clusterId);
   const blocks = template.rules.some(
@@ -46,11 +49,11 @@ export function ApplyTemplateDialog({
         setOpen(false);
         if (data.applied === data.total) {
           toast.success(
-            `Added ${ruleCount(data.applied)} from ${template.name} at the top of the cluster's firewall rules.`,
+            t("applyTemplateDialog.addedAppliedFromNameAt", { applied: ruleCount(data.applied), name: template.name }),
           );
         } else {
           toast.warning(
-            `Added ${String(data.applied)} of ${ruleCount(data.total)} from ${template.name}. Proxmox refused the other ${String(data.total - data.applied)}; check the cluster's rule list.`,
+            t("applyTemplateDialog.addedAppliedOfTotalFrom", { applied: String(data.applied), total: ruleCount(data.total), name: template.name, total2: String(data.total - data.applied) }),
           );
         }
       },
@@ -61,7 +64,7 @@ export function ApplyTemplateDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          aria-label={`Apply template ${template.name}`}
+          aria-label={t("applyTemplateDialog.applyTemplateName", { name: template.name })}
           variant="ghost"
           size="icon"
           className="h-8 w-8"
@@ -72,23 +75,17 @@ export function ApplyTemplateDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Apply template {template.name}</DialogTitle>
+          <DialogTitle>{t("applyTemplateDialog.applyTemplateName", { name: template.name })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Adds {ruleCount(template.rules.length)} at the top of the
-            cluster&apos;s firewall rules, above every rule already there, in
-            the order below. Existing rules are not changed or removed.
+            {t("applyTemplateDialog.addsLengthAtTheTop", { length: ruleCount(template.rules.length) })}
           </p>
 
           {blocks && (
-            <WarningCallout title="This can lock you out of the cluster">
+            <WarningCallout title={t("applyTemplateDialog.thisCanLockYouOut")}>
               <p>
-                Rules are checked from the top, so these come before every rule
-                the cluster has now. While the cluster&apos;s firewall is on, a
-                DROP or REJECT here that matches the traffic you reach its
-                nodes with — their web UI and API, SSH, or Nexara&apos;s own
-                connection — cuts that access off.
+                {t("applyTemplateDialog.rulesAreCheckedFromThe")}
               </p>
             </WarningCallout>
           )}
@@ -104,7 +101,7 @@ export function ApplyTemplateDialog({
                   {rule.action}
                 </span>
                 <span>
-                  {rule.proto || "any"}
+                  {rule.proto || t("applyTemplateDialog.any")}
                   {rule.dport && (
                     <span className="font-mono">:{rule.dport}</span>
                   )}
@@ -126,10 +123,10 @@ export function ApplyTemplateDialog({
               setOpen(false);
             }}
           >
-            Cancel
+            {t("applyTemplateDialog.cancel")}
           </Button>
           <Button onClick={handleApply} disabled={apply.isPending}>
-            Apply to Cluster
+            {t("applyTemplateDialog.applyToCluster")}
           </Button>
         </DialogFooter>
       </DialogContent>

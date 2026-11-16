@@ -20,6 +20,7 @@ import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNDNS, useUpdateSDNDNS } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNDNS, CreateSDNDNSRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNDNSDialogProps {
   clusterId: string;
@@ -32,6 +33,7 @@ export function CreateSDNDNSDialog({
   clusterId,
   initialData,
 }: CreateSDNDNSDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [dns, setDns] = useState("");
@@ -75,7 +77,7 @@ export function CreateSDNDNSDialog({
       settle(
         update.mutateAsync({ dns: initialData.dns, params: updateParams }),
         {
-          action: `Saving DNS server ${initialData.dns}`,
+          action: t("sdnDNSActions.saving", { dns: initialData.dns }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -84,7 +86,7 @@ export function CreateSDNDNSDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating DNS server ${dns}`,
+        action: t("sdnDNSActions.creating", { dns }),
         onSuccess: () => {
           setOpen(false);
         },

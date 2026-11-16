@@ -19,8 +19,10 @@ import {
 } from "@/components/ui/select";
 import { useCreateFirewallTemplate } from "../api/network-queries";
 import type { FirewallRuleRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 export function CreateTemplateDialog() {
+  const { t } = useTranslation("networks");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -63,18 +65,20 @@ export function CreateTemplateDialog() {
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="h-4 w-4" />
-          Create Template
+          {t("createTemplateDialog.createTemplate")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Create firewall template</DialogTitle>
+          <DialogTitle>
+            {t("createTemplateDialog.createFirewallTemplate")}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Name</Label>
+            <Label>{t("createTemplateDialog.name")}</Label>
             <Input
-              placeholder="e.g. Web Server Rules"
+              placeholder={t("createTemplateDialog.eGWebServerRules")}
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
@@ -82,9 +86,9 @@ export function CreateTemplateDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label>Description</Label>
+            <Label>{t("createTemplateDialog.description")}</Label>
             <Input
-              placeholder="Optional description"
+              placeholder={t("createTemplateDialog.optionalDescription")}
               value={description}
               onChange={(e) => {
                 setDescription(e.target.value);
@@ -94,15 +98,15 @@ export function CreateTemplateDialog() {
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>Rules</Label>
+              <Label>{t("createTemplateDialog.rules")}</Label>
               <Button variant="outline" size="sm" onClick={addRule}>
                 <Plus className="h-3 w-3" />
-                Add Rule
+                {t("createTemplateDialog.addRule")}
               </Button>
             </div>
             {rules.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No rules added yet. Click "Add Rule" to start.
+                {t("createTemplateDialog.noRulesAddedYetClick")}
               </p>
             ) : (
               <div className="space-y-2">
@@ -121,8 +125,12 @@ export function CreateTemplateDialog() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="in">In</SelectItem>
-                        <SelectItem value="out">Out</SelectItem>
+                        <SelectItem value="in">
+                          {t("createTemplateDialog.in")}
+                        </SelectItem>
+                        <SelectItem value="out">
+                          {t("createTemplateDialog.out")}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                     <Select
@@ -135,14 +143,20 @@ export function CreateTemplateDialog() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="ACCEPT">ACCEPT</SelectItem>
-                        <SelectItem value="DROP">DROP</SelectItem>
-                        <SelectItem value="REJECT">REJECT</SelectItem>
+                        <SelectItem value="ACCEPT">
+                          {t("createTemplateDialog.accept")}
+                        </SelectItem>
+                        <SelectItem value="DROP">
+                          {t("createTemplateDialog.drop")}
+                        </SelectItem>
+                        <SelectItem value="REJECT">
+                          {t("createTemplateDialog.reject")}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                     <Input
                       className="w-24"
-                      placeholder="Proto"
+                      placeholder={t("createTemplateDialog.proto")}
                       value={rule.proto || ""}
                       onChange={(e) => {
                         updateRule(i, "proto", e.target.value);
@@ -150,7 +164,7 @@ export function CreateTemplateDialog() {
                     />
                     <Input
                       className="flex-1"
-                      placeholder="D.Port"
+                      placeholder={t("createTemplateDialog.dPort")}
                       value={rule.dport || ""}
                       onChange={(e) => {
                         updateRule(i, "dport", e.target.value);
@@ -158,14 +172,16 @@ export function CreateTemplateDialog() {
                     />
                     <Input
                       className="flex-1"
-                      placeholder="Comment"
+                      placeholder={t("createTemplateDialog.comment")}
                       value={rule.comment || ""}
                       onChange={(e) => {
                         updateRule(i, "comment", e.target.value);
                       }}
                     />
                     <Button
-                      aria-label={`Remove rule ${String(i + 1)}`}
+                      aria-label={t("createTemplateDialog.removeRuleI", {
+                        i: String(i + 1),
+                      })}
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-destructive"
@@ -188,10 +204,10 @@ export function CreateTemplateDialog() {
                 setOpen(false);
               }}
             >
-              Cancel
+              {t("createTemplateDialog.cancel")}
             </Button>
             <Button onClick={handleSubmit} disabled={!name || create.isPending}>
-              Create Template
+              {t("createTemplateDialog.createTemplate")}
             </Button>
           </div>
         </div>

@@ -20,6 +20,7 @@ import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNIPAM, useUpdateSDNIPAM } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNIPAM, CreateSDNIPAMRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNIPAMDialogProps {
   clusterId: string;
@@ -32,6 +33,7 @@ export function CreateSDNIPAMDialog({
   clusterId,
   initialData,
 }: CreateSDNIPAMDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [ipam, setIpam] = useState("");
@@ -81,7 +83,7 @@ export function CreateSDNIPAMDialog({
       settle(
         update.mutateAsync({ ipam: initialData.ipam, params: updateParams }),
         {
-          action: `Saving IPAM ${initialData.ipam}`,
+          action: t("sdnIPAMActions.saving", { ipam: initialData.ipam }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -90,7 +92,7 @@ export function CreateSDNIPAMDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating IPAM ${ipam}`,
+        action: t("sdnIPAMActions.creating", { ipam }),
         onSuccess: () => {
           setOpen(false);
         },

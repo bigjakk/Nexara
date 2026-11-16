@@ -21,6 +21,7 @@ import { Plus, Pencil } from "lucide-react";
 import { useCreateSDNZone, useUpdateSDNZone } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNZone, CreateSDNZoneRequest } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNZoneDialogProps {
   clusterId: string;
@@ -33,6 +34,7 @@ export function CreateSDNZoneDialog({
   clusterId,
   initialData,
 }: CreateSDNZoneDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [zone, setZone] = useState("");
@@ -135,7 +137,7 @@ export function CreateSDNZoneDialog({
       settle(
         update.mutateAsync({ zone: initialData.zone, params: updateParams }),
         {
-          action: `Saving zone ${initialData.zone}`,
+          action: t("sdnZoneActions.saving", { zone: initialData.zone }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -144,7 +146,7 @@ export function CreateSDNZoneDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating zone ${zone}`,
+        action: t("sdnZoneActions.creating", { zone }),
         onSuccess: () => {
           setOpen(false);
         },

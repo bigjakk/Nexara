@@ -95,25 +95,35 @@ export function CreateFirewallRuleDialog({
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="h-4 w-4" />
-          Add Rule
+          {t("createFirewallRuleDialog.addRule")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add firewall rule</DialogTitle>
+          <DialogTitle>
+            {t("createFirewallRuleDialog.addFirewallRule")}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Direction</Label>
+              <Label>{t("createFirewallRuleDialog.direction")}</Label>
               <Select value={type} onValueChange={setType}>
-                <SelectTrigger aria-label="Direction">
+                <SelectTrigger
+                  aria-label={t("createFirewallRuleDialog.direction")}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="in">In</SelectItem>
-                  <SelectItem value="out">Out</SelectItem>
-                  <SelectItem value="group">Group</SelectItem>
+                  <SelectItem value="in">
+                    {t("createFirewallRuleDialog.in")}
+                  </SelectItem>
+                  <SelectItem value="out">
+                    {t("createFirewallRuleDialog.out")}
+                  </SelectItem>
+                  <SelectItem value="group">
+                    {t("createFirewallRuleDialog.group")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -135,15 +145,21 @@ export function CreateFirewallRuleDialog({
               </div>
             ) : (
               <div className="space-y-2">
-                <Label>Action</Label>
+                <Label>{t("createFirewallRuleDialog.action")}</Label>
                 <Select value={action} onValueChange={setAction}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ACCEPT">ACCEPT</SelectItem>
-                    <SelectItem value="DROP">DROP</SelectItem>
-                    <SelectItem value="REJECT">REJECT</SelectItem>
+                    <SelectItem value="ACCEPT">
+                      {t("createFirewallRuleDialog.accept")}
+                    </SelectItem>
+                    <SelectItem value="DROP">
+                      {t("createFirewallRuleDialog.drop")}
+                    </SelectItem>
+                    <SelectItem value="REJECT">
+                      {t("createFirewallRuleDialog.reject")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -162,30 +178,44 @@ export function CreateFirewallRuleDialog({
           {!isGroup && (
             <>
               <div className="space-y-2">
-                <Label>Protocol{dport.length > 0 ? "" : " (optional)"}</Label>
+                <Label>
+                  {dport.length > 0
+                    ? t("createFirewallRuleDialog.protocol")
+                    : t("createFirewallRuleDialog.protocolOptional")}
+                </Label>
                 <Select value={proto} onValueChange={setProto}>
                   <SelectTrigger
                     className={needsProto ? "border-destructive" : ""}
                   >
-                    <SelectValue placeholder="Any" />
+                    <SelectValue
+                      placeholder={t("createFirewallRuleDialog.any")}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="tcp">TCP</SelectItem>
-                    <SelectItem value="udp">UDP</SelectItem>
-                    <SelectItem value="icmp">ICMP</SelectItem>
+                    <SelectItem value="tcp">
+                      {t("createFirewallRuleDialog.tcp")}
+                    </SelectItem>
+                    <SelectItem value="udp">
+                      {t("createFirewallRuleDialog.udp")}
+                    </SelectItem>
+                    <SelectItem value="icmp">
+                      {t("createFirewallRuleDialog.icmp")}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
                 {needsProto && (
                   <p className="text-xs text-destructive">
-                    Protocol is required when a destination port is specified.
+                    {t("createFirewallRuleDialog.protocolIsRequiredWhenA")}
                   </p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Source (optional)</Label>
+                  <Label>{t("createFirewallRuleDialog.sourceOptional")}</Label>
                   <Input
-                    placeholder="e.g. 10.0.0.0/24"
+                    placeholder={t(
+                      "createFirewallRuleDialog.sourcePlaceholder",
+                    )}
                     value={source}
                     onChange={(e) => {
                       setSource(e.target.value);
@@ -193,9 +223,13 @@ export function CreateFirewallRuleDialog({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Destination (optional)</Label>
+                  <Label>
+                    {t("createFirewallRuleDialog.destinationOptional")}
+                  </Label>
                   <Input
-                    placeholder="e.g. 10.0.1.0/24"
+                    placeholder={t(
+                      "createFirewallRuleDialog.destinationPlaceholder",
+                    )}
                     value={dest}
                     onChange={(e) => {
                       setDest(e.target.value);
@@ -204,9 +238,13 @@ export function CreateFirewallRuleDialog({
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Destination port (optional)</Label>
+                <Label>
+                  {t("createFirewallRuleDialog.destinationPortOptional")}
+                </Label>
                 <Input
-                  placeholder="e.g. 80, 443, 8000-9000"
+                  placeholder={t(
+                    "createFirewallRuleDialog.destinationPortPlaceholder",
+                  )}
                   value={dport}
                   onChange={(e) => {
                     setDport(e.target.value);
@@ -216,9 +254,9 @@ export function CreateFirewallRuleDialog({
             </>
           )}
           <div className="space-y-2">
-            <Label>Comment (optional)</Label>
+            <Label>{t("createFirewallRuleDialog.commentOptional")}</Label>
             <Input
-              placeholder="Rule description"
+              placeholder={t("createFirewallRuleDialog.ruleDescription")}
               value={comment}
               onChange={(e) => {
                 setComment(e.target.value);
@@ -235,7 +273,9 @@ export function CreateFirewallRuleDialog({
               }}
               className="rounded border"
             />
-            <Label htmlFor="enable-rule">Enable rule</Label>
+            <Label htmlFor="enable-rule">
+              {t("createFirewallRuleDialog.enableRule")}
+            </Label>
           </div>
           {errorMessage && (
             <p className="text-sm text-destructive">{errorMessage}</p>
@@ -247,13 +287,13 @@ export function CreateFirewallRuleDialog({
                 setOpen(false);
               }}
             >
-              Cancel
+              {t("createFirewallRuleDialog.cancel")}
             </Button>
             <Button
               onClick={handleSubmit}
               disabled={create.isPending || (isGroup && group === "")}
             >
-              Create
+              {t("createFirewallRuleDialog.create")}
             </Button>
           </div>
         </div>

@@ -26,6 +26,7 @@ import type {
   SDNController,
   CreateSDNControllerRequest,
 } from "../types/network";
+import { useTranslation } from "react-i18next";
 
 interface CreateSDNControllerDialogProps {
   clusterId: string;
@@ -38,6 +39,7 @@ export function CreateSDNControllerDialog({
   clusterId,
   initialData,
 }: CreateSDNControllerDialogProps) {
+  const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
   const [open, setOpen] = useState(false);
   const [controller, setController] = useState("");
@@ -120,7 +122,9 @@ export function CreateSDNControllerDialog({
           params: updateParams,
         }),
         {
-          action: `Saving controller ${initialData.controller}`,
+          action: t("sdnControllerActions.saving", {
+            controller: initialData.controller,
+          }),
           onSuccess: () => {
             setOpen(false);
           },
@@ -129,7 +133,7 @@ export function CreateSDNControllerDialog({
       );
     } else {
       settle(create.mutateAsync(params), {
-        action: `Creating controller ${controller}`,
+        action: t("sdnControllerActions.creating", { controller }),
         onSuccess: () => {
           setOpen(false);
         },

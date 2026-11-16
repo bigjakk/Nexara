@@ -39,11 +39,11 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
   // offer to toggle from a state that was guessed.
   if (!opts) {
     return (
-      <Panel title="Options">
+      <Panel title={t("firewallOptionsCard.options")}>
         <QueryStateNotice
           query={optionsQuery}
-          subject="the cluster firewall options"
-          empty="Proxmox returned no firewall options for this cluster."
+          subject={t("firewallOptionsCard.theClusterFirewallOptions")}
+          empty={t("firewallOptionsCard.proxmoxReturnedNoFirewallOptions")}
           skeletonClassName="h-20 w-full"
         />
       </Panel>
@@ -54,17 +54,19 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
 
   return (
     <Panel
-      title="Options"
-      aside="Each change is saved as soon as you make it"
+      title={t("firewallOptionsCard.options")}
+      aside={t("firewallOptionsCard.eachChangeIsSavedAs")}
       className="max-w-4xl"
     >
       <div className="divide-y">
         <SettingRow
-          label="Cluster firewall"
-          description="While it is off, no cluster, node or guest rule is enforced."
+          label={t("firewallOptionsCard.clusterFirewall")}
+          description={t("firewallOptionsCard.whileItIsOffNo")}
         >
           <Badge variant={isEnabled ? "healthy" : "secondary"}>
-            {isEnabled ? "Enabled" : "Disabled"}
+            {isEnabled
+              ? t("firewallOptionsCard.enabled")
+              : t("firewallOptionsCard.disabled")}
           </Badge>
           {/* Turning it off stops every rule being enforced, at once: it asks
               first. Turning it on does not. */}
@@ -82,7 +84,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             }}
             disabled={setOpts.isPending}
           >
-            {isEnabled ? t("disableFirewall") : "Enable Firewall"}
+            {isEnabled
+              ? t("disableFirewall")
+              : t("firewallOptionsCard.enableFirewall")}
           </Button>
           <ConfirmDeleteDialog
             target={confirmDisable}
@@ -98,8 +102,8 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
           />
         </SettingRow>
         <SettingRow
-          label="Inbound policy"
-          description="What happens to incoming traffic no rule matches."
+          label={t("firewallOptionsCard.inboundPolicy")}
+          description={t("firewallOptionsCard.whatHappensToIncomingTraffic")}
           htmlFor="firewall-policy-in"
         >
           <Select
@@ -121,8 +125,8 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
           </Select>
         </SettingRow>
         <SettingRow
-          label="Outbound policy"
-          description="What happens to outgoing traffic no rule matches."
+          label={t("firewallOptionsCard.outboundPolicy")}
+          description={t("firewallOptionsCard.whatHappensToOutgoingTraffic")}
           htmlFor="firewall-policy-out"
         >
           <Select

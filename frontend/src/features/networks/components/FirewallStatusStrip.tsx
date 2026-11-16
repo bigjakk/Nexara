@@ -4,6 +4,7 @@ import {
   useClusterFirewallRules,
   useFirewallOptions,
 } from "../api/network-queries";
+import { useTranslation } from "react-i18next";
 
 /**
  * The state of the cluster firewall, above every view of the tab: whether it
@@ -15,6 +16,7 @@ import {
  * an unread value is a dash, and the Options view reports the failure.
  */
 export function FirewallStatusStrip({ clusterId }: { clusterId: string }) {
+  const { t } = useTranslation("networks");
   const opts = useFirewallOptions(clusterId).data;
   const rules = useClusterFirewallRules(clusterId).data;
   const enabled = opts === undefined ? null : opts.enable === 1;
@@ -24,7 +26,7 @@ export function FirewallStatusStrip({ clusterId }: { clusterId: string }) {
     <Panel flush bodyClassName="py-4">
       <StatStrip>
         <Stat
-          label="Cluster firewall"
+          label={t("firewallStatusStrip.clusterFirewall")}
           tone={enabled === true ? "default" : "quiet"}
           value={
             enabled === null ? (
@@ -39,34 +41,40 @@ export function FirewallStatusStrip({ clusterId }: { clusterId: string }) {
                       : "h-2.5 w-2.5 shrink-0 rounded-full ring-[1.5px] ring-inset ring-muted-foreground/70"
                   }
                 />
-                {enabled ? "Enabled" : "Disabled"}
+                {enabled
+                  ? t("firewallStatusStrip.enabled")
+                  : t("firewallStatusStrip.disabled")}
               </span>
             )
           }
           sub={
             enabled === false
-              ? "No rule is enforced while it is off"
+              ? t("firewallStatusStrip.noRuleIsEnforcedWhile")
               : undefined
           }
         />
         <Stat
-          label="Inbound policy"
+          label={t("firewallStatusStrip.inboundPolicy")}
           tone={opts === undefined ? "quiet" : "default"}
           value={opts === undefined ? "—" : opts.policy_in || "DROP"}
-          sub="Traffic no rule matches"
+          sub={t("firewallStatusStrip.trafficNoRuleMatches")}
         />
         <Stat
-          label="Outbound policy"
+          label={t("firewallStatusStrip.outboundPolicy")}
           tone={opts === undefined ? "quiet" : "default"}
           value={opts === undefined ? "—" : opts.policy_out || "ACCEPT"}
-          sub="Traffic no rule matches"
+          sub={t("firewallStatusStrip.trafficNoRuleMatches")}
         />
         <Stat
-          label="Cluster rules"
+          label={t("firewallStatusStrip.clusterRules")}
           tone={rules === undefined || rules.length === 0 ? "quiet" : "default"}
           value={rules === undefined ? "—" : String(rules.length)}
           sub={
-            disabledRules > 0 ? `${String(disabledRules)} disabled` : undefined
+            disabledRules > 0
+              ? t("firewallStatusStrip.disabledRulesDisabled", {
+                  disabledRules: String(disabledRules),
+                })
+              : undefined
           }
         />
       </StatStrip>
