@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -162,11 +164,17 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
 	}
 
+	roles, err := h.globalRoleNames(c.Context(), id)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
+	}
+
 	return c.JSON(userListResponse{
 		ID:          user.ID,
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Role:        user.Role,
+		Roles:       roles,
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
@@ -174,6 +182,23 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
+}
+
+// globalRoleNames is a user's global RBAC role names, sorted and each once: the
+// roles List answers for the same user (ListUsersWithRoles' rbac_roles).
+func (h *UserHandler) globalRoleNames(ctx context.Context, id uuid.UUID) ([]string, error) {
+	rows, err := h.queries.ListUserRoles(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("list the user's roles: %w", err)
+	}
+	names := []string{}
+	for _, r := range rows {
+		if r.ScopeType == "global" && !slices.Contains(names, r.RoleName) {
+			names = append(names, r.RoleName)
+		}
+	}
+	slices.Sort(names)
+	return names, nil
 }
 
 // Update handles PUT /api/v1/users/:id.
@@ -295,11 +320,20 @@ func (h *UserHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		cancel()
 	}
 
+	// The change is made; a roles read that fails now does not undo it, so it is
+	// logged and the answer carries roles: null, which only this case answers.
+	roles, rolesErr := h.globalRoleNames(c.Context(), id)
+	if rolesErr != nil {
+		slog.Warn("update user: the change was made, but its roles could not be read for the answer", "user_id", id, "error", rolesErr)
+		roles = nil
+	}
+
 	return c.JSON(userListResponse{
 		ID:          user.ID,
 		Email:       user.Email,
 		DisplayName: user.DisplayName,
 		Role:        user.Role,
+		Roles:       roles,
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,

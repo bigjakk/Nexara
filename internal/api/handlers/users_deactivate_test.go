@@ -146,8 +146,8 @@ func TestDeactivate_TheChangeTheBumpAndTheRevokeAreOneTransaction(t *testing.T) 
 	if want := []string{"UpdateUserProfile", "BumpUserAuthEpoch", "ListUserSessions", "RevokeAllUserSessions"}; !reflect.DeepEqual(inTx, want) {
 		t.Errorf("the transaction's statements = %v, want %v, in this order", inTx, want)
 	}
-	if want := []string{"GetUserByID", "InsertAuditLog"}; !reflect.DeepEqual(onPool, want) {
-		t.Errorf("the pool's statements = %v, want %v: the read before and the audit row after, nothing else", onPool, want)
+	if want := []string{"GetUserByID", "InsertAuditLog", "ListUserRoles"}; !reflect.DeepEqual(onPool, want) {
+		t.Errorf("the pool's statements = %v, want %v: the read before, the audit row and the answer's roles after, nothing else", onPool, want)
 	}
 	if got := f.a.store.poolStatementsWhileTx(); len(got) != 0 {
 		t.Errorf("the handler queried the POOL (%v) while its own transaction still held a connection: with the pool "+

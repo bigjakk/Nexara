@@ -2396,7 +2396,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/users` | List all users. `sso_linked` says whether an SSO account is bound to its provider identity; the identity is never returned |
-| GET | `/users/:id` | Get user |
+| GET | `/users/:id` | Get user, with `roles` (its global RBAC role names) as the list answers them; `PUT` answers the same shape |
 | PUT | `/users/:id` | Update user. Deactivating the account (`is_active: false`) changes it and ends every one of its sessions in one transaction: if the sessions cannot be ended, the account stays active and the answer (`503` or `500`) says it was **not** changed. An answer that says the change **could not be confirmed** means the deactivation may have taken effect; repeating it is safe |
 | DELETE | `/users/:id` | Delete user |
 | DELETE | `/users/:id/totp` | Admin reset user's TOTP |

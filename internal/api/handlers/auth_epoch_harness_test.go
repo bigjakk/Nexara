@@ -62,6 +62,8 @@ type epochStore struct {
 	// their default (ListDirectoryConfigsUsingRole).
 	roles     map[uuid.UUID]db.Role
 	roleUsers map[uuid.UUID][]db.ListDirectoryConfigsUsingRoleRow
+	// userRoles are the user_roles rows ListUserRoles answers, by user.
+	userRoles map[uuid.UUID][]db.ListUserRolesRow
 	// stepUpProofs are totp_step_up_proofs: the expiry of each, by session and purpose,
 	// for the user it holds.
 	stepUpProofs map[stepUpProofKey]stepUpProof
@@ -590,6 +592,12 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 				Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, SsoLinked: u.OidcSubject != ""})
 		}
 		return &authFakeRows{items: items}, nil
+	case "ListUserRoles":
+		var items []any
+		for _, r := range s.userRoles[args[0].(uuid.UUID)] {
+			items = append(items, r)
+		}
+		return &authFakeRows{items: items}, nil
 	case "ListUserIDsByRole":
 		return &authFakeRows{}, nil
 	case "GetUserScopedPermissions":
@@ -777,6 +785,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
 	app.Get("/users", withRequestParams(t, apischema.Properties{}, nil, uh.List))
+	app.Get("/users/:id", withRequestParams(t, apischema.Properties{
+		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.Get))
 	app.Delete("/oidc/links", withRequestParams(t, apischema.Properties{}, nil, uh.ResetAllSSOLinks))
 	app.Delete("/users/:id/sso-link", withRequestParams(t, apischema.Properties{
 		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetSSOLink))
