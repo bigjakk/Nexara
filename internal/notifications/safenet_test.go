@@ -59,6 +59,7 @@ func TestCheckTargetIP(t *testing.T) {
 		{"0.0.0.0", true, true, false},
 		{"::", true, true, false},
 		{"100.64.0.9", true, false, true},
+		{"100.100.100.200", true, true, false}, // Alibaba Cloud's metadata service, inside CGNAT
 		{"fd00:ec2::254", true, true, false},
 		{"fd20:ce::254", true, true, false},
 		{"203.0.113.10", false, false, false},

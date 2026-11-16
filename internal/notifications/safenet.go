@@ -50,7 +50,7 @@ func (e *TargetAddressError) Error() string {
 func checkTargetIP(ip net.IP, allowPrivate bool) error {
 	switch {
 	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		ipv6Metadata(ip):
+		cloudMetadata(ip):
 		return &TargetAddressError{IP: ip.String()}
 	case (ip.IsPrivate() || cgnat.Contains(ip)) && !allowPrivate:
 		return &TargetAddressError{IP: ip.String(), Overridable: true}
@@ -62,10 +62,12 @@ func checkTargetIP(ip net.IP, allowPrivate bool) error {
 // needs a channel's confirmation as a private address does.
 var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
 
-// ipv6Metadata reports the cloud metadata services' IPv6 addresses, AWS's and
-// GCP's, which sit in the unique-local range a confirmation relaxes.
-func ipv6Metadata(ip net.IP) bool {
-	return ip.Equal(net.ParseIP("fd00:ec2::254")) || ip.Equal(net.ParseIP("fd20:ce::254"))
+// cloudMetadata reports the cloud metadata services' addresses that sit in a
+// range a confirmation relaxes: AWS's and GCP's IPv6 ones (unique-local) and
+// Alibaba Cloud's 100.100.100.200 (carrier-grade NAT).
+func cloudMetadata(ip net.IP) bool {
+	return ip.Equal(net.ParseIP("fd00:ec2::254")) || ip.Equal(net.ParseIP("fd20:ce::254")) ||
+		ip.Equal(net.ParseIP("100.100.100.200"))
 }
 
 type allowPrivateKey struct{}
