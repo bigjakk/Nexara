@@ -200,7 +200,16 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 			"rule_type":  drsRuleTypeParam(),
 			"vm_ids":     drsVMIDsParam(true, "Proxmox VMIDs the rule applies to."),
 			"node_names": drsNodeNamesParam,
-			"enabled":    optFlag("Whether the engine should honour the rule."),
+			// Default true, not optFlag's false: an omitted key creates the rule
+			// enabled, as the dialog (which always sends it) and the HA-rule
+			// create below both do. CreateRule reads it with p.Bool.
+			"enabled": {
+				Type:        apischema.Boolean,
+				Optional:    true,
+				Default:     true,
+				Typetext:    "<boolean>",
+				Description: "Whether the engine should honour the rule. Omitted, the rule is created enabled.",
+			},
 		}),
 		Handler: h.CreateRule,
 	})

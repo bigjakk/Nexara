@@ -640,3 +640,18 @@ func TestDRSCreateHARuleForwardsEnabled(t *testing.T) {
 		}
 	}
 }
+
+// A Nexara rule created without "enabled" is created enabled, as the dialog's
+// default sends it.
+func TestDRSCreateRuleDefaultsToEnabled(t *testing.T) {
+	t.Parallel()
+	cap := &capture{}
+	app := newRegistryApp(t, noAuth(), probeDRSEndpoint(t, fiber.MethodPost, drsScope+"/rules", cap))
+	body := `{"rule_type":"affinity","vm_ids":[100,101],"node_names":[]}`
+	if status, env := send(t, app, jsonRequest(http.MethodPost, drsRoute(drsScope+"/rules"), body)); status != fiber.StatusNoContent {
+		t.Fatalf("status = %d (%q), want 204", status, env.Message)
+	}
+	if !cap.params.Bool("enabled") {
+		t.Error("an omitted enabled reads false; the rule would be created disabled")
+	}
+}

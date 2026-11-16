@@ -2086,7 +2086,7 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | GET | `/clusters/:id/drs/config` | Get DRS config |
 | PUT | `/clusters/:id/drs/config` | Update DRS config |
 | GET | `/clusters/:id/drs/rules` | List DRS rules |
-| POST | `/clusters/:id/drs/rules` | Create DRS rule |
+| POST | `/clusters/:id/drs/rules` | Create DRS rule. `enabled` omitted creates it enabled |
 | DELETE | `/clusters/:id/drs/rules/:rule_id` | Delete DRS rule |
 | POST | `/clusters/:id/drs/evaluate` | Trigger DRS evaluation. The answer's `held_nodes[]` (`node`, `uptime_seconds`, `holdoff_seconds`) names the nodes left alone because they booted within the hold-off |
 | GET | `/clusters/:id/drs/history` | List DRS evaluation history |
