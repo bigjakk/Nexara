@@ -79,18 +79,23 @@ func TestExchangeAndVerify_PostsTheCodeThroughTheProvidersClient(t *testing.T) {
 
 // TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified: the check runs on the
 // verified ID token's claims, for an otherwise good sign-in; the same token saying true
-// signs in.
+// signs in, carrying its iss and sub (the identity an account is bound to), and one
+// without a sub is refused.
 func TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified(t *testing.T) {
 	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, verified := range []bool{false, true} {
+	for _, tc := range []struct {
+		verified bool
+		sub      string
+	}{{false, "alice"}, {true, "alice"}, {true, ""}} {
+		verified := tc.verified
 		var issuer string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			idToken, _ := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
-				"iss": issuer, "aud": "nexara", "sub": "alice", "nonce": "nonce",
+				"iss": issuer, "aud": "nexara", "sub": tc.sub, "nonce": "nonce",
 				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Unix(),
 				"email": "alice@example.com", "email_verified": verified,
 			}).SignedString(key)
@@ -115,8 +120,15 @@ func TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified(t *testing.T)
 		info, err := p.ExchangeAndVerify(t.Context(), "idp-code", "state")
 
 		var unverified *OIDCEmailNotVerifiedError
-		if refused := errors.As(err, &unverified); refused == verified || verified && info == nil {
+		switch {
+		case tc.sub == "":
+			if !errors.Is(err, ErrOIDCClaimExtract) {
+				t.Errorf("no sub: info %+v, err %v; want ErrOIDCClaimExtract", info, err)
+			}
+		case errors.As(err, &unverified) == verified || verified && info == nil:
 			t.Errorf("email_verified %v: info %+v, err %v; want a refusal only when false", verified, info, err)
+		case verified && (info.Issuer != srv.URL || info.Subject != "alice"):
+			t.Errorf("issuer %q, subject %q; want %q, alice", info.Issuer, info.Subject, srv.URL)
 		}
 	}
 }

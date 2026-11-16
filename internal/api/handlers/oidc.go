@@ -799,6 +799,8 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 		user, err = h.queries.CreateOIDCUser(c.Context(), db.CreateOIDCUserParams{
 			Email:       userInfo.Email,
 			DisplayName: displayName,
+			OidcIssuer:  userInfo.Issuer,
+			OidcSubject: userInfo.Subject,
 		})
 	}
 	if err != nil {

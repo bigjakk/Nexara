@@ -155,7 +155,7 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 const createLDAPUser = `-- name: CreateLDAPUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
 VALUES ($1, '', $2, true, 'user', 'ldap')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
 `
 
 type CreateLDAPUserParams struct {
@@ -180,6 +180,8 @@ func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) 
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }
@@ -281,7 +283,7 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject FROM users
 WHERE (users.email = $1::text
        OR (octet_length($1::text) = char_length($1::text)
            AND octet_length(users.email) = char_length(users.email)
@@ -315,6 +317,8 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }
@@ -633,7 +637,7 @@ func (q *Queries) UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) er
 const updateLDAPUserProfile = `-- name: UpdateLDAPUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
 `
 
 type UpdateLDAPUserProfileParams struct {
@@ -658,6 +662,8 @@ func (q *Queries) UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserP
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }

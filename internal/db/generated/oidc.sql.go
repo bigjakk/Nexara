@@ -14,6 +14,62 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearAllOIDCIdentities = `-- name: ClearAllOIDCIdentities :many
+UPDATE users SET oidc_issuer = '', oidc_subject = ''
+WHERE auth_source = 'oidc' AND oidc_subject <> ''
+RETURNING id
+`
+
+// The reset of every SSO account's link at once (after an issuer change), returning
+// the accounts it cleared.
+func (q *Queries) ClearAllOIDCIdentities(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, clearAllOIDCIdentities)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const clearOIDCIdentity = `-- name: ClearOIDCIdentity :execrows
+UPDATE users SET oidc_issuer = '', oidc_subject = ''
+WHERE id = $1 AND auth_source = 'oidc' AND oidc_subject <> ''
+`
+
+// An administrator's reset of one SSO account's link: its next sign-in links again by
+// address. 0 rows: not an SSO account, or not linked.
+func (q *Queries) ClearOIDCIdentity(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearOIDCIdentity, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countUsersLinkedToIssuer = `-- name: CountUsersLinkedToIssuer :one
+SELECT count(*) FROM users WHERE oidc_issuer = $1 AND oidc_subject <> ''
+`
+
+// How many accounts are bound to an identity of this issuer: the accounts a change of
+// a configuration's issuer would leave refused at sign-in.
+func (q *Queries) CountUsersLinkedToIssuer(ctx context.Context, oidcIssuer string) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsersLinkedToIssuer, oidcIssuer)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createOIDCConfig = `-- name: CreateOIDCConfig :one
 INSERT INTO oidc_configs (
     name, enabled, issuer_url, client_id, client_secret_encrypted,
@@ -89,18 +145,27 @@ func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigPara
 }
 
 const createOIDCUser = `-- name: CreateOIDCUser :one
-INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
-VALUES ($1, '', $2, true, 'user', 'oidc')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
+INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source, oidc_issuer, oidc_subject)
+VALUES ($1, '', $2, true, 'user', 'oidc', $3, $4)
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
 `
 
 type CreateOIDCUserParams struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
+	OidcIssuer  string `json:"oidc_issuer"`
+	OidcSubject string `json:"oidc_subject"`
 }
 
+// A new SSO account, bound at creation to the identity that signed in: the ID token's
+// issuer and subject (users_oidc_identity_key refuses a second account for one).
 func (q *Queries) CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createOIDCUser, arg.Email, arg.DisplayName)
+	row := q.db.QueryRow(ctx, createOIDCUser,
+		arg.Email,
+		arg.DisplayName,
+		arg.OidcIssuer,
+		arg.OidcSubject,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -116,6 +181,8 @@ func (q *Queries) CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) 
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }
@@ -185,6 +252,81 @@ func (q *Queries) GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+	)
+	return i, err
+}
+
+const getUserByOIDCIdentity = `-- name: GetUserByOIDCIdentity :one
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject FROM users
+WHERE oidc_issuer = $1 AND oidc_subject = $2
+  AND oidc_subject <> '' AND auth_source = 'oidc'
+`
+
+type GetUserByOIDCIdentityParams struct {
+	OidcIssuer  string `json:"oidc_issuer"`
+	OidcSubject string `json:"oidc_subject"`
+}
+
+// The SSO account bound to this provider identity, whatever its address says now.
+func (q *Queries) GetUserByOIDCIdentity(ctx context.Context, arg GetUserByOIDCIdentityParams) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByOIDCIdentity, arg.OidcIssuer, arg.OidcSubject)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.TotpSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.AuthSource,
+		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+	)
+	return i, err
+}
+
+const linkOIDCIdentity = `-- name: LinkOIDCIdentity :one
+UPDATE users SET oidc_issuer = $1, oidc_subject = $2
+WHERE id = $3 AND auth_source = 'oidc' AND oidc_subject = '' AND oidc_issuer = ''
+  AND $1::text <> '' AND $2::text <> ''
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+`
+
+type LinkOIDCIdentityParams struct {
+	OidcIssuer  string    `json:"oidc_issuer"`
+	OidcSubject string    `json:"oidc_subject"`
+	ID          uuid.UUID `json:"id"`
+}
+
+// Binds an SSO account that has no identity stored to this one, and only such an
+// account: no row when it is of another source or already bound (to this identity or
+// another), so two first sign-ins that race cannot both write, and a stored link is
+// never overwritten. users_oidc_identity_key refuses an identity another account holds.
+func (q *Queries) LinkOIDCIdentity(ctx context.Context, arg LinkOIDCIdentityParams) (User, error) {
+	row := q.db.QueryRow(ctx, linkOIDCIdentity, arg.OidcIssuer, arg.OidcSubject, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.TotpSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.AuthSource,
+		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }
@@ -365,7 +507,7 @@ func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigPara
 const updateOIDCUserProfile = `-- name: UpdateOIDCUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'oidc'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
 `
 
 type UpdateOIDCUserProfileParams struct {
@@ -390,6 +532,8 @@ func (q *Queries) UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserP
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }

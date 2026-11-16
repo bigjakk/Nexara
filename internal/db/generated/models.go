@@ -1393,6 +1393,8 @@ type User struct {
 	AuthEpoch              int64  `json:"auth_epoch"`
 	DeactivatedByDirectory bool   `json:"deactivated_by_directory"`
 	LdapLoginName          string `json:"ldap_login_name"`
+	OidcIssuer             string `json:"oidc_issuer"`
+	OidcSubject            string `json:"oidc_subject"`
 }
 
 // Per-user starred resources, surfaced above the sidebar tree

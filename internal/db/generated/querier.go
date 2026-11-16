@@ -318,6 +318,9 @@ type Querier interface {
 	ClassifyObservedChanges(ctx context.Context, arg ClassifyObservedChangesParams) (int64, error)
 	CleanupOldReportRuns(ctx context.Context) error
 	CleanupStaleDRSHistory(ctx context.Context) error
+	// The reset of every SSO account's link at once (after an issuer change), returning
+	// the accounts it cleared.
+	ClearAllOIDCIdentities(ctx context.Context) ([]uuid.UUID, error)
 	// Forget that Nexara minted this cluster's credential.
 	//
 	// Run when the cluster is re-pointed at a different endpoint or a different
@@ -342,6 +345,9 @@ type Querier interface {
 	// explicit lists on its first pass.)
 	ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error
+	// An administrator's reset of one SSO account's link: its next sign-in links again by
+	// address. 0 rows: not an SSO account, or not linked.
+	ClearOIDCIdentity(ctx context.Context, id uuid.UUID) (int64, error)
 	ClearTOTPSecret(ctx context.Context, id uuid.UUID) error
 	// ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
 	// partial index on is_stable only ever matches the row the source just named.
@@ -504,6 +510,9 @@ type Querier interface {
 	// deactivate every user and inadvertently re-open the anonymous-admin path
 	// on the next /auth/register call, so we filter by ID exclusion instead.
 	CountUsers(ctx context.Context) (int64, error)
+	// How many accounts are bound to an identity of this issuer: the accounts a change of
+	// a configuration's issuer would leave refused at sign-in.
+	CountUsersLinkedToIssuer(ctx context.Context, oidcIssuer string) (int64, error)
 	// How many jobs are stored for this server, for the empty-listing sweep guard.
 	//
 	// Its own query rather than len(ListVeeamJobsByServer): that listing carries a
@@ -522,6 +531,8 @@ type Querier interface {
 	// NUT servers: the upsd instances Nexara reads UPS data from (000131).
 	CreateNutServer(ctx context.Context, arg CreateNutServerParams) (NutServer, error)
 	CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigParams) (OidcConfig, error)
+	// A new SSO account, bound at creation to the identity that signed in: the ID token's
+	// issuer and subject (users_oidc_identity_key refuses a second account for one).
 	CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) (User, error)
 	CreatePBSServer(ctx context.Context, arg CreatePBSServerParams) (PbsServer, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
@@ -1290,6 +1301,8 @@ type Querier interface {
 	// case, between plain-ASCII addresses), of the given source.
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// The SSO account bound to this provider identity, whatever its address says now.
+	GetUserByOIDCIdentity(ctx context.Context, arg GetUserByOIDCIdentityParams) (User, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)
 	GetUserScopedPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserScopedPermissionsRow, error)
 	GetUserTOTPSecret(ctx context.Context, id uuid.UUID) (GetUserTOTPSecretRow, error)
@@ -1550,6 +1563,11 @@ type Querier interface {
 	// One start per migration, the earliest; a start in two migrations is the later
 	// one's. Rows linked earlier are skipped, so a second call changes nothing.
 	LinkMigrationTargetStarts(ctx context.Context, arg LinkMigrationTargetStartsParams) (int64, error)
+	// Binds an SSO account that has no identity stored to this one, and only such an
+	// account: no row when it is of another source or already bound (to this identity or
+	// another), so two first sign-ins that race cannot both write, and a stored link is
+	// never overwritten. users_oidc_identity_key refuses an identity another account holds.
+	LinkOIDCIdentity(ctx context.Context, arg LinkOIDCIdentityParams) (User, error)
 	// An SDN apply (reloadnetworkall) reloads every node's network as a task of its
 	// own (srvreload, service "networking"), which the collector ingests as a node
 	// network apply made in Proxmox. They are parts of the apply, not applies. This

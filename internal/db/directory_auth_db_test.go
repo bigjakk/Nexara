@@ -189,3 +189,62 @@ func TestUserByEmail_IgnoresCaseWhenUnique(t *testing.T) {
 		}
 	})
 }
+
+// TestOIDCIdentity_SQL: the link of an SSO account to its provider identity. Only an
+// unlinked SSO account is linked, a stored link is never overwritten, one identity
+// names one account, and no other source can hold one.
+func TestOIDCIdentity_SQL(t *testing.T) {
+	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
+		const iss = "https://sso.example.com"
+		ids := map[string]uuid.UUID{}
+		for email, source := range map[string]string{"carol@example.com": "oidc", "dave@example.com": "local"} {
+			var id uuid.UUID
+			if err := tx.QueryRow(ctx, `INSERT INTO users (email, password_hash, display_name, auth_source) VALUES ($1, '', 'x', $2) RETURNING id`, email, source).Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids[source] = id
+		}
+		link := func(id uuid.UUID, sub string) error {
+			_, err := q.LinkOIDCIdentity(ctx, gen.LinkOIDCIdentityParams{ID: id, OidcIssuer: iss, OidcSubject: sub})
+			return err
+		}
+		if err := link(ids["local"], "sub-1"); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("linking a local account = %v, want no row", err)
+		}
+		if err := link(ids["oidc"], "sub-1"); err != nil {
+			t.Fatalf("linking an unlinked SSO account: %v", err)
+		}
+		if err := link(ids["oidc"], "sub-2"); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("linking a linked account again = %v, want no row", err)
+		}
+		if u, err := q.GetUserByOIDCIdentity(ctx, gen.GetUserByOIDCIdentityParams{OidcIssuer: iss, OidcSubject: "sub-1"}); err != nil || u.ID != ids["oidc"] {
+			t.Errorf("GetUserByOIDCIdentity = %v, %v; want carol", u.ID, err)
+		}
+		if n, err := q.CountUsersLinkedToIssuer(ctx, iss); err != nil || n != 1 {
+			t.Errorf("CountUsersLinkedToIssuer = %d, %v; want 1", n, err)
+		}
+		for stmt, args := range map[string][]any{
+			// Inside a savepoint each, so the refusal does not end the transaction.
+			`INSERT INTO users (email, password_hash, display_name, auth_source, oidc_issuer, oidc_subject) VALUES ('erin@example.com', '', 'x', 'oidc', $1, 'sub-1')`: {iss},
+			`UPDATE users SET oidc_issuer = $1, oidc_subject = 'sub-3' WHERE id = $2`: {iss, ids["local"]},
+		} {
+			sp, err := tx.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := sp.Exec(ctx, stmt, args...); err == nil {
+				t.Errorf("%s: accepted, want refused", stmt)
+			}
+			_ = sp.Rollback(ctx)
+		}
+		if n, err := q.ClearOIDCIdentity(ctx, ids["oidc"]); err != nil || n != 1 {
+			t.Errorf("ClearOIDCIdentity = %d, %v; want 1", n, err)
+		}
+		if err := link(ids["oidc"], "sub-2"); err != nil {
+			t.Errorf("linking after a reset: %v", err)
+		}
+		if cleared, err := q.ClearAllOIDCIdentities(ctx); err != nil || len(cleared) != 1 || cleared[0] != ids["oidc"] {
+			t.Errorf("ClearAllOIDCIdentities = %v, %v; want carol", cleared, err)
+		}
+	})
+}

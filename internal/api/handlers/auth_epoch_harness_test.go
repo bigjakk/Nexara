@@ -166,6 +166,17 @@ func (s *epochStore) byEmail(email string) *db.User {
 	return nil
 }
 
+// byIdentity is the account GetUserByOIDCIdentity matches: an SSO account bound to this
+// issuer and subject. Called with the store locked.
+func (s *epochStore) byIdentity(issuer, subject string) *db.User {
+	for _, u := range s.users {
+		if subject != "" && u.AuthSource == "oidc" && u.OidcIssuer == issuer && u.OidcSubject == subject {
+			return u
+		}
+	}
+	return nil
+}
+
 func (s *epochStore) afterHook(name string) {
 	if fn := s.after[name]; fn != nil {
 		fn(s)
@@ -320,6 +331,13 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		u := &db.User{
 			ID: uuid.New(), Email: args[0].(string), DisplayName: args[1].(string),
 			IsActive: true, Role: "user", AuthSource: source,
+		}
+		if name == "CreateOIDCUser" {
+			// oidc_issuer, oidc_subject; users_oidc_identity_key refuses a second holder.
+			u.OidcIssuer, u.OidcSubject = args[2].(string), args[3].(string)
+			if s.byIdentity(u.OidcIssuer, u.OidcSubject) != nil {
+				return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key"}}
+			}
 		}
 		s.users[u.ID] = u
 		remember(func() { delete(s.users, u.ID) })

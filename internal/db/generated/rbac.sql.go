@@ -450,12 +450,13 @@ func (q *Queries) ListUserRoles(ctx context.Context, userID uuid.UUID) ([]ListUs
 const listUsersWithRoles = `-- name: ListUsersWithRoles :many
 SELECT u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source,
        (u.totp_secret IS NOT NULL)::bool AS totp_enabled,
+       (u.oidc_subject <> '')::bool AS sso_linked,
        COALESCE(string_agg(DISTINCT r.name, ', ' ORDER BY r.name), '') AS rbac_roles
 FROM users u
 LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.scope_type = 'global'
 LEFT JOIN roles r ON r.id = ur.role_id
 WHERE u.id != '00000000-0000-0000-0000-000000000000'
-GROUP BY u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source, u.totp_secret
+GROUP BY u.id, u.email, u.display_name, u.role, u.is_active, u.created_at, u.updated_at, u.auth_source, u.totp_secret, u.oidc_subject
 ORDER BY u.created_at DESC
 `
 
@@ -469,6 +470,7 @@ type ListUsersWithRolesRow struct {
 	UpdatedAt   time.Time   `json:"updated_at"`
 	AuthSource  string      `json:"auth_source"`
 	TotpEnabled bool        `json:"totp_enabled"`
+	SsoLinked   bool        `json:"sso_linked"`
 	RbacRoles   interface{} `json:"rbac_roles"`
 }
 
@@ -491,6 +493,7 @@ func (q *Queries) ListUsersWithRoles(ctx context.Context) ([]ListUsersWithRolesR
 			&i.UpdatedAt,
 			&i.AuthSource,
 			&i.TotpEnabled,
+			&i.SsoLinked,
 			&i.RbacRoles,
 		); err != nil {
 			return nil, err
@@ -584,7 +587,7 @@ SET display_name = COALESCE($1::text, display_name),
     -- An administrator's change of is_active is theirs: an LDAP sync never undoes it.
     deactivated_by_directory = deactivated_by_directory AND $2::boolean IS NULL
 WHERE id = $4
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
 `
 
 type UpdateUserProfileParams struct {
@@ -624,6 +627,8 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
 		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
 	)
 	return i, err
 }

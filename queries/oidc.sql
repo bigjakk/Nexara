@@ -44,9 +44,45 @@ RETURNING *;
 DELETE FROM oidc_configs WHERE id = $1;
 
 -- name: CreateOIDCUser :one
-INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
-VALUES ($1, '', $2, true, 'user', 'oidc')
+-- A new SSO account, bound at creation to the identity that signed in: the ID token's
+-- issuer and subject (users_oidc_identity_key refuses a second account for one).
+INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source, oidc_issuer, oidc_subject)
+VALUES (sqlc.arg(email), '', sqlc.arg(display_name), true, 'user', 'oidc', sqlc.arg(oidc_issuer), sqlc.arg(oidc_subject))
 RETURNING *;
+
+-- name: GetUserByOIDCIdentity :one
+-- The SSO account bound to this provider identity, whatever its address says now.
+SELECT * FROM users
+WHERE oidc_issuer = sqlc.arg(oidc_issuer) AND oidc_subject = sqlc.arg(oidc_subject)
+  AND oidc_subject <> '' AND auth_source = 'oidc';
+
+-- name: LinkOIDCIdentity :one
+-- Binds an SSO account that has no identity stored to this one, and only such an
+-- account: no row when it is of another source or already bound (to this identity or
+-- another), so two first sign-ins that race cannot both write, and a stored link is
+-- never overwritten. users_oidc_identity_key refuses an identity another account holds.
+UPDATE users SET oidc_issuer = sqlc.arg(oidc_issuer), oidc_subject = sqlc.arg(oidc_subject)
+WHERE id = sqlc.arg(id) AND auth_source = 'oidc' AND oidc_subject = '' AND oidc_issuer = ''
+  AND sqlc.arg(oidc_issuer)::text <> '' AND sqlc.arg(oidc_subject)::text <> ''
+RETURNING *;
+
+-- name: ClearOIDCIdentity :execrows
+-- An administrator's reset of one SSO account's link: its next sign-in links again by
+-- address. 0 rows: not an SSO account, or not linked.
+UPDATE users SET oidc_issuer = '', oidc_subject = ''
+WHERE id = sqlc.arg(id) AND auth_source = 'oidc' AND oidc_subject <> '';
+
+-- name: ClearAllOIDCIdentities :many
+-- The reset of every SSO account's link at once (after an issuer change), returning
+-- the accounts it cleared.
+UPDATE users SET oidc_issuer = '', oidc_subject = ''
+WHERE auth_source = 'oidc' AND oidc_subject <> ''
+RETURNING id;
+
+-- name: CountUsersLinkedToIssuer :one
+-- How many accounts are bound to an identity of this issuer: the accounts a change of
+-- a configuration's issuer would leave refused at sign-in.
+SELECT count(*) FROM users WHERE oidc_issuer = sqlc.arg(oidc_issuer) AND oidc_subject <> '';
 
 -- name: UpdateOIDCUserProfile :one
 UPDATE users SET display_name = $2

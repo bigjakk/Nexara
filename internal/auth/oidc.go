@@ -77,11 +77,16 @@ type OIDCConfig struct {
 }
 
 // OIDCUserInfo represents a user extracted from an OIDC ID token.
+//
+// Issuer and Subject are the token's iss and sub: who the person is at the provider,
+// the pair an SSO account is bound to. The verifier has matched Issuer to the
+// configuration's issuer; both are always set on a value ExchangeAndVerify returns.
 type OIDCUserInfo struct {
 	Email       string
 	DisplayName string
 	Groups      []string
 	Subject     string
+	Issuer      string
 }
 
 // OIDCProvider wraps the go-oidc provider with oauth2 config and Redis for state.
@@ -229,6 +234,12 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 		return nil, fmt.Errorf("%w: nonce mismatch", ErrOIDCTokenVerify)
 	}
 
+	// The identity an account is bound to: a token without one cannot be told apart
+	// from another person's.
+	if idToken.Subject == "" || idToken.Issuer == "" {
+		return nil, fmt.Errorf("%w: the ID token has no subject or issuer", ErrOIDCClaimExtract)
+	}
+
 	// Extract claims
 	var claims map[string]interface{}
 	if err := idToken.Claims(&claims); err != nil {
@@ -274,6 +285,7 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 		DisplayName: displayName,
 		Groups:      groups,
 		Subject:     idToken.Subject,
+		Issuer:      idToken.Issuer,
 	}, nil
 }
 
