@@ -48,12 +48,20 @@ func (f *heldFile) Read(p []byte) (int, error) {
 // TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing: Proxmox answers while
 // net/http is in a read of the file. The storage handler's file is a request
 // stream fasthttp recycles once the handler returns, so UploadToStorage may
-// not return until that read has ended. Ending the held read needs a wait:
-// one that passes is the fix (still blocked), one that is too short only lets
-// a broken build pass, never fails a good one.
+// not return until that read has ended. The fake Proxmox answers only once the
+// held read has started, so the scenario is certain rather than a race its
+// answer can win. Ending the held read needs a wait: one that passes is the fix
+// (still blocked), one that is too short only lets a broken build pass, never
+// fails a good one. Every other wait is bounded by an outcome, not a clock.
 func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	file := &heldFile{holding: make(chan struct{}), free: make(chan struct{})}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-file.holding:
+		case <-r.Context().Done():
+			return
+		}
 		const answer = `{"message":"storage 'store01' is not online\n"}`
 		// A Content-Length, as pveproxy sends, so the answer ends before the body does.
 		w.Header().Set("Content-Length", strconv.Itoa(len(answer)))
@@ -62,7 +70,6 @@ func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	file := &heldFile{holding: make(chan struct{}), free: make(chan struct{})}
 	done := make(chan error, 1)
 	go func() {
 		_, err := newTestClient(t, srv.URL).UploadToStorage(context.Background(), "pve-01", "store01", "iso",
@@ -70,7 +77,13 @@ func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 		file.returned.Store(true)
 		done <- err
 	}()
-	<-file.holding
+	select {
+	case <-file.holding:
+	case err := <-done:
+		t.Fatalf("UploadToStorage returned (%v) before the second read of the file began", err)
+	case <-time.After(30 * time.Second): // only a transport that stopped reading gets here
+		t.Fatal("no second read of the file began")
+	}
 	select {
 	case <-done:
 		t.Fatal("UploadToStorage returned while a read of the file was still going")
@@ -78,8 +91,13 @@ func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 	}
 	close(file.free)
 	var apiErr *APIError
-	if err := <-done; !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusInternalServerError {
-		t.Errorf("err = %v, want Proxmox's 500", err)
+	select {
+	case err := <-done:
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusInternalServerError {
+			t.Errorf("err = %v, want Proxmox's 500", err)
+		}
+	case <-time.After(30 * time.Second): // only an upload that never returns gets here
+		t.Fatal("UploadToStorage never returned after the held read ended")
 	}
 	if file.overlaps.Load() {
 		t.Error("the held read ended after UploadToStorage returned")
