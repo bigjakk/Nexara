@@ -163,19 +163,29 @@ export function MigrateWizard() {
     // sent after the session changed hands it would run as whoever is signed in
     // next, on the previous user's job.
     const ended = sessionScope();
-    void createMutation.mutateAsync(req).then((created) => {
-      if (ended()) return;
-      setJobId(created.id);
-      void checkMutation.mutateAsync(created.id).then(() => {
-        setStep("preflight");
-      });
-    });
+    // A failure of either is reported by the app's error toast.
+    createMutation.mutateAsync(req).then(
+      (created) => {
+        if (ended()) return;
+        setJobId(created.id);
+        checkMutation.mutateAsync(created.id).then(
+          () => {
+            setStep("preflight");
+          },
+          () => undefined,
+        );
+      },
+      () => undefined,
+    );
   }
 
   function handleExecute() {
-    void executeMutation.mutateAsync(jobId).then(() => {
-      setStep("progress");
-    });
+    executeMutation.mutateAsync(jobId).then(
+      () => {
+        setStep("progress");
+      },
+      () => undefined, // reported by the app's error toast
+    );
   }
 
   function updateStorageMapping(sourcePool: string, targetPool: string) {
