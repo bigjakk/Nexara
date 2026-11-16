@@ -1523,6 +1523,51 @@ func TestSyncCluster_CarriesUnreportedDiskCounters(t *testing.T) {
 	}
 }
 
+// A node's IO wait is stored as not reported (NULL) when the status call failed
+// or came from a fresh pveproxy worker (status CPU 0 while the list's is above
+// 0, whose wait is a 0 that measured nothing), and a reported 0 stays 0.
+func TestSyncCluster_StoresUnreportedIOWaitAsNull(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		status    *proxmox.NodeStatus // nil: the status call fails
+		want      float64
+		wantValid bool
+	}{
+		{"reported", &proxmox.NodeStatus{CPU: 0.1, Wait: 0.05}, 0.05, true},
+		{"a reported zero", &proxmox.NodeStatus{CPU: 0.1, Wait: 0}, 0, true},
+		{"a fresh worker's first answer", &proxmox.NodeStatus{CPU: 0, Wait: 0}, 0, false},
+		{"the status call failed", nil, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			routes := map[string]http.HandlerFunc{
+				"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+					jsonResponse(w, []proxmox.NodeListEntry{{Node: "pve1", Status: "online", CPU: 0.3, MaxCPU: 4}})
+				},
+				"/api2/json/nodes/pve1/qemu":    func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, []proxmox.VirtualMachine{}) },
+				"/api2/json/nodes/pve1/lxc":     func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, []proxmox.Container{}) },
+				"/api2/json/nodes/pve1/storage": func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, []proxmox.StoragePool{}) },
+			}
+			if tc.status != nil {
+				routes["/api2/json/nodes/pve1/status"] = func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, *tc.status) }
+			}
+			srv := newTestServer(t, routes)
+			defer srv.Close()
+			mq := newMockQueries()
+			if _, err := newTestSyncer(mq).SyncCluster(context.Background(), makeCluster(t, srv.URL)); err != nil {
+				t.Fatalf("SyncCluster: %v", err)
+			}
+			if len(mq.upsertNodeCalls) != 1 {
+				t.Fatalf("node upserts = %d, want 1", len(mq.upsertNodeCalls))
+			}
+			if got := mq.upsertNodeCalls[0].IoWait; got.Valid != tc.wantValid || got.Float64 != tc.want {
+				t.Errorf("IoWait = %+v, want {%v %v}", got, tc.want, tc.wantValid)
+			}
+		})
+	}
+}
+
 // --- Inventory change event tests ---
 
 type mockEvent struct {

@@ -42,8 +42,8 @@ export function NodeMetricsPanel({
   cpuCount: number;
   /** The node list's 1, 5 and 15 minute load averages, as one string. */
   loadAvg?: string | undefined;
-  /** Share of CPU time spent waiting on IO, 0 to 1. Zero is not reported. */
-  ioWait?: number | undefined;
+  /** Share of CPU time spent waiting on IO, 0 to 1; null when not reported. */
+  ioWait?: number | null | undefined;
 }) {
   const [timeRange, setTimeRange] = useState<TimeRange>("live");
   const [focus, setFocus] = useState<MetricFocus>("cpu");
@@ -89,7 +89,7 @@ export function NodeMetricsPanel({
 
   const readings = [
     loadAvg !== undefined && loadAvg !== "" ? `Load ${loadAvg}` : "",
-    ioWait !== undefined && ioWait > 0
+    ioWait !== undefined && ioWait !== null
       ? `IO wait ${(ioWait * 100).toFixed(1)}%`
       : "",
   ].filter((part) => part !== "");

@@ -145,7 +145,7 @@ type nodeResponse struct {
 	SubscriptionStatus string    `json:"subscription_status"`
 	SubscriptionLevel  string    `json:"subscription_level"`
 	LoadAvg            string    `json:"load_avg"`
-	IOWait             float64   `json:"io_wait"`
+	IOWait             *float64  `json:"io_wait"` // null: not reported
 	Uptime             int64     `json:"uptime"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -153,6 +153,10 @@ type nodeResponse struct {
 }
 
 func toNodeResponse(n db.Node) nodeResponse {
+	var ioWait *float64
+	if n.IoWait.Valid {
+		ioWait = &n.IoWait.Float64
+	}
 	return nodeResponse{
 		ID:                 n.ID,
 		ClusterID:          n.ClusterID,
@@ -179,7 +183,7 @@ func toNodeResponse(n db.Node) nodeResponse {
 		SubscriptionStatus: n.SubscriptionStatus,
 		SubscriptionLevel:  n.SubscriptionLevel,
 		LoadAvg:            n.LoadAvg,
-		IOWait:             n.IoWait,
+		IOWait:             ioWait,
 		Uptime:             n.Uptime,
 		LastSeenAt:         n.LastSeenAt,
 		CreatedAt:          n.CreatedAt,

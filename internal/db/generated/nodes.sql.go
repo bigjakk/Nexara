@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countNodeStatusesByCluster = `-- name: CountNodeStatusesByCluster :many
@@ -371,33 +372,33 @@ RETURNING id, cluster_id, name, status, cpu_count, mem_total, disk_total, pve_ve
 `
 
 type UpsertNodeParams struct {
-	ClusterID          uuid.UUID `json:"cluster_id"`
-	Name               string    `json:"name"`
-	Status             string    `json:"status"`
-	CpuCount           int32     `json:"cpu_count"`
-	MemTotal           int64     `json:"mem_total"`
-	DiskTotal          int64     `json:"disk_total"`
-	PveVersion         string    `json:"pve_version"`
-	SslFingerprint     string    `json:"ssl_fingerprint"`
-	Uptime             int64     `json:"uptime"`
-	CpuModel           string    `json:"cpu_model"`
-	CpuCores           int32     `json:"cpu_cores"`
-	CpuSockets         int32     `json:"cpu_sockets"`
-	CpuThreads         int32     `json:"cpu_threads"`
-	CpuMhz             string    `json:"cpu_mhz"`
-	KernelVersion      string    `json:"kernel_version"`
-	SwapTotal          int64     `json:"swap_total"`
-	SwapUsed           int64     `json:"swap_used"`
-	SwapFree           int64     `json:"swap_free"`
-	DnsServers         string    `json:"dns_servers"`
-	DnsSearch          string    `json:"dns_search"`
-	Timezone           string    `json:"timezone"`
-	SubscriptionStatus string    `json:"subscription_status"`
-	SubscriptionLevel  string    `json:"subscription_level"`
-	LoadAvg            string    `json:"load_avg"`
-	IoWait             float64   `json:"io_wait"`
-	HaState            string    `json:"ha_state"`
-	RootfsUsed         int64     `json:"rootfs_used"`
+	ClusterID          uuid.UUID     `json:"cluster_id"`
+	Name               string        `json:"name"`
+	Status             string        `json:"status"`
+	CpuCount           int32         `json:"cpu_count"`
+	MemTotal           int64         `json:"mem_total"`
+	DiskTotal          int64         `json:"disk_total"`
+	PveVersion         string        `json:"pve_version"`
+	SslFingerprint     string        `json:"ssl_fingerprint"`
+	Uptime             int64         `json:"uptime"`
+	CpuModel           string        `json:"cpu_model"`
+	CpuCores           int32         `json:"cpu_cores"`
+	CpuSockets         int32         `json:"cpu_sockets"`
+	CpuThreads         int32         `json:"cpu_threads"`
+	CpuMhz             string        `json:"cpu_mhz"`
+	KernelVersion      string        `json:"kernel_version"`
+	SwapTotal          int64         `json:"swap_total"`
+	SwapUsed           int64         `json:"swap_used"`
+	SwapFree           int64         `json:"swap_free"`
+	DnsServers         string        `json:"dns_servers"`
+	DnsSearch          string        `json:"dns_search"`
+	Timezone           string        `json:"timezone"`
+	SubscriptionStatus string        `json:"subscription_status"`
+	SubscriptionLevel  string        `json:"subscription_level"`
+	LoadAvg            string        `json:"load_avg"`
+	IoWait             pgtype.Float8 `json:"io_wait"`
+	HaState            string        `json:"ha_state"`
+	RootfsUsed         int64         `json:"rootfs_used"`
 }
 
 func (q *Queries) UpsertNode(ctx context.Context, arg UpsertNodeParams) (Node, error) {

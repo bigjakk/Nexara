@@ -940,7 +940,7 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 	var kernelVersion string
 	var swapTotal, swapUsed, swapFree int64
 	var loadAvg string
-	var ioWait float64
+	var ioWait pgtype.Float8 // NULL: not reported.
 
 	status, err := client.GetNodeStatus(ctx, node.Node)
 	if err != nil {
@@ -970,7 +970,9 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		swapTotal = status.Swap.Total
 		swapUsed = status.Swap.Used
 		swapFree = status.Swap.Free
-		ioWait = status.Wait
+		// A fresh worker's first answer (see the CPU fallback below) has wait 0
+		// too, which is not a reading: stored as not reported, not as 0%.
+		ioWait = pgtype.Float8{Float64: status.Wait, Valid: status.CPU != 0 || node.CPU <= 0}
 		if len(status.LoadAvg) > 0 {
 			loadAvg = strings.Join(status.LoadAvg, ", ")
 		}

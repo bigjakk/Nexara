@@ -787,7 +787,8 @@ export interface NodeResponse {
   subscription_status: string;
   subscription_level: string;
   load_avg: string;
-  io_wait: number;
+  /** null: the node did not report it on the last pass. */
+  io_wait: number | null;
   uptime: number;
   last_seen_at: string;
   created_at: string;
