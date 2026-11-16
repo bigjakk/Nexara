@@ -1820,6 +1820,13 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	if err := requireClusterPerm(c, "manage", "backup", clusterID); err != nil {
 		return err
 	}
+	// Proxmox starts the guest itself when asked to, so the start is held to
+	// what the power route asks of the same guest: execute on its kind here.
+	if p.Bool("start_after_restore") {
+		if err := requireRestoreStartPerm(c, p.String("backup_type"), clusterID); err != nil {
+			return err
+		}
+	}
 	// The uuid format on the declaration has already refused anything unparseable.
 	pbsID, err := parseParamUUID(p.String("pbs_server_id"))
 	if err != nil {
@@ -2025,6 +2032,25 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 		"upid":   upid,
 		"status": "restoring",
 	})
+}
+
+// requireRestoreStartPerm refuses a start after restore to a caller who could
+// not start the guest through its power route (execute:vm or execute:container
+// on the cluster), naming the permission in the 403.
+func requireRestoreStartPerm(c fiber.Ctx, backupType string, clusterID uuid.UUID) error {
+	resource := "vm"
+	if backupType == "ct" {
+		resource = "container"
+	}
+	allowed, err := hasClusterPerm(c, "execute", resource, clusterID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return fiber.NewError(fiber.StatusForbidden,
+			"Starting the guest after the restore requires execute:"+resource+" on this cluster")
+	}
+	return nil
 }
 
 // GetBackupCoverage handles GET /api/v1/backup-coverage

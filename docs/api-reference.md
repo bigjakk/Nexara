@@ -1777,6 +1777,9 @@ storage is found, and the stop is recorded as a task of its own. The caller need
 `manage:backup` on the cluster (`403` without it) and `view:backup` on the PBS
 server, on the cluster it is attached to or instance-wide when it is standalone;
 a server the caller may not view answers `404`, like one that does not exist.
+`start_after_restore` also needs what starting the guest needs, `execute:vm`
+(`execute:container` for a `ct`) on the cluster; without it the answer is `403`
+naming that permission, and nothing is restored.
 
 A backup job carries exactly one guest selection, set on create and update:
 

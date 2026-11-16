@@ -67,8 +67,10 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 	}{
 		{"the storage of the requested server and datastore, on the node asked for", both, restoreStorages, false, 200,
 			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", false},
-		{"start after restore is asked of Proxmox with the restore itself", both, restoreStorages, false, 200,
+		{"start after restore is asked of Proxmox with the restore itself", grantsOf("manage:backup", "view:backup", "execute:vm"), restoreStorages, false, 200,
 			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", true},
+		// Restoring is not starting: the start needs what the VM's power route needs.
+		{"start after restore without execute:vm: refused, nothing asked of Proxmox", both, restoreStorages, false, 403, nil, "", "", true},
 		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", both, restoreOtherServerOnly, false, 400,
 			[]string{storageGet}, "", "", false},
 		{"the only candidate is used, and recorded as such", both, restoreAliasOnly, false, 200,

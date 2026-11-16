@@ -596,7 +596,8 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 			"through the cluster's Proxmox storage for the snapshot's PBS server and datastore, so one " +
 			"must be configured in Proxmox first. Requires manage:backup on this cluster and view:backup " +
 			"on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); " +
-			"a server the caller cannot view answers 404. Runs as a background task.",
+			"a server the caller cannot view answers 404. start_after_restore also requires execute:vm " +
+			"(execute:container for a ct) on this cluster. Runs as a background task.",
 		Group:       "Backup",
 		Permissions: Permissions{Deferred: restoreDeferredReason},
 		Parameters:  clusterParams(restoreBackupParams()),

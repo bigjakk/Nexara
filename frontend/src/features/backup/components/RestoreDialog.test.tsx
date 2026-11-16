@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { fill, setupUser } from "@/test/user";
+import { useAuthStore } from "@/stores/auth-store";
 import { RestoreDialog } from "./RestoreDialog";
 import type { PBSSnapshot } from "../types/backup";
 
@@ -47,5 +48,29 @@ describe("RestoreDialog — Unique", () => {
     fill(vmid, "101");
     fill(vmid, "201");
     expect(unique).not.toBeChecked();
+  });
+});
+
+// The server refuses a start after restore to a caller without execute on the
+// guest's kind, so the dialog does not offer the tick to one.
+describe("RestoreDialog — Start after restore", () => {
+  it.each([
+    [["execute:vm"], true],
+    [["execute:container"], false],
+  ])("with %j the tick is enabled: %s", async (permissions, enabled) => {
+    vi.mocked(apiClient.list).mockResolvedValue([]);
+    vi.mocked(apiClient.get).mockResolvedValue([]);
+    useAuthStore.setState({ permissions });
+    try {
+      const user = setupUser();
+      renderWithProviders(<RestoreDialog snapshot={SNAPSHOT} pbsId="p1" />);
+      await user.click(screen.getByRole("button", { name: "Restore" }));
+      const start = await screen.findByRole("checkbox", {
+        name: "Start after restore",
+      });
+      expect(start.hasAttribute("disabled")).toBe(!enabled);
+    } finally {
+      useAuthStore.setState({ permissions: [] });
+    }
   });
 });

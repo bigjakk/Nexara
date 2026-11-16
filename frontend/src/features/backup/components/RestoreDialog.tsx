@@ -18,6 +18,7 @@ import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useClusterNodes,
   useClusterStorage,
@@ -43,6 +44,12 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   const [uniqueChoice, setUniqueChoice] = useState<boolean | null>(null);
   const unique = uniqueChoice ?? vmid.trim() !== snapshot.backup_id;
   const [startAfter, setStartAfter] = useState(false);
+  // The server holds a start after restore to what the guest's power route
+  // needs (execute on its kind), so the tick is offered only to a holder.
+  const { canExecute } = usePermissions();
+  const canStart = canExecute(
+    snapshot.backup_type === "ct" ? "container" : "vm",
+  );
   const [error, setError] = useState<string | null>(null);
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
 
@@ -137,7 +144,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
           ...(storage ? { storage } : {}),
           force,
           unique,
-          start_after_restore: startAfter,
+          start_after_restore: startAfter && canStart,
         },
       }),
       {
@@ -321,7 +328,8 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    checked={startAfter}
+                    checked={startAfter && canStart}
+                    disabled={!canStart}
                     onChange={(e) => {
                       setStartAfter(e.target.checked);
                     }}
