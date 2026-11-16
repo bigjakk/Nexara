@@ -56,7 +56,8 @@ func (s *Server) RegisterFrontend(distFS fs.FS) {
 		// Never serve the SPA shell for API paths — fall through to Fiber's
 		// native 404/405 JSON envelope (see the doc comment above).
 		Next: func(c fiber.Ctx) bool {
-			return strings.HasPrefix(c.Path(), "/api/")
+			// Folded as the router folds it: "/API/v1/nope" is the API's 404.
+			return strings.HasPrefix(routerFold(c.Path()), "/api/")
 		},
 		// ModifyResponse runs after a real file is found and served. Without
 		// explicit headers, browsers fall back to heuristics and can pin a stale

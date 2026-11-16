@@ -33,6 +33,7 @@ func TestRegisterFrontend_UnmatchedAPIPathReturnsJSON404(t *testing.T) {
 		"/api/v1/does-not-exist",
 		"/api/v1/clusters/abc/bananas",
 		"/api/v1/version/extra", // partial match of a real prefix, still no route
+		"/API/v1/nope",          // the router folds case, so the SPA handler must too
 	}
 	for _, path := range cases {
 		t.Run(path, func(t *testing.T) {
@@ -48,6 +49,9 @@ func TestRegisterFrontend_UnmatchedAPIPathReturnsJSON404(t *testing.T) {
 			}
 			if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			if cc := resp.Header.Get("Cache-Control"); cc != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store", cc)
 			}
 
 			body, _ := io.ReadAll(resp.Body)

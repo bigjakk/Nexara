@@ -8,6 +8,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.15
 	github.com/gofiber/contrib/v3/websocket v1.2.9
 	github.com/gofiber/fiber/v3 v3.6.1
+	github.com/gofiber/utils/v2 v2.6.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/google/uuid v1.6.0
@@ -34,7 +35,6 @@ require (
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/gofiber/schema v1.9.0 // indirect
-	github.com/gofiber/utils/v2 v2.6.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect

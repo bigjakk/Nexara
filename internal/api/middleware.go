@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
+	casestrings "github.com/gofiber/utils/v2/strings"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -75,7 +76,7 @@ func corsAllowOrigins(raw string) []string {
 // isAPIPath reports whether path is under /api/v1, as the router matches it:
 // case-insensitively.
 func isAPIPath(path string) bool {
-	p := strings.ToLower(path)
+	p := routerFold(path)
 	return p == "/api/v1" || strings.HasPrefix(p, "/api/v1/")
 }
 
@@ -1150,8 +1151,16 @@ const (
 	wsTokenLimitedPath = "/api/v1/auth/ws-token"
 )
 
+// routerFold lower-cases path the way Fiber's router does for its detection path
+// (appendLowerASCII, helpers.go in v3.6.1): ASCII letters only. strings.ToLower
+// folds Unicode too ("İ" and "K" to "i" and "k"), which would have a gate match
+// a path the router does not.
+func routerFold(path string) string {
+	return casestrings.ToLower(path)
+}
+
 func limiterPath(c fiber.Ctx) string {
-	p := strings.ToLower(c.Path())
+	p := routerFold(c.Path())
 	if len(p) > 1 {
 		p = strings.TrimRight(p, "/")
 	}

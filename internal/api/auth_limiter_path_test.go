@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -23,6 +25,9 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/v1/auth/login",
+		// U+0130 sent raw: the router folds ASCII only and routes it nowhere, so
+		// the auth bucket must not count it (strings.ToLower made it "i").
+		"!/apİ/v1/auth/login",
 		"/api/v1/auth/login/",
 		"/API/v1/auth/login",
 		"/api/V1/Auth/Login",
@@ -34,9 +39,13 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			s := newTestServer(t)
 
+			target, wantLimited := strings.CutPrefix(path, "!")
+			wantLimited = !wantLimited
 			var got []int
 			for i := 0; i < attempts; i++ {
-				resp, err := s.app.Test(httptest.NewRequest(http.MethodPost, path, nil))
+				req := httptest.NewRequest(http.MethodPost, "/", nil)
+				req.URL = &url.URL{Opaque: target} // on the wire byte for byte
+				resp, err := s.app.Test(req)
 				if err != nil {
 					t.Fatalf("Test: %v", err)
 				}
@@ -55,10 +64,9 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 					break
 				}
 			}
-			if !limited {
-				t.Errorf("%s passed through the middleware stack %d times without hitting the "+
-					"auth cap — this spelling escapes brute-force protection (statuses: %v)",
-					path, attempts, got[:5])
+			if limited != wantLimited {
+				t.Errorf("%s: %d requests, auth cap hit %t, want %t — the limiter and the router "+
+					"read this spelling differently (statuses: %v)", target, attempts, limited, wantLimited, got[:5])
 			}
 		})
 	}
