@@ -80,6 +80,7 @@ import {
   TLS_FINGERPRINT_ISSUE,
 } from "../components/ClusterCertificateBanner";
 import { ClusterConfigureTab } from "../components/ClusterConfigureTab";
+import { AcceptClusterName } from "../components/AcceptClusterName";
 import { ClusterHistoryTab } from "../components/ClusterHistoryTab";
 import {
   DEFAULT_CONFIGURE_SECTION,
@@ -397,7 +398,9 @@ export function ClusterDetailPage() {
             </TabsList>
 
             <TabsContent value="overview" className="mt-5 space-y-4">
-              {issues.length > 0 && <AttentionPanel issues={issues} />}
+              {issues.length > 0 && (
+                <AttentionPanel clusterId={clusterId ?? ""} issues={issues} />
+              )}
               <PerformancePanel
                 clusterId={clusterId ?? ""}
                 metrics={clusterMetrics}
@@ -829,7 +832,13 @@ function NodeMeter({
 }
 
 /** The cluster's open health issues. Not drawn at all when there are none. */
-function AttentionPanel({ issues }: { issues: readonly HealthIssue[] }) {
+function AttentionPanel({
+  clusterId,
+  issues,
+}: {
+  clusterId: string;
+  issues: readonly HealthIssue[];
+}) {
   return (
     <Panel
       title="Needs attention"
@@ -862,6 +871,7 @@ function AttentionPanel({ issues }: { issues: readonly HealthIssue[] }) {
                   {issue.detail}
                 </p>
               )}
+              <AcceptClusterName clusterId={clusterId} issue={issue} />
             </div>
           </li>
         ))}

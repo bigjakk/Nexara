@@ -26,6 +26,26 @@ export function useCluster(id: string) {
   });
 }
 
+/**
+ * Accepts the corosync cluster name a cluster's API URL now answers with
+ * (the cluster_name_changed issue). The dialog that sends it shows the
+ * failure, a 409 for a name that is no longer the one reported included.
+ */
+export function useAcceptClusterName(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    ...errorsHandledLocally,
+    mutationFn: (clusterName: string) =>
+      apiClient.post(
+        apiPath`/api/v1/clusters/${clusterId}/accept-cluster-name`,
+        { cluster_name: clusterName },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["clusters"] });
+    },
+  });
+}
+
 export function useClusterNodes(clusterId: string) {
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes"],
