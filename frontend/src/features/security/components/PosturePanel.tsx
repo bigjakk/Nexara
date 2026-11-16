@@ -3,6 +3,7 @@ import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { Button } from "@/components/ui/button";
 import type { SecurityPosture } from "@/types/api";
 import { countTone, hasScans, scoreTone } from "../lib/posture";
+import { formatExactDateTime } from "@/lib/format";
 
 interface PosturePanelProps {
   posture: SecurityPosture;
@@ -37,7 +38,7 @@ export function PosturePanel({ posture, onShowKEV }: PosturePanelProps) {
       title="Posture"
       aside={
         scannedAt
-          ? `from the scan of ${new Date(scannedAt).toLocaleString()}`
+          ? `from the scan of ${formatExactDateTime(scannedAt)}`
           : undefined
       }
     >

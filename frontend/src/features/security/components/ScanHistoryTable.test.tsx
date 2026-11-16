@@ -5,6 +5,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { stubApi } from "@/test/fetch-stub";
 import type { CVEScan } from "@/types/api";
 import { ScanHistoryTable } from "./ScanHistoryTable";
+import { usePreferencesStore } from "@/stores/preferences-store";
 
 const CLUSTER = "c1";
 
@@ -37,8 +38,14 @@ beforeEach(() => {
   api = stubApi({});
 });
 
+// The rows are found by their date as the locale format writes it.
+beforeEach(() => {
+  usePreferencesStore.getState().setPreferences({ dateFormat: "locale" });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  usePreferencesStore.getState().setPreferences({ dateFormat: "relative" });
 });
 
 function renderTable() {

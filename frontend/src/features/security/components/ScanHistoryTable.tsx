@@ -14,6 +14,8 @@ import type { CVEScan, CVEScanNode } from "@/types/api";
 import { useCVEScanDetail, useDeleteScan } from "../api/cve-queries";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { SeverityBadge } from "./SeverityBadge";
+import { DateTime } from "@/components/DateTime";
+import { formatExactDateTime } from "@/lib/format";
 
 interface ScanHistoryTableProps {
   scans: CVEScan[];
@@ -164,7 +166,7 @@ export function ScanHistoryTable({
                       !isExpanded && "-rotate-90",
                     )}
                   />
-                  {new Date(scan.started_at).toLocaleString()}
+                  <DateTime value={scan.started_at} />
                 </TableCell>
                 <TableCell className="py-2">
                   <ScanStatus status={scan.status} />
@@ -250,7 +252,7 @@ export function ScanHistoryTable({
           deleteScan.mutate({ clusterId, scanId: scan.id });
         }}
         title={(scan) =>
-          `Delete the scan from ${new Date(scan.started_at).toLocaleString()}?`
+          `Delete the scan from ${formatExactDateTime(scan.started_at)}?`
         }
         // cve_scan_nodes and cve_scan_vulns are ON DELETE CASCADE from
         // cve_scans (migration 000020). The posture reads the newest
