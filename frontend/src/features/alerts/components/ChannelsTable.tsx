@@ -17,6 +17,7 @@ import {
 } from "../api/alert-queries";
 import { ChannelForm } from "./ChannelForm";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Panel } from "@/components/page/Panel";
@@ -41,6 +42,9 @@ export function ChannelsTable() {
   const { data: channels, isLoading } = channelsQuery;
   const deleteMutation = useDeleteNotificationChannel();
   const testMutation = useTestNotificationChannel();
+  // Each row shows its own test's failure (the hook opts out of the app's
+  // toast); one that lands after the page was left is toasted instead.
+  const settle = useSaveOutcome();
   const [testResults, setTestResults] = useState<
     Record<string, { success: boolean; message: string } | undefined>
   >({});
@@ -49,7 +53,9 @@ export function ChannelsTable() {
 
   const handleTest = (id: string) => {
     setTestResults((prev) => ({ ...prev, [id]: undefined }));
-    testMutation.mutate(id, {
+    const name = channels?.find((ch) => ch.id === id)?.name ?? id;
+    settle(testMutation.mutateAsync(id), {
+      action: `Testing the channel "${name}"`,
       onSuccess: (data) => {
         setTestResults((prev) => ({
           ...prev,

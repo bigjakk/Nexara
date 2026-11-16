@@ -25,6 +25,7 @@ import {
   useDeleteNotificationDLQ,
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { formatRelativeTime } from "@/lib/format";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { DetailField } from "@/components/DetailField";
@@ -64,6 +65,9 @@ export function NotificationDLQTable() {
   const { data: summary } = useNotificationDLQSummary();
   const { data: entries, isLoading } = useNotificationDLQ(stateFilter);
   const retry = useRetryNotificationDLQ();
+  // Each row shows its own retry's failure (the hook opts out of the app's
+  // toast); one that lands after the page was left is toasted instead.
+  const settle = useSaveOutcome();
   const dismiss = useDismissNotificationDLQ();
   const del = useDeleteNotificationDLQ();
 
@@ -73,7 +77,8 @@ export function NotificationDLQTable() {
 
   const handleRetry = (entry: NotificationDLQEntry) => {
     setRetryFeedback((prev) => ({ ...prev, [entry.id]: undefined }));
-    retry.mutate(entry.id, {
+    settle(retry.mutateAsync(entry.id), {
+      action: `Retrying the notification to ${entry.channel_name}`,
       onSuccess: (resp) => {
         setRetryFeedback((prev) => ({
           ...prev,

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   AlertRule,
   AlertInstance,
@@ -200,6 +201,7 @@ export function useDeleteNotificationChannel() {
 
 export function useTestNotificationChannel() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.post<TestChannelResponse>(
         apiPath`/api/v1/notification-channels/${id}/test`,
@@ -296,6 +298,7 @@ export function useNotificationDLQSummary() {
 export function useRetryNotificationDLQ() {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.post<{ success: boolean; message: string }>(
         apiPath`/api/v1/notification-dlq/${id}/retry`,
