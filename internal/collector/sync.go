@@ -153,6 +153,9 @@ type SyncQueries interface {
 	DeleteStaleStoragePools(ctx context.Context, arg db.DeleteStaleStoragePoolsParams) (int64, error)
 	GetNodeByClusterAndName(ctx context.Context, arg db.GetNodeByClusterAndNameParams) (db.Node, error)
 	DeleteClusterNodes(ctx context.Context, arg db.DeleteClusterNodesParams) ([]db.DeleteClusterNodesRow, error)
+	ListActiveAlertsForNodes(ctx context.Context, nodeIDs []uuid.UUID) ([]db.AlertHistory, error)
+	DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error)
+	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
 	ListVMStatusesByCluster(ctx context.Context, clusterID uuid.UUID) ([]db.ListVMStatusesByClusterRow, error)
 	DeleteStaleVMsForNodes(ctx context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error)
 	UpdateNodeAddress(ctx context.Context, arg db.UpdateNodeAddressParams) error
@@ -327,6 +330,7 @@ type Syncer struct {
 	cache                *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor        *HealthMonitor
 	eventPub             eventPublisher
+	alertNotifier        alertResolveNotifier // sends a resolved alert's "resolved"; nil sends none
 	logger               *slog.Logger
 	lastSyncErrorMu      sync.Mutex
 	lastSyncError        map[uuid.UUID]time.Time // rate-limits the endpoint-failover report
@@ -383,6 +387,18 @@ func NewSyncer(queries SyncQueries, encryptionKey string, logger *slog.Logger) *
 type eventPublisher interface {
 	ClusterEvent(ctx context.Context, clusterID, kind, resourceType, resourceID, action string)
 	SystemEvent(ctx context.Context, kind, action string)
+}
+
+// alertResolveNotifier is the alert engine's NotifyResolved
+// (*notifications.Engine satisfies it).
+type alertResolveNotifier interface {
+	NotifyResolved(ctx context.Context, alert db.AlertHistory)
+}
+
+// SetAlertResolveNotifier attaches the alert engine, which sends the
+// "resolved" for the alerts a node removal resolves (pruneRemovedNodes).
+func (s *Syncer) SetAlertResolveNotifier(n alertResolveNotifier) {
+	s.alertNotifier = n
 }
 
 // SetEventPublisher attaches an event publisher for status change notifications.

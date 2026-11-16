@@ -478,6 +478,9 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 	queries := application.Queries
 	syncer := collector.NewSyncer(queries, cfg.EncryptionKey, logger)
 	syncer.SetProxmoxCache(application.ProxmoxCache)
+	if application.AlertEngine != nil {
+		syncer.SetAlertResolveNotifier(application.AlertEngine)
+	}
 
 	// The process-wide publisher — the API server attached the syslog
 	// forwarder to it, so collector-written audit entries reach a configured

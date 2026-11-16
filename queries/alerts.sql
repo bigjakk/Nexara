@@ -323,3 +323,16 @@ WHERE ah.cluster_id = @cluster_id::uuid
 GROUP BY r.name, ah.metric, ah.severity
 ORDER BY fired DESC, r.name
 LIMIT @row_limit::int;
+
+-- name: ListActiveAlertsForNodes :many
+-- The active alerts on node rows the collector is about to remove
+-- (Syncer.pruneRemovedNodes), read before the delete nulls their node_id.
+SELECT * FROM alert_history
+WHERE node_id = ANY(@node_ids::uuid[]) AND state IN ('pending', 'firing', 'acknowledged');
+
+-- name: DisableNodeAlertRules :execrows
+-- Turns off the node-scoped rules of a node row the collector removed: with no
+-- node left they can evaluate nothing, and an edit that keeps one enabled is
+-- refused for its unknown node_id.
+UPDATE alert_rules SET enabled = false, updated_at = now()
+WHERE scope_type = 'node' AND node_id = @node_id AND enabled;

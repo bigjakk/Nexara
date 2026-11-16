@@ -833,6 +833,10 @@ type Querier interface {
 	// construction — the WHERE clause only touches rows that have none yet, so a
 	// pruned session cannot un-attribute a job that was already resolved.
 	DeriveVeeamJobPlatforms(ctx context.Context, veeamServerID uuid.UUID) error
+	// Turns off the node-scoped rules of a node row the collector removed: with no
+	// node left they can evaluate nothing, and an edit that keeps one enabled is
+	// refused for its unknown node_id.
+	DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error)
 	// DisableScheduledTaskForBadSchedule parks a task whose cron can never fire.
 	//
 	// Leaving it enabled is the busy loop: this table's due predicate counts NULL
@@ -1561,6 +1565,9 @@ type Querier interface {
 	ListAPIKeysByUser(ctx context.Context, userID uuid.UUID) ([]ListAPIKeysByUserRow, error)
 	ListActiveAlerts(ctx context.Context) ([]AlertHistory, error)
 	ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error)
+	// The active alerts on node rows the collector is about to remove
+	// (Syncer.pruneRemovedNodes), read before the delete nulls their node_id.
+	ListActiveAlertsForNodes(ctx context.Context, nodeIds []uuid.UUID) ([]AlertHistory, error)
 	ListActiveClusters(ctx context.Context) ([]Cluster, error)
 	ListActiveGuestToolsConfigs(ctx context.Context) ([]GuestToolsConfig, error)
 	ListActiveMaintenanceWindows(ctx context.Context) ([]MaintenanceWindow, error)

@@ -192,6 +192,12 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 	for _, r := range remove {
 		ids = append(ids, r.ID)
 	}
+	// Read before the delete, which nulls alert_history.node_id.
+	active, alertErr := s.queries.ListActiveAlertsForNodes(ctx, ids)
+	if alertErr != nil {
+		s.logger.Warn("node membership: could not read the active alerts of the nodes being removed; they stay open",
+			"cluster_id", cluster.ID, "error", alertErr)
+	}
 	deleted, err := s.queries.DeleteClusterNodes(ctx, db.DeleteClusterNodesParams{ClusterID: cluster.ID, Ids: ids})
 	if err != nil {
 		s.nodeAbsent.Store(cluster.ID, absent)
@@ -203,18 +209,57 @@ func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, know
 		delete(absent, d.Name)
 		s.logger.Warn("node membership: removed the row of a node the cluster no longer lists, with its guest, storage and hardware rows",
 			"cluster_id", cluster.ID, "node", d.Name, "node_id", d.ID)
-		s.auditNodeRemoved(ctx, cluster, d)
+		disabled, derr := s.queries.DisableNodeAlertRules(ctx, pgtype.UUID{Bytes: d.ID, Valid: true})
+		if derr != nil {
+			s.logger.Warn("node membership: could not turn off the removed node's alert rules",
+				"cluster_id", cluster.ID, "node", d.Name, "error", derr)
+		}
+		s.auditNodeRemoved(ctx, cluster, d, disabled, s.resolveRemovedNodeAlerts(ctx, cluster, d, active))
 	}
 	s.nodeAbsent.Store(cluster.ID, absent)
 	return len(deleted) > 0
 }
 
+// resolveRemovedNodeAlerts resolves the active alerts on a removed node, as the
+// alert engine's automatic resolve does: AutoResolveAlert, then the "resolved"
+// notification for one that fired (NotifyResolved, given the row as it stood),
+// and the alert event. Nothing will ever evaluate them again. Returns how many
+// it resolved.
+func (s *Syncer) resolveRemovedNodeAlerts(ctx context.Context, cluster db.Cluster, node db.DeleteClusterNodesRow, active []db.AlertHistory) int {
+	resolved := 0
+	for _, a := range active {
+		if !a.NodeID.Valid || a.NodeID.Bytes != node.ID {
+			continue
+		}
+		n, err := s.queries.AutoResolveAlert(ctx, a.ID)
+		if err != nil {
+			s.logger.Warn("node membership: could not resolve an alert on the removed node",
+				"cluster_id", cluster.ID, "node", node.Name, "alert_id", a.ID, "error", err)
+			continue
+		}
+		if n == 0 {
+			continue // resolved meanwhile, which sent its own "resolved"
+		}
+		resolved++
+		if s.alertNotifier != nil {
+			s.alertNotifier.NotifyResolved(ctx, a)
+		}
+		if s.eventPub != nil {
+			s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAlertStateChange, "alert", a.ID.String(), "resolved")
+		}
+	}
+	return resolved
+}
+
 // auditNodeRemoved records a node row's removal as a system action, written as
-// reportEndpointFailover writes its entry.
-func (s *Syncer) auditNodeRemoved(ctx context.Context, cluster db.Cluster, node db.DeleteClusterNodesRow) {
-	details, _ := json.Marshal(map[string]string{
-		"cluster_name": cluster.Name,
-		"node_id":      node.ID.String(),
+// reportEndpointFailover writes its entry, with how many of the node's alert
+// rules were turned off and alerts resolved.
+func (s *Syncer) auditNodeRemoved(ctx context.Context, cluster db.Cluster, node db.DeleteClusterNodesRow, rulesDisabled int64, alertsResolved int) {
+	details, _ := json.Marshal(map[string]any{
+		"cluster_name":    cluster.Name,
+		"node_id":         node.ID.String(),
+		"rules_disabled":  rulesDisabled,
+		"alerts_resolved": alertsResolved,
 	})
 
 	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{

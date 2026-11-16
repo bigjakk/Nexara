@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/migrations"
@@ -97,6 +98,9 @@ func TestDeleteClusterNodes_KeepsHistory(t *testing.T) {
 	}
 
 	q := gen.New(pool)
+	if active, err := q.ListActiveAlertsForNodes(ctx, []uuid.UUID{nrGoneID}); err != nil || len(active) != 1 {
+		t.Errorf("ListActiveAlertsForNodes = %d alerts, %v; want the pending one", len(active), err)
+	}
 	removed, err := q.DeleteClusterNodes(ctx, gen.DeleteClusterNodesParams{ClusterID: nrClusterID, Ids: []uuid.UUID{nrGoneID}})
 	if err != nil || len(removed) != 1 || removed[0].Name != "pve-02" {
 		t.Fatalf("DeleteClusterNodes(pve-02) = %+v, %v; want pve-02 removed", removed, err)
@@ -112,6 +116,10 @@ func TestDeleteClusterNodes_KeepsHistory(t *testing.T) {
 		if got := count(sql); got != want {
 			t.Errorf("%s = %d, want %d", sql, got, want)
 		}
+	}
+
+	if n, err := q.DisableNodeAlertRules(ctx, pgtype.UUID{Bytes: nrGoneID, Valid: true}); err != nil || n != 1 {
+		t.Errorf("DisableNodeAlertRules = %d, %v; want the removed node's rule turned off", n, err)
 	}
 
 	// The last row is never removed, whatever the caller asks.

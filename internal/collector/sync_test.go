@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -50,6 +51,9 @@ type mockQueries struct {
 	deleteStaleVMsForNodesCalls   []db.DeleteStaleVMsForNodesParams
 	deleteStaleVMsForNodesRemoved int64
 	nodeStatusFastCalls           []db.UpdateNodeStatusFastParams
+	activeAlerts                  []db.AlertHistory   // ListActiveAlertsForNodes answers those on the nodes asked about
+	enabledNodeRules              map[uuid.UUID]int64 // DisableNodeAlertRules turns these off
+	autoResolved                  []uuid.UUID
 	deleteAbsentCalls             []db.DeleteVMsAbsentFromClusterParams
 
 	runningTasks   []db.TaskHistory
@@ -398,6 +402,27 @@ func (m *mockQueries) DeleteClusterNodes(_ context.Context, arg db.DeleteCluster
 		}
 	}
 	return out, nil
+}
+
+func (m *mockQueries) ListActiveAlertsForNodes(_ context.Context, nodeIDs []uuid.UUID) ([]db.AlertHistory, error) {
+	var out []db.AlertHistory
+	for _, a := range m.activeAlerts {
+		if a.NodeID.Valid && slices.Contains(nodeIDs, uuid.UUID(a.NodeID.Bytes)) {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockQueries) DisableNodeAlertRules(_ context.Context, nodeID pgtype.UUID) (int64, error) {
+	n := m.enabledNodeRules[uuid.UUID(nodeID.Bytes)]
+	delete(m.enabledNodeRules, uuid.UUID(nodeID.Bytes))
+	return n, nil
+}
+
+func (m *mockQueries) AutoResolveAlert(_ context.Context, id uuid.UUID) (int64, error) {
+	m.autoResolved = append(m.autoResolved, id)
+	return 1, nil
 }
 
 func (m *mockQueries) DeleteStaleVMsForNodes(_ context.Context, arg db.DeleteStaleVMsForNodesParams) (int64, error) {

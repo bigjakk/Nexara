@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -156,9 +158,17 @@ func seedNodes(mq *mockQueries, clusterID uuid.UUID, names ...string) {
 	}
 }
 
+// recordingNotifier stands in for the alert engine's NotifyResolved.
+type recordingNotifier struct{ got []uuid.UUID }
+
+func (r *recordingNotifier) NotifyResolved(_ context.Context, a db.AlertHistory) {
+	r.got = append(r.got, a.ID)
+}
+
 // TestSyncCluster_RemovesANodeTheClusterStopsListing wires the plan into the
-// pass: the second pass without pve-02 deletes its row, audits it as a system
-// action and publishes the inventory change.
+// pass: the second pass without pve-02 deletes its row, turns off its node
+// rules, resolves its active alerts (and only its), audits it as a system
+// action with those counts, and publishes the inventory change.
 func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	t.Parallel()
 
@@ -173,6 +183,14 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	syncer.SetEventPublisher(pub)
 	cluster := makeCluster(t, srv.URL)
 	seedNodes(mq, cluster.ID, "pve-01", "pve-02")
+	goneID, keptID := mq.nodes[cluster.ID.String()+":pve-02"].ID, mq.nodes[cluster.ID.String()+":pve-01"].ID
+	on := func(id uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: id, Valid: true} }
+	firing, pending, other := uuid.New(), uuid.New(), uuid.New()
+	mq.activeAlerts = []db.AlertHistory{{ID: firing, State: "firing", NodeID: on(goneID)},
+		{ID: pending, State: "pending", NodeID: on(goneID)}, {ID: other, State: "firing", NodeID: on(keptID)}}
+	mq.enabledNodeRules = map[uuid.UUID]int64{goneID: 2, keptID: 1}
+	notifier := &recordingNotifier{}
+	syncer.SetAlertResolveNotifier(notifier)
 
 	for pass := 1; pass <= 2; pass++ {
 		pub.events = nil
@@ -192,6 +210,22 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	if a.Action != "node_removed" || a.ResourceType != "node" || a.ResourceID != "pve-02" ||
 		a.UserID.Bytes != auth.SystemUserID || a.ClusterID.Bytes != cluster.ID {
 		t.Errorf("audit entry = %+v, want node_removed of pve-02 by the system user", a)
+	}
+	var details struct {
+		RulesDisabled  int `json:"rules_disabled"`
+		AlertsResolved int `json:"alerts_resolved"`
+	}
+	if err := json.Unmarshal(a.Details, &details); err != nil || details.RulesDisabled != 2 || details.AlertsResolved != 2 {
+		t.Errorf("audit details = %s, want rules_disabled 2 and alerts_resolved 2", a.Details)
+	}
+	if want := []uuid.UUID{firing, pending}; !slices.Equal(mq.autoResolved, want) || !slices.Equal(notifier.got, want) {
+		t.Errorf("resolved %v and notified %v, want %v for both", mq.autoResolved, notifier.got, want)
+	}
+	if mq.enabledNodeRules[keptID] != 1 {
+		t.Errorf("pve-01's rules were turned off")
+	}
+	if pub.countKind(events.KindAlertStateChange) != 2 {
+		t.Errorf("alert_state_change events = %d, want 2", pub.countKind(events.KindAlertStateChange))
 	}
 	if pub.countKind(events.KindInventoryChange) == 0 {
 		t.Errorf("the removing pass published no inventory_change: %+v", pub.events)

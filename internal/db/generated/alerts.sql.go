@@ -153,6 +153,22 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, id uuid.UUID) e
 	return err
 }
 
+const disableNodeAlertRules = `-- name: DisableNodeAlertRules :execrows
+UPDATE alert_rules SET enabled = false, updated_at = now()
+WHERE scope_type = 'node' AND node_id = $1 AND enabled
+`
+
+// Turns off the node-scoped rules of a node row the collector removed: with no
+// node left they can evaluate nothing, and an edit that keeps one enabled is
+// refused for its unknown node_id.
+func (q *Queries) DisableNodeAlertRules(ctx context.Context, nodeID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, disableNodeAlertRules, nodeID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const discardPendingAlert = `-- name: DiscardPendingAlert :exec
 DELETE FROM alert_history WHERE id = $1 AND state = 'pending'
 `
@@ -859,6 +875,58 @@ ORDER BY created_at DESC
 
 func (q *Queries) ListActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) ([]AlertHistory, error) {
 	rows, err := q.db.Query(ctx, listActiveAlertsByCluster, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AlertHistory{}
+	for rows.Next() {
+		var i AlertHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.RuleID,
+			&i.State,
+			&i.Severity,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.VmID,
+			&i.ResourceName,
+			&i.Metric,
+			&i.CurrentValue,
+			&i.Threshold,
+			&i.Message,
+			&i.EscalationLevel,
+			&i.ChannelID,
+			&i.PendingAt,
+			&i.FiredAt,
+			&i.AcknowledgedAt,
+			&i.AcknowledgedBy,
+			&i.ResolvedAt,
+			&i.ResolvedBy,
+			&i.CreatedAt,
+			&i.NotificationSentAt,
+			&i.VmVmid,
+			&i.UpsID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveAlertsForNodes = `-- name: ListActiveAlertsForNodes :many
+SELECT id, rule_id, state, severity, cluster_id, node_id, vm_id, resource_name, metric, current_value, threshold, message, escalation_level, channel_id, pending_at, fired_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, created_at, notification_sent_at, vm_vmid, ups_id FROM alert_history
+WHERE node_id = ANY($1::uuid[]) AND state IN ('pending', 'firing', 'acknowledged')
+`
+
+// The active alerts on node rows the collector is about to remove
+// (Syncer.pruneRemovedNodes), read before the delete nulls their node_id.
+func (q *Queries) ListActiveAlertsForNodes(ctx context.Context, nodeIds []uuid.UUID) ([]AlertHistory, error) {
+	rows, err := q.db.Query(ctx, listActiveAlertsForNodes, nodeIds)
 	if err != nil {
 		return nil, err
 	}
