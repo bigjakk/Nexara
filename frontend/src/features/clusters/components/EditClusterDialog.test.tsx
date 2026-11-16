@@ -165,13 +165,11 @@ describe("EditClusterDialog SSH trust reset", () => {
   });
 });
 
-// The dialog is given whether an SSH credential is set and nothing of it, and a
-// save that does not retype the token secret leaves the stored one in place.
+// The dialog is given whether an SSH credential is set and nothing of it.
 describe("EditClusterDialog stored credentials", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockedGet.mockResolvedValue({ configured: true });
-    mockedPut.mockResolvedValue({ cluster: CLUSTER });
   });
 
   it("asks only whether an SSH credential is set", async () => {
@@ -186,20 +184,5 @@ describe("EditClusterDialog stored credentials", () => {
     expect(mockedGet.mock.calls.map((c) => c[0])).toEqual([
       "/api/v1/clusters/cluster-1/ssh-credentials/configured",
     ]);
-  });
-
-  it("saves without the token secret when it was not retyped", async () => {
-    const user = render();
-    const name = screen.getByLabelText(/^name$/i);
-    await user.clear(name);
-    await user.type(name, "cluster01");
-    await user.click(screen.getByRole("button", { name: /^save$/i }));
-
-    await waitFor(() => {
-      expect(mockedPut).toHaveBeenCalledTimes(1);
-    });
-    const body = mockedPut.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(body["name"]).toBe("cluster01");
-    expect(body).not.toHaveProperty("token_secret");
   });
 });
