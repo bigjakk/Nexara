@@ -12,6 +12,7 @@ import {
 } from "../components/SnapshotFilterBar";
 import { ageBucket, ageDays } from "../lib/age";
 import type { GuestSnapshotRow } from "../types/snapshots";
+import { formatDateTime } from "@/lib/format";
 
 function matchesFilters(
   row: GuestSnapshotRow,
@@ -123,7 +124,7 @@ export function SnapshotsPage() {
             {stats.lastSeen > 0 && (
               <span className="mt-0.5 block text-[12.5px] text-muted-foreground/75">
                 {t("lastSynced", {
-                  time: new Date(stats.lastSeen).toLocaleString(),
+                  time: formatDateTime(stats.lastSeen),
                 })}
               </span>
             )}

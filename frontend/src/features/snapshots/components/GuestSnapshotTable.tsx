@@ -31,14 +31,14 @@ import { useDeleteSnapshot } from "@/features/vms/api/vm-queries";
 import { useResyncGuestSnapshots } from "../api/snapshot-queries";
 import { ageBucket, ageDays, formatAge, snapshotRowKey } from "../lib/age";
 import type { GuestSnapshotRow } from "../types/snapshots";
+import { DateTime } from "@/components/DateTime";
 
 interface GuestSnapshotTableProps {
   rows: GuestSnapshotRow[];
 }
 
-function formatUnixTime(ts: number): string {
-  if (ts <= 0) return "—";
-  return new Date(ts * 1000).toLocaleString();
+function formatUnixTime(ts: number) {
+  return <DateTime value={ts > 0 ? ts * 1000 : null} />;
 }
 
 /** A row's icon actions stay quiet until the pointer is on them. */
@@ -451,7 +451,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                             {row.vmid}
                           </DetailField>
                           <DetailField label={t("detail.lastSeen")}>
-                            {new Date(row.last_seen_at).toLocaleString()}
+                            <DateTime value={row.last_seen_at} />
                           </DetailField>
                           {row.vm_status && (
                             <DetailField label={t("detail.guestStatus")}>
