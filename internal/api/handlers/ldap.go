@@ -629,6 +629,23 @@ type ldapSyncResult struct {
 	notSignedIn                                   int // no stored sign-in name, and a filter that does not match the address
 }
 
+// sameAddress says whether an entry's address is the account's: the same spelling, or,
+// between plain-ASCII addresses only, the same ignoring case (the rule of GetUserByEmail).
+func sameAddress(entry, account string) bool {
+	if entry == account {
+		return true
+	}
+	ascii := func(s string) bool {
+		for i := 0; i < len(s); i++ {
+			if s[i] >= 0x80 {
+				return false
+			}
+		}
+		return true
+	}
+	return ascii(entry) && ascii(account) && strings.EqualFold(entry, account)
+}
+
 // filterMatch is what userFilterMatchesAddress can tell.
 type filterMatch int
 
@@ -782,6 +799,14 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 			res.skipped++
 			slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
 				"user_id", dbUser.ID, "reason", ldapFailureClass(err))
+		case ldapUser.Email == "":
+			// An entry with no address cannot be told to be this account's: nothing changes.
+			res.skipped++
+		case !sameAddress(ldapUser.Email, dbUser.Email):
+			// The name now finds someone else (a reused uid): this account's entry is
+			// gone, and the other entry's groups are never applied to it.
+			missing++
+			results = append(results, searched{dbUser: dbUser})
 		default:
 			results = append(results, searched{dbUser: dbUser, found: ldapUser})
 		}

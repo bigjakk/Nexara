@@ -249,17 +249,17 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		status   int
 		disabled int
 	}{{0, http.StatusUnprocessableEntity, 0}, {3, http.StatusOK, 1}} {
-		names := map[string]bool{}
+		entries := map[string]auth.LDAPUser{}
 		users := make([]db.User, 0, 4)
 		for i := range 4 {
 			u := db.User{ID: uuid.New(), Email: fmt.Sprintf("user%d@example.com", i), IsActive: true, AuthSource: "ldap"}
 			if i < tc.present {
-				names[u.Email] = true
+				entries[u.Email] = auth.LDAPUser{Email: u.Email}
 			}
 			users = append(users, u)
 		}
 		store := newEpochStore(users...)
-		a, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{}, names: names})
+		a, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: entries})
 		status := sync()
 		disabled := 0
 		for _, u := range users {
@@ -414,5 +414,27 @@ func TestLDAPSync_ADirectoryDeactivatedAccountRecoversThroughASignIn(t *testing.
 	}
 	if status := sync(); status != http.StatusOK || !store.user(user.ID).IsActive {
 		t.Errorf("sync: status %d, active %t; want the account re-enabled", status, store.user(user.ID).IsActive)
+	}
+}
+
+// TestLDAPSync_AReusedNameFindsSomeoneElse: a stored name the directory gave to a new
+// hire finds an entry whose address is not the account's. The account is missing, so
+// it is deactivated, and the new hire's groups are never applied to it.
+func TestLDAPSync_AReusedNameFindsSomeoneElse(t *testing.T) {
+	t.Parallel()
+	departed := db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap", LdapLoginName: "alice"}
+	other := db.User{ID: uuid.New(), Email: epochAdminEmail, IsActive: true, AuthSource: "ldap"}
+	store := newEpochStore(departed, other)
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{
+		"alice":         {Email: "newhire@example.com", Groups: []string{"cn=admins,dc=example,dc=com"}},
+		epochAdminEmail: {Email: epochAdminEmail},
+	}})
+	if status := sync(); status != http.StatusOK || store.user(departed.ID).IsActive {
+		t.Errorf("status %d, active %t: the account was kept on someone else's entry", status, store.user(departed.ID).IsActive)
+	}
+	for _, st := range store.named("RevokeAllUserRoles") {
+		if st.args[0] == departed.ID {
+			t.Error("the new hire's groups were applied to the departed account")
+		}
 	}
 }
