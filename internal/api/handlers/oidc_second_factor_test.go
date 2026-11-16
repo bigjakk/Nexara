@@ -93,6 +93,9 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 				}
 			}
 			untouched("after the callback")
+			if n := linkRows(store); n != 0 {
+				t.Errorf("%d oidc_identity_linked rows before the code", n)
+			}
 			if tc.wrongFirst {
 				code, _ := totp.GenerateCode(plain, time.Now())
 				wrong := string(rune('0'+(code[0]-'0'+1)%10)) + code[1:]
@@ -127,6 +130,9 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 			if len(store.named("RevokeAllUserRoles")) != 1 || len(assigned) != 1 || assigned[0] != tc.wantRole {
 				t.Errorf("roles revoked %d times, assigned %v; want replaced by %v alone", len(store.named("RevokeAllUserRoles")), assigned, tc.wantRole)
 			}
+			if want := map[bool]int{false: 1, true: 0}[tc.bound]; linkRows(store) != want {
+				t.Errorf("%d oidc_identity_linked rows, want %d: one for a link written, none for an account already bound", linkRows(store), want)
+			}
 			if n := len(store.liveSessionsOf(user.ID)); n != 1 || callbackRows(store) != 1 {
 				t.Errorf("%d sessions, %d oidc_callback rows; want 1 and 1", n, callbackRows(store))
 			}
@@ -134,9 +140,13 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 	}
 }
 
-func callbackRows(store *epochStore) (n int) {
-	for _, action := range store.auditActions() {
-		if action == "oidc_callback" {
+func callbackRows(store *epochStore) int { return auditActionCount(store, "oidc_callback") }
+
+func linkRows(store *epochStore) int { return auditActionCount(store, "oidc_identity_linked") }
+
+func auditActionCount(store *epochStore, action string) (n int) {
+	for _, got := range store.auditActions() {
+		if got == action {
 			n++
 		}
 	}

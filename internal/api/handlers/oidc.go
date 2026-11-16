@@ -1372,10 +1372,14 @@ func (h *OIDCHandler) FinishSignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUI
 // linkOIDCAccount binds an unlinked SSO account to the identity signing in to it. The
 // write is conditional in SQL (LinkOIDCIdentity: only while no link is stored), so when
 // another sign-in got there first what is stored then decides (boundAccountAfterRace).
+// A link it writes is audited as oidc_identity_linked under the account, with neither the
+// subject nor the issuer (audit details are readable by every Viewer).
 func (h *OIDCHandler) linkOIDCAccount(c fiber.Ctx, user db.User, info *auth.OIDCUserInfo) (db.User, error) {
 	linked, err := h.queries.LinkOIDCIdentity(c.Context(), db.LinkOIDCIdentityParams{
 		ID: user.ID, OidcIssuer: info.Issuer, OidcSubject: info.Subject})
 	if err == nil {
+		details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc"})
+		AuditLogAs(c, h.queries, h.eventPub, linked.ID, pgtype.UUID{}, "auth", linked.ID.String(), "oidc_identity_linked", details)
 		return linked, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) && !isDuplicateKeyError(err) {

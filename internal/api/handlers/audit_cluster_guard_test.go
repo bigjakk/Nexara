@@ -89,6 +89,7 @@ var auditClusterExempt = map[string]string{
 	"oidc.go.auditOIDCCallback":     "OIDC login callback is an auth event; no cluster in scope",
 	"oidc.go.exchangeFailure":       "a failed SSO sign-in; no cluster in scope",
 	"oidc.go.auditIdentityMismatch": "a failed SSO sign-in; no cluster in scope",
+	"oidc.go.linkOIDCAccount":       "an SSO account bound to its provider identity; no cluster in scope",
 	"oidc.go.finishStepUp":          "an SSO account's step-up before enrolling 2FA; no cluster in scope",
 	"oidc.go.refuseStepUp":          "a refused SSO step-up before enrolling 2FA; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",

@@ -102,6 +102,11 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 				}
 				return
 			}
+			// A link written at the callback is audited; an account already bound is not linked again.
+			alreadyBound := tc.want < 0 || tc.users[tc.want].OidcSubject != ""
+			if want := map[bool]int{false: 1, true: 0}[alreadyBound]; linkRows(store) != want {
+				t.Errorf("%d oidc_identity_linked rows, want %d", linkRows(store), want)
+			}
 			if !synced || got.DisplayName != info.DisplayName {
 				t.Errorf("roles synced %t, name %q; want synced and the provider's name", synced, got.DisplayName)
 			}
