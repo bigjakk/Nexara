@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -110,5 +111,24 @@ func TestAccessCreateUserAuditRow(t *testing.T) {
 			req.Header.Set("X-Test-User", "yes")
 			requireAudited(t, app, pve, store, req, tt.want)
 		})
+	}
+}
+
+// keys is bounded at PVE's own 4096 (User.pm's user-keys), refused at the registry
+// before Proxmox is asked.
+func TestAccessUserKeysAreBoundedAsProxmoxBoundsThem(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		length int
+		status int
+	}{{4096, fiber.StatusCreated}, {4097, fiber.StatusBadRequest}} {
+		app, pve, _ := newAccessCreateApp(t)
+		req := jsonRequest(http.MethodPost, accessRoute(accessScope+"/users"),
+			`{"userid": "alice@pve", "keys": "`+strings.Repeat("a", tt.length)+`"}`)
+		req.Header.Set("X-Test-User", "yes")
+		status, body := sendBody(t, app, req)
+		if status != tt.status || (status == fiber.StatusBadRequest && len(pve.seen) != 0) {
+			t.Errorf("keys of %d: answered %d %s after %d Proxmox requests, want %d", tt.length, status, body, len(pve.seen), tt.status)
+		}
 	}
 }

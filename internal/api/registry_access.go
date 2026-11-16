@@ -707,7 +707,8 @@ func accessUserFieldParams() apischema.Properties {
 		"groups": optString(4096, "<group[,group...]>",
 			"Comma-separated group membership. Replaces the stored list unless append is set; sent "+
 				"empty, it removes the account from every group."),
-		"keys": optString(8192, "<string>",
+		// 4096 is User.pm's user-keys pattern, [0-9a-zA-Z!=]{0,4096}.
+		"keys": optString(4096, "<string>",
 			"Legacy realm two-factor keys: YubiKey ids, or OATH (TOTP) secret keys. Not SSH keys. "+
 				"Sent empty, it clears them."),
 		"enable": {
