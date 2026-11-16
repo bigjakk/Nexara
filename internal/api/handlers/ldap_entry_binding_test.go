@@ -227,7 +227,17 @@ func TestLDAPLogin_ASecondFactorAccountIsBoundOnlyAfterItsCode(t *testing.T) {
 
 	store.mutate(carol.ID, func(u *db.User) { u.LdapConfigID, u.LdapEntryID = pgtype.UUID{}, "" })
 	directory("carol", own)
+	// Bound to another entry between the password step and the code: refused.
 	token := epochFirstStep(t, a, "carol")
+	store.mutate(carol.ID, func(u *db.User) { u.LdapConfigID, u.LdapEntryID = pgtype.UUID{Bytes: cfg, Valid: true}, entryOfDave })
+	resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain))
+	epochRequireNothingIssued(t, resp, authRequireStatus(t, resp, http.StatusForbidden))
+	if rows, details := auditOf(a, "login_failed"); len(rows) != 1 || !strings.Contains(details[0], `"reason":"identity_mismatch"`) {
+		t.Fatalf("login_failed %v %v; want one identity_mismatch row", rows, details)
+	}
+
+	store.mutate(carol.ID, func(u *db.User) { u.LdapConfigID, u.LdapEntryID = pgtype.UUID{}, "" })
+	token = epochFirstStep(t, a, "carol")
 	if store.user(carol.ID).LdapConfigID.Valid {
 		t.Fatal("the owner's password step bound the account before its code")
 	}
