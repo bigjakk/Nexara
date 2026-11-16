@@ -167,6 +167,30 @@ describe("the app-wide mutation-error net", () => {
     expect(mockedToastError).not.toHaveBeenCalled();
   });
 
+  // Why a call must not pass onError to mutate() (query-client.guard.test.ts):
+  // the net cannot see it there, and reports the failure as well.
+  it("still toasts a mutation whose only onError was given to mutate()", async () => {
+    const client = new QueryClient({ mutationCache: createMutationCache() });
+    const callOnError = vi.fn();
+    const observer = new QueryMutationObserver(client, {
+      mutationFn: vi.fn().mockRejectedValue(new Error(PROBE)),
+    });
+    // mutate()'s callbacks run only for an observer someone listens to.
+    const unsubscribe = observer.subscribe(() => undefined);
+
+    await observer
+      .mutate(undefined, { onError: callOnError })
+      .catch(() => undefined);
+
+    // The observer's callbacks run on query-core's notify tick.
+    await vi.waitFor(() => {
+      expect(callOnError).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedToastError).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    client.clear();
+  });
+
   // The app's own client, not only one built from the factory.
   it("is the net the app's own client runs", async () => {
     await fail(queryClient, new Error(PROBE));

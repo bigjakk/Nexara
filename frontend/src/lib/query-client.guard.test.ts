@@ -1,0 +1,256 @@
+/// <reference types="vite/client" />
+import { describe, expect, it } from "vitest";
+import ts from "typescript";
+
+/**
+ * A failed mutation is reported once (frontend/src/CLAUDE.md). The app's error
+ * toast (createMutationCache, lib/query-client.ts) sees only the onError a hook
+ * gives useMutation, never one given to mutate(vars, { onError }) or
+ * mutateAsync(vars, { onError }). So a call that passes one to a hook without
+ * its own reports the failure twice, and loses it when the caller unmounts.
+ * This reads the source and fails on such a call: put the onError on the hook
+ * (errorsHandledLocally) and settle the call through useSaveOutcome.
+ *
+ * A hook counts as having one when its useMutation options hold an onError, a
+ * spread of an object in the same file that does, or a spread of
+ * errorsHandledLocally; one spread only on a flag counts where the hook is
+ * called with `true`. A spread it cannot read (a caller's own options) is not
+ * judged. Test files are not scanned.
+ */
+
+// A leading-slash glob resolves against Vite's root (frontend/), as in
+// api-path.guard.test.ts.
+const sources: Record<string, string> = import.meta.glob(
+  ["/src/**/*.{ts,tsx}", "!/src/**/*.test.{ts,tsx}", "!/src/test/**"],
+  { eager: true, query: "?raw", import: "default" },
+);
+
+/** "param": only when the hook is called with `true` (errorsShownByCaller). */
+type Has = "yes" | "no" | "unknown" | "param";
+
+function parse(file: string): ts.SourceFile {
+  return ts.createSourceFile(
+    file,
+    sources[file] ?? "",
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+}
+
+function objectNamed(sf: ts.SourceFile, name: string) {
+  let found: ts.ObjectLiteralExpression | null = null;
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer !== undefined &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      found = node.initializer;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return found as ts.ObjectLiteralExpression | null;
+}
+
+/** Whether an options object literal carries an onError. */
+function hasOnError(obj: ts.ObjectLiteralExpression, sf: ts.SourceFile): Has {
+  let result: Has = "no";
+  for (const p of obj.properties) {
+    if (p.name !== undefined && p.name.getText(sf) === "onError") return "yes";
+    if (!ts.isSpreadAssignment(p)) continue;
+    const e = ts.isParenthesizedExpression(p.expression)
+      ? p.expression.expression
+      : p.expression;
+    if (ts.isIdentifier(e) && e.text === "errorsHandledLocally") return "yes";
+    if (
+      ts.isConditionalExpression(e) &&
+      e.whenTrue.getText(sf) === "errorsHandledLocally"
+    ) {
+      return "param";
+    }
+    const local = ts.isIdentifier(p.expression)
+      ? objectNamed(sf, p.expression.text)
+      : null;
+    if (local === null) result = "unknown";
+    else if (hasOnError(local, sf) === "yes") return "yes";
+  }
+  return result;
+}
+
+function optionsOfUseMutation(node: ts.Node, sf: ts.SourceFile) {
+  const out: ts.ObjectLiteralExpression[] = [];
+  const visit = (n: ts.Node) => {
+    if (
+      ts.isCallExpression(n) &&
+      n.expression.getText(sf) === "useMutation" &&
+      n.arguments[0] !== undefined &&
+      ts.isObjectLiteralExpression(n.arguments[0])
+    ) {
+      out.push(n.arguments[0]);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(node);
+  return out;
+}
+
+/** file -> hook name -> whether its mutation has an onError. */
+function mutationHooks(files: ts.SourceFile[]) {
+  const hooks = new Map<string, Map<string, Has>>();
+  for (const sf of files) {
+    const visit = (node: ts.Node) => {
+      let name: string | null = null;
+      let body: ts.Node | undefined;
+      if (ts.isFunctionDeclaration(node) && node.name) {
+        name = node.name.text;
+        body = node.body;
+      } else if (
+        ts.isVariableDeclaration(node) &&
+        ts.isIdentifier(node.name) &&
+        node.initializer !== undefined &&
+        (ts.isArrowFunction(node.initializer) ||
+          ts.isFunctionExpression(node.initializer))
+      ) {
+        name = node.name.text;
+        body = node.initializer.body;
+      }
+      if (name !== null && /^use[A-Z]/.test(name) && body !== undefined) {
+        const opts = optionsOfUseMutation(body, sf);
+        if (opts.length === 1 && opts[0]) {
+          const byName = hooks.get(sf.fileName) ?? new Map<string, Has>();
+          byName.set(name, hasOnError(opts[0], sf));
+          hooks.set(sf.fileName, byName);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return hooks;
+}
+
+/** The scanned file an import specifier names, if it is one. */
+function resolve(from: string, spec: string): string | null {
+  let base: string;
+  if (spec.startsWith("@/")) base = `/src/${spec.slice(2)}`;
+  else if (spec.startsWith(".")) {
+    const parts = from.split("/").slice(0, -1);
+    for (const seg of spec.split("/")) {
+      if (seg === "..") parts.pop();
+      else if (seg !== ".") parts.push(seg);
+    }
+    base = parts.join("/");
+  } else return null;
+  for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+    if (`${base}${ext}` in sources) return `${base}${ext}`;
+  }
+  return null;
+}
+
+interface Finding {
+  at: string;
+  hook: string;
+}
+
+function scan() {
+  const files = Object.keys(sources).map(parse);
+  const hooks = mutationHooks(files);
+  const findings: Finding[] = [];
+  let callsWithOptions = 0;
+  for (const sf of files) {
+    // Where each imported name comes from, and what each local holds.
+    const imported = new Map<string, string>();
+    for (const st of sf.statements) {
+      if (
+        !ts.isImportDeclaration(st) ||
+        !ts.isStringLiteral(st.moduleSpecifier)
+      )
+        continue;
+      const file = resolve(sf.fileName, st.moduleSpecifier.text);
+      const named = st.importClause?.namedBindings;
+      if (file === null || named === undefined || !ts.isNamedImports(named))
+        continue;
+      for (const el of named.elements) imported.set(el.name.text, file);
+    }
+    const hookOf = (callee: string): Has | undefined => {
+      const file = imported.get(callee) ?? sf.fileName;
+      return hooks.get(file)?.get(callee);
+    };
+    const locals = new Map<string, { hook: string; has: Has }>();
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isVariableDeclaration(node) &&
+        node.initializer !== undefined &&
+        ts.isCallExpression(node.initializer)
+      ) {
+        const call = node.initializer;
+        const callee = call.expression.getText(sf);
+        const arg = call.arguments[0];
+        let has =
+          callee === "useMutation" &&
+          arg !== undefined &&
+          ts.isObjectLiteralExpression(arg)
+            ? hasOnError(arg, sf)
+            : hookOf(callee);
+        if (has === "param") {
+          has = call.arguments.some((a) => a.kind === ts.SyntaxKind.TrueKeyword)
+            ? "yes"
+            : "no";
+        }
+        if (has !== undefined) {
+          if (ts.isIdentifier(node.name)) {
+            locals.set(node.name.text, { hook: callee, has });
+          } else if (ts.isObjectBindingPattern(node.name)) {
+            for (const el of node.name.elements) {
+              const prop = (el.propertyName ?? el.name).getText(sf);
+              if (prop === "mutate" || prop === "mutateAsync") {
+                locals.set(`()${el.name.getText(sf)}`, { hook: callee, has });
+              }
+            }
+          }
+        }
+      }
+      if (ts.isCallExpression(node) && node.arguments[1] !== undefined) {
+        const e = node.expression;
+        const target =
+          ts.isPropertyAccessExpression(e) &&
+          (e.name.text === "mutate" || e.name.text === "mutateAsync")
+            ? locals.get(e.expression.getText(sf))
+            : ts.isIdentifier(e)
+              ? locals.get(`()${e.text}`)
+              : undefined;
+        const opts = node.arguments[1];
+        if (target !== undefined && ts.isObjectLiteralExpression(opts)) {
+          callsWithOptions++;
+          if (target.has === "no" && hasOnError(opts, sf) === "yes") {
+            const { line } = sf.getLineAndCharacterOfPosition(
+              node.getStart(sf),
+            );
+            findings.push({
+              at: `${sf.fileName}:${String(line + 1)}`,
+              hook: target.hook,
+            });
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  const hookCount = [...hooks.values()].reduce((n, m) => n + m.size, 0);
+  return { findings, callsWithOptions, hookCount };
+}
+
+describe("a failed mutation", () => {
+  it("is never handed an onError at the call by a hook that has none", () => {
+    const { findings, callsWithOptions, hookCount } = scan();
+    expect(findings).toEqual([]);
+    // The floor: the scan still finds the hooks and the calls it judges.
+    expect(hookCount).toBeGreaterThan(250);
+    expect(callsWithOptions).toBeGreaterThan(100);
+  });
+});
