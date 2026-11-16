@@ -90,11 +90,15 @@ func NewMigrator(databaseURL string) (*migrate.Migrate, func(), error) {
 }
 
 // withoutSecrets replaces in msg every spelling of the configured URL and of its
-// password: as given, as handed to golang-migrate, and the password raw and escaped.
+// password: as given, as handed to golang-migrate, and the password raw, query- and
+// path-escaped, and escaped as url.URL writes userinfo (a:b;c is a%3Ab;c there).
 func withoutSecrets(msg, databaseURL string, parsed *url.URL) string {
 	secrets := []string{databaseURL, toPgx5URL(databaseURL)}
 	if pw, ok := parsed.User.Password(); ok && pw != "" {
 		secrets = append(secrets, pw, url.QueryEscape(pw), url.PathEscape(pw))
+		if _, written, ok := strings.Cut(parsed.User.String(), ":"); ok {
+			secrets = append(secrets, written)
+		}
 	}
 	for _, s := range secrets {
 		if s != "" {

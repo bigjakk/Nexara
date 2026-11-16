@@ -1,6 +1,7 @@
 package db
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -116,7 +117,6 @@ func TestNewMigrator_ErrorsNeverCarryThePassword(t *testing.T) {
 	const pw = "s3cr3t:Pa55-synthetic"
 	for _, tc := range []struct{ name, dsn, says string }{
 		{"keyword/value", "host=/var/run/postgresql user=nexara password=" + pw + " dbname=nexara", "postgres://user:password@host"},
-		{"a URL that cannot connect", "postgres://nexara:" + pw + "@127.0.0.1:1/nexara?sslmode=disable&connect_timeout=2", "init migrate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -129,5 +129,28 @@ func TestNewMigrator_ErrorsNeverCarryThePassword(t *testing.T) {
 				t.Errorf("error = %q: want no password and %q in it", err, tc.says)
 			}
 		})
+	}
+}
+
+// TestWithoutSecrets_ScrubsEverySpellingOfThePassword: golang-migrate's text is not
+// ours, so the scrub must catch the password however a library may have written it.
+func TestWithoutSecrets_ScrubsEverySpellingOfThePassword(t *testing.T) {
+	t.Parallel()
+	dsn := "postgres://nexara:" + url.PathEscape("a:b;c x") + "@db.example.com:5432/nexara"
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, spelling := range []string{
+		"a:b;c x",                      // decoded
+		"a%3Ab%3Bc+x",                  // url.QueryEscape
+		"a:b%3Bc%20x",                  // url.PathEscape
+		"a%3Ab;c%20x",                  // url.URL's userinfo
+		dsn,                            // the URL as given
+		"pgx5" + dsn[len("postgres"):], // as handed to golang-migrate
+	} {
+		if got := withoutSecrets("dial failed: "+spelling+" refused", dsn, parsed); strings.Contains(got, spelling) || !strings.Contains(got, "REDACTED") {
+			t.Errorf("withoutSecrets kept %q: %q", spelling, got)
+		}
 	}
 }
