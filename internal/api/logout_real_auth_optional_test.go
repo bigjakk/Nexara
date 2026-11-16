@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -84,6 +85,8 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 		header func(t *testing.T) string
 		// key, when set, is an API key of that user the fake database knows.
 		keyOf uuid.UUID
+		// keyErr, when set, is what the key lookup fails with instead.
+		keyErr error
 
 		want    int
 		revoked bool
@@ -212,6 +215,14 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 			keyOf:  other,
 			want:   refused,
 		},
+		{
+			// Not an unauthenticated caller: a lookup that could not answer is passed on,
+			// and nothing is revoked on the strength of a key nobody checked.
+			name:   "an API key whose lookup cannot answer",
+			header: func(*testing.T) string { return "Bearer nxra_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD" },
+			keyErr: context.DeadlineExceeded,
+			want:   http.StatusServiceUnavailable,
+		},
 	}
 
 	for _, tt := range tests {
@@ -239,6 +250,9 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 			}
 			if tt.keyOf == uuid.Nil {
 				fake.errs["GetAPIKeyByHash"] = pgx.ErrNoRows
+			}
+			if tt.keyErr != nil {
+				fake.errs["GetAPIKeyByHash"] = tt.keyErr
 			}
 			queries := db.New(fake)
 
