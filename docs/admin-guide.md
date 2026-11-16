@@ -714,6 +714,8 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 4. LDAP group memberships are mapped to Nexara roles
 5. Every login and sync **replaces** the user's roles: all of them are removed, hand-assigned and cluster-scoped ones included, and only the mapped global roles or the default role are added back. When the group search fails (a timeout, a size limit, no read access to the groups), nothing is replaced: the sign-in keeps the roles the user has, and the sync counts the user as skipped
 
+A wrong password is only the directory's own *invalid credentials* answer. When the directory cannot be reached, or does not answer the search or the bind in time, or answers the bind with anything else, the password has not been checked: the sign-in page says *The directory did not answer, so your password could not be checked*, and nothing counts toward the sign-in lockout. The same holds for the directory password asked for when setting up two-factor authentication.
+
 #### Which directory entry an account is
 
 When the directory gives its entries a stable identifier (`entryUUID`, or `objectGUID`, which Nexara stores in one text form), a directory account is bound to its entry under the configuration it signs in through:

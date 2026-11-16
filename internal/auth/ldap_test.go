@@ -170,3 +170,22 @@ func TestEntryIDOf_OneCanonicalTextForm(t *testing.T) {
 		t.Errorf("entryIDFilter = %q, %v; want %q", filter, err, want)
 	}
 }
+
+// TestClassifyUserBind_OnlyInvalidCredentialsIsAWrongPassword: a user bind that timed
+// out, lost its connection, or got any answer but invalidCredentials did not check the
+// password, and must not spend a sign-in budget.
+func TestClassifyUserBind_OnlyInvalidCredentialsIsAWrongPassword(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		want error
+	}{
+		{ldap.NewError(ldap.LDAPResultInvalidCredentials, errors.New("invalid credentials")), ErrLDAPUserBindFailed},
+		{ldap.NewError(ldap.ErrorNetwork, errors.New("ldap: connection timed out")), ErrLDAPUnavailable},
+		{ldap.NewError(ldap.LDAPResultBusy, errors.New("busy")), ErrLDAPUnavailable},
+	} {
+		if got := classifyUserBind(tc.err); !errors.Is(got, tc.want) {
+			t.Errorf("%v: %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -113,6 +115,51 @@ func TestLDAP_AnAccountFollowsItsEntrysNewAddress(t *testing.T) {
 			if a.store.userCount() != 1 || !after.IsActive || after.Email != moved || len(details) != 1 || !strings.Contains(details[0], `"outcome":"updated"`) {
 				t.Errorf("%d accounts, active %t, address %q, audit %v; want carol's one account, active, at %s, one row",
 					a.store.userCount(), after.IsActive, after.Email, details, moved)
+			}
+		})
+	}
+}
+
+// TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget: a user bind that timed out,
+// or a directory that could not be reached, has not checked the password: 503, and no
+// budget is spent, so the right password signs in once the directory answers again
+// after more such failures than the lockout allows.
+func TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		open, bind error
+	}{
+		{"the user bind timed out", nil, fmt.Errorf("%w: user bind: ldap: connection timed out", auth.ErrLDAPUnavailable)},
+		{"the directory cannot be reached", fmt.Errorf("%w: dial: connection refused", auth.ErrLDAPConnection), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, carol := directoryAccountFixture(t, "")
+			var healthy atomic.Bool
+			a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+				dir := fakeSignInDirectory{names: map[string]bool{"carol": true}, password: racePassword,
+					entry: auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Email: carol.Email}}
+				if healthy.Load() {
+					return dir, nil
+				}
+				if tc.open != nil {
+					return nil, tc.open
+				}
+				dir.bindErr = tc.bind
+				return dir, nil
+			}})
+			for i := 0; i <= loginLockoutThreshold; i++ {
+				if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusServiceUnavailable {
+					t.Fatalf("attempt %d against a directory that does not answer = %d %v, want 503", i+1, resp.StatusCode, body)
+				}
+			}
+			healthy.Store(true)
+			if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusOK {
+				t.Errorf("the right password once the directory answers = %d %v, want 200", resp.StatusCode, body)
+			}
+			if rows, _ := auditOf(a, "login_failed"); len(rows) != 0 {
+				t.Errorf("login_failed rows %v for attempts the directory never checked", rows)
 			}
 		})
 	}

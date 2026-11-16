@@ -1348,6 +1348,8 @@ func classifyLDAPError(err error) string {
 		return "User not found. Check your search base DN, user filter, and username attribute. For Active Directory, use sAMAccountName instead of uid."
 	case errors.Is(err, auth.ErrLDAPSearchFailed):
 		return "Search failed. Verify the search base DN exists and the bind account has read permissions."
+	case errors.Is(err, auth.ErrLDAPUnavailable):
+		return "The directory did not answer in time. Verify that it is reachable and not overloaded."
 	case errors.Is(err, auth.ErrLDAPUserBindFailed):
 		return "User found but password is incorrect."
 	case errors.Is(err, auth.ErrLDAPFilterInvalid):

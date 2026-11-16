@@ -20,6 +20,10 @@ var (
 	ErrLDAPUserNotFound    = errors.New("ldap: user not found")
 	ErrLDAPSearchFailed    = errors.New("ldap: search failed")
 	ErrLDAPUserBindFailed  = errors.New("ldap: user password incorrect")
+	// ErrLDAPUnavailable is a directory that gave no answer to a search or to the
+	// user's bind (a timeout, a connection lost), or answered the bind with anything
+	// but invalidCredentials: the password was not checked, so it is not a wrong one.
+	ErrLDAPUnavailable = errors.New("ldap: the directory did not answer")
 	// ErrLDAPFilterInvalid is a user or group filter that go-ldap cannot compile,
 	// which no directory is ever asked: go-ldap v3.4.15 compiles more strictly than
 	// v3.4.14 did (a set or a nested filter must end in ")"), so a filter stored
@@ -217,11 +221,21 @@ func (s *LDAPSession) Authenticate(user *LDAPUser, password string) error {
 		return fmt.Errorf("%w: empty password not allowed", ErrLDAPUserBindFailed)
 	}
 	if err := s.conn.Bind(user.DN, password); err != nil {
-		return fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
+		return classifyUserBind(err)
 	}
 	// Fetch groups (re-bind as service account first)
 	s.client.fillGroups(s.conn, user, true)
 	return nil
+}
+
+// classifyUserBind names a failed user bind: only the directory's own
+// invalidCredentials (49) is a wrong password; no answer, or any other answer, is
+// ErrLDAPUnavailable, which spends no sign-in budget.
+func classifyUserBind(err error) error {
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
+		return fmt.Errorf("%w: %v", ErrLDAPUserBindFailed, err)
+	}
+	return fmt.Errorf("%w: user bind: %v", ErrLDAPUnavailable, err)
 }
 
 // SearchUser looks up a user without authenticating them.
@@ -314,6 +328,9 @@ func (c *LDAPClient) searchOne(conn ldap.Client, filter string) (*LDAPUser, erro
 
 	result, err := conn.Search(searchReq)
 	if err != nil {
+		if ldap.IsErrorWithCode(err, ldap.ErrorNetwork) {
+			return nil, fmt.Errorf("%w: %w: %v", ErrLDAPSearchFailed, ErrLDAPUnavailable, err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrLDAPSearchFailed, err)
 	}
 

@@ -19,6 +19,7 @@ type fakeSignInDirectory struct {
 	entry    auth.LDAPUser
 	password string
 	binds    *atomic.Int32 // when set, counts the binds made
+	bindErr  error         // when set, what every bind answers
 }
 
 func (d fakeSignInDirectory) Search(username string) (*auth.LDAPUser, error) {
@@ -32,6 +33,9 @@ func (d fakeSignInDirectory) Search(username string) (*auth.LDAPUser, error) {
 func (d fakeSignInDirectory) Authenticate(_ *auth.LDAPUser, password string) error {
 	if d.binds != nil {
 		d.binds.Add(1)
+	}
+	if d.bindErr != nil {
+		return d.bindErr
 	}
 	if password != d.password {
 		return fmt.Errorf("%w: invalid credentials", auth.ErrLDAPUserBindFailed)

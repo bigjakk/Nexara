@@ -962,15 +962,19 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 
 	// Typed errors carry the class: logged so admins can tell "wrong password" from
 	// "directory unreachable" without the client learning which.
+	// A directory that cannot be opened (no connection, no service bind) or did not
+	// answer has not checked the password: out.unavailable, and nothing is spent.
 	dir, err := h.ldapHandler.openSignIn(authCfg)
 	if err != nil {
 		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
+		out.unavailable = true
 		return db.User{}, false
 	}
 	defer dir.Close()
 	ldapUser, err := dir.Search(email)
 	if err != nil {
 		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
+		out.unavailable = errors.Is(err, auth.ErrLDAPUnavailable)
 		return db.User{}, false
 	}
 
@@ -980,6 +984,10 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 	}
 	if err := dir.Authenticate(ldapUser, password); err != nil {
 		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
+		if errors.Is(err, auth.ErrLDAPUnavailable) {
+			out.unavailable = true
+			return db.User{}, false
+		}
 		out.account = h.directoryAccount(c, ldapCfg.ID, ldapUser, email)
 		return db.User{}, false
 	}
@@ -989,32 +997,41 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 
 // directorySignIn is what a directory sign-in learned beyond its answer: the entry's
 // budget (not counted when no entry was found), its lock's 429 when that budget is
-// spent, and the account a failed bind is audited under. mismatch: the password was
+// spent, and the account a failed bind is audited under. unavailable: the directory did
+// not check the password (directoryUnavailableMessage). mismatch: the password was
 // right, but the entry's address names an account bound to another entry (account).
 type directorySignIn struct {
-	entry    loginAttempt
-	locked   error
-	account  *db.User
-	mismatch bool
+	entry       loginAttempt
+	locked      error
+	account     *db.User
+	unavailable bool
+	mismatch    bool
 }
 
-// ldapEntryMismatchMessage is the answer of a sign-in whose entry is not the account's.
-// It names no entry and no address: the person learns what to do, an attacker nothing
-// (it is the SSO identity_mismatch's wording).
-const ldapEntryMismatchMessage = "This sign-in does not match the directory entry your account is linked to. " +
-	"Contact an administrator."
+// The answers of a directory sign-in that is neither a success nor a wrong password.
+// The mismatch names no entry and no address: the person learns what to do, an
+// attacker nothing (it is the SSO identity_mismatch's wording).
+const (
+	directoryUnavailableMessage = "The directory did not answer, so your password could not be checked. " +
+		"Nothing was counted against your account; try again shortly."
+	ldapEntryMismatchMessage = "This sign-in does not match the directory entry your account is linked to. " +
+		"Contact an administrator."
+)
 
 // directorySignInNotChecked answers a directory sign-in that ended without a wrong
 // password, and gives back the attempts it took (the typed name's, a, and the entry's):
-// 403 for an entry that is not the account's, audited as a failed sign-in under that
-// account with the fixed reason identity_mismatch. nil for every other failure, which
-// the caller refuses as before.
+// 503 when the directory did not answer, 403 for an entry that is not the account's,
+// audited as a failed sign-in under that account with the fixed reason identity_mismatch.
+// nil for every other failure, which the caller refuses as before.
 func (h *AuthHandler) directorySignInNotChecked(c fiber.Ctx, a loginAttempt, dir *directorySignIn) error {
-	if !dir.mismatch {
+	if !dir.unavailable && !dir.mismatch {
 		return nil
 	}
 	h.handBackLoginAttempt(c, a)
 	h.handBackLoginAttempt(c, dir.entry)
+	if dir.unavailable {
+		return fiber.NewError(fiber.StatusServiceUnavailable, directoryUnavailableMessage)
+	}
 	slog.Warn("ldap login: refused a sign-in whose directory entry is not the one the account is bound to", "user_id", dir.account.ID)
 	h.recordFailedSignIn(c, a, dir.account, "identity_mismatch")
 	return fiber.NewError(fiber.StatusForbidden, ldapEntryMismatchMessage)
@@ -1119,6 +1136,14 @@ func (h *AuthHandler) ProveDirectoryPassword(c fiber.Ctx, userID uuid.UUID, pass
 		attempts = append(attempts, a)
 	}
 	if err := dir.Authenticate(entry, password); err != nil {
+		if errors.Is(err, auth.ErrLDAPUnavailable) {
+			// Not checked, so not a wrong password: nothing is spent.
+			slog.Warn("two-factor setup: the directory did not answer the bind", "user_id", userID, "reason", ldapFailureClass(err))
+			for _, a := range attempts {
+				h.handBackLoginAttempt(c, a)
+			}
+			return fiber.NewError(fiber.StatusServiceUnavailable, totpDirectoryUnavailableMessage)
+		}
 		slog.Warn("two-factor setup: wrong directory password", "user_id", userID, "ip", c.IP(), "reason", ldapFailureClass(err))
 		var locked error
 		for _, a := range attempts {
@@ -1161,6 +1186,8 @@ func ldapFailureClass(err error) string {
 		return "connection_failed"
 	case errors.Is(err, auth.ErrLDAPBindCredentials):
 		return "service_bind_failed"
+	case errors.Is(err, auth.ErrLDAPUnavailable):
+		return "directory_unavailable"
 	case errors.Is(err, auth.ErrLDAPSearchFailed):
 		return "search_failed"
 	case errors.Is(err, auth.ErrLDAPFilterInvalid):
