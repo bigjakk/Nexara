@@ -576,6 +576,10 @@ digit, `-`, `.`, `_` or `~`) in the path before it routes, so `%41` is `A`
 and `%2E%2E` is `..`. Every other escape keeps its meaning: `%2F` is part of
 a segment, never a separator.
 
+The access log names the path as routed and, when the request spelled it
+otherwise, adds the spelling it was sent with — `(sent as …)`, without the
+query string, cut at 256 bytes — so a dot-segment or escaped probe is visible.
+
 ## Request Bodies and Connections
 
 Send a request body with a `Content-Length`. A body sent chunked

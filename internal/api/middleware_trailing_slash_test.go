@@ -302,13 +302,13 @@ func TestTrailingSlashRefusalReachesACrossOriginCaller(t *testing.T) {
 
 // TestTrailingSlashRefusalIsAccessLogged pins the gate inside the access logger, the other reason
 // middleware.go gives for its position: a refused request is logged, with its request id and the path as
-// sent. Moved ahead of the logger the gate would still refuse, and only the log would show the difference.
+// routed, and as sent when that differs (wirePathSuffix). Moved ahead of the logger the gate would still refuse, and only the log would show the difference.
 // The logger writes to the standard output its package captured at init, so this runs the test binary again
 // as a child and reads the child's output (the production logger, unmodified), as
 // TestContentCodingRefusalIsAccessLogged does. The plain request is the positive control: a missing line
 // for the refusal means something only if the plain request's line is there.
 func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
-	const plainID, refusedID = "slash-log-plain-0001", "slash-log-refused-0001"
+	const plainID, refusedID, probeID = "slash-log-plain-0001", "slash-log-refused-0001", "slash-log-probe-0001"
 	target := pathPrefix + "clusters/" + testClusterID + "/"
 	if os.Getenv(accessLogChildEnv) == "1" {
 		s := newAssembledServer(t)
@@ -318,6 +318,9 @@ func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
 		refused, _ := wireRequest{method: fiber.MethodDelete, target: target,
 			lines: []string{"X-Request-ID: " + refusedID}}.build(t)
 		serveThroughApp(s, refused)
+		probe, _ := wireRequest{method: fiber.MethodDelete, target: target + "pools/..?confirm=cluster01",
+			lines: []string{"X-Request-ID: " + probeID}}.build(t)
+		serveThroughApp(s, probe)
 		return
 	}
 
@@ -350,6 +353,10 @@ func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
 	if !strings.Contains(line, "| 400 |") || !strings.HasSuffix(strings.TrimSpace(line), "| DELETE "+target) {
 		t.Errorf("access-log line %q, want the 400 for DELETE %s", line, target)
 	}
+	// A dot-segment probe is logged as routed and as sent, without its query.
+	if line, want := lineFor(probeID), "| DELETE "+target+" (sent as "+target+"pools/..)"; !strings.HasSuffix(strings.TrimSpace(line), want) {
+		t.Errorf("access-log line %q, want it to end %q", line, want)
+	}
 }
 
 // TestTrailingSlashGateReadsThePathTheRouterStrips measures what c.Path()
@@ -375,6 +382,24 @@ func TestTrailingSlashGateReadsThePathTheRouterStrips(t *testing.T) {
 		s.app.ReleaseCtx(c)
 		if got != tt.path {
 			t.Errorf("c.Path() for %q = %q, want %q", tt.target, got, tt.path)
+		}
+	}
+}
+
+// The wire spelling is added only when it differs from the routed path, with
+// every byte outside printable ASCII escaped and the whole cut at wirePathMax.
+func TestWirePathSuffix(t *testing.T) {
+	t.Parallel()
+	long := "/" + strings.Repeat("a", wirePathMax+10)
+	for _, tt := range []struct{ original, routed, want string }{
+		{"/api/v1/version", "/api/v1/version", ""},
+		{"/api/v1/x/../version", "/api/v1/version", " (sent as /api/v1/x/../version)"},
+		{"/api/v1/%41", "/api/v1/A", " (sent as /api/v1/%41)"},
+		{"/api/v1/a\tb\xff", "/api/v1/ab", " (sent as /api/v1/a%09b%FF)"},
+		{long, "/a", " (sent as " + long[:wirePathMax] + "…)"},
+	} {
+		if got := wirePathSuffix([]byte(tt.original), tt.routed); got != tt.want {
+			t.Errorf("%q routed as %q: %q, want %q", tt.original, tt.routed, got, tt.want)
 		}
 	}
 }

@@ -133,7 +133,12 @@ func (s *Server) setupMiddleware() {
 	// ${requestid} — the v2 ${locals:requestid} no longer resolves because
 	// requestid stores the value in the request context, not c.Locals.
 	s.app.Use(logger.New(logger.Config{
-		Format: "${time} | ${status} | ${latency} | ${ip} | ${requestid} | ${method} ${path}\n",
+		Format: "${time} | ${status} | ${latency} | ${ip} | ${requestid} | ${method} ${path}${wirepath}\n",
+		CustomTags: map[string]logger.LogFunc{
+			"wirepath": func(output logger.Buffer, c fiber.Ctx, _ *logger.Data, _ string) (int, error) {
+				return output.WriteString(wirePathSuffix(c.Request().URI().PathOriginal(), c.Path()))
+			},
+		},
 	}))
 
 	// Refuse (400) a request whose head frames its body ambiguously — an
@@ -1388,4 +1393,39 @@ func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 	}()
 
 	return nil
+}
+
+// wirePathMax bounds the wire spelling an access-log line repeats.
+const wirePathMax = 256
+
+// wirePathSuffix is what an access-log line adds after the routed path (c.Path())
+// when the request spelled it otherwise on the wire: Fiber 3.6 resolves dot
+// segments and decodes unreserved escapes before routing, so a probe such as
+// /api/v1/x/../y or %41 would otherwise be logged as the path it was routed to.
+// "" when the two agree. The original carries no query string (fasthttp's
+// PathOriginal stops at "?"). Each byte outside printable ASCII is written as
+// %XX, so the line holds no control character, and the spelling is cut after
+// wirePathMax of its bytes with a trailing "…".
+func wirePathSuffix(original []byte, routed string) string {
+	if string(original) == routed {
+		return ""
+	}
+	const hex = "0123456789ABCDEF"
+	var b strings.Builder
+	b.WriteString(" (sent as ")
+	for i, c := range original {
+		if i == wirePathMax {
+			b.WriteString("…")
+			break
+		}
+		if c <= ' ' || c >= 0x7f {
+			b.WriteByte('%')
+			b.WriteByte(hex[c>>4])
+			b.WriteByte(hex[c&0xf])
+			continue
+		}
+		b.WriteByte(c)
+	}
+	b.WriteString(")")
+	return b.String()
 }
