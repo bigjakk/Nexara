@@ -52,6 +52,7 @@ import {
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
+import { DateTime } from "@/components/DateTime";
 
 /** The backend's code for an LDAP transport downgrade (ldap.go). */
 const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
@@ -454,9 +455,7 @@ export function LDAPPage() {
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {cfg.last_sync_at
-                        ? new Date(cfg.last_sync_at).toLocaleString()
-                        : "Never"}
+                      <DateTime value={cfg.last_sync_at} fallback="Never" />
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
