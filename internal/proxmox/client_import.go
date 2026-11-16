@@ -180,8 +180,11 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 
 	// Forward remaining create-args verbatim (smbios1, vga, numa, ...). Disk and NIC
 	// slots are handled below from the dedicated maps, so skip anything that looks like one.
+	// An owned key outside `mapped` is dropped rather than sent through Extra,
+	// which CreateVM refuses: PVE's import metadata does not produce one (ESXi
+	// get_create_args, OVF.pm), and one would have overridden the typed field.
 	for k, v := range args {
-		if mapped[k] || v == "" || isGuestSlotKey(k) {
+		if mapped[k] || v == "" || isGuestSlotKey(k) || vmCreateOwnedKeys[k] {
 			continue
 		}
 		p.Extra[k] = v
@@ -260,7 +263,7 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 			continue
 		}
 		if slot == "efidisk0" || slot == "tpmstate0" {
-			p.Extra[slot] = importFromSpec(opts, disk.Volid)
+			p.setDisk(slot, importFromSpec(opts, disk.Volid))
 			continue
 		}
 		dataSlots = append(dataSlots, slot)
@@ -276,7 +279,7 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		if strings.HasPrefix(slot, "scsi") && target != slot {
 			movedOffScsi = true
 		}
-		p.Extra[target] = importFromSpec(opts, parsed[slot].Volid)
+		p.setDisk(target, importFromSpec(opts, parsed[slot].Volid))
 		bootOrder = append(bootOrder, target)
 	}
 	if len(bootOrder) > 0 {
@@ -297,8 +300,8 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	// firmware has nowhere to store its boot entry and the guest won't boot. No format= is set
 	// so PVE picks the right one per storage (qcow2 on file, raw on Ceph/LVM).
 	if p.BIOS == "ovmf" {
-		if _, ok := p.Extra["efidisk0"]; !ok {
-			p.Extra["efidisk0"] = opts.TargetStorage + ":1,efitype=4m"
+		if p.EFIDisk0 == "" {
+			p.EFIDisk0 = opts.TargetStorage + ":1,efitype=4m"
 		}
 	}
 
@@ -317,6 +320,23 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		p.Start = true
 	}
 	return p
+}
+
+// setDisk puts a disk on its slot: the typed field for a slot CreateVM owns,
+// Extra for any other.
+func (p *CreateVMParams) setDisk(slot, spec string) {
+	switch slot {
+	case "scsi0":
+		p.SCSI0 = spec
+	case "ide2":
+		p.IDE2 = spec
+	case "efidisk0":
+		p.EFIDisk0 = spec
+	case "tpmstate0":
+		p.TPMState0 = spec
+	default:
+		p.Extra[slot] = spec
+	}
 }
 
 // importFromSpec builds a create-with-import-from disk spec that allocates a new volume on

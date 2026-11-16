@@ -1386,7 +1386,8 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 			return err
 		}
 	}
-	if err := requireExtraForcePerm(c, extra, "vm", clusterID); err != nil {
+	restore, err := requireExtraRestorePerm(c, extra, false, clusterID)
+	if err != nil {
 		return err
 	}
 
@@ -1455,7 +1456,7 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "create",
 		UPID:         upid,
 		Description:  "create VM " + strconv.Itoa(vmid),
-		Extra:        map[string]any{"vmid": vmid},
+		Extra:        createDetails(vmid, restore, extra["archive"], extra),
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(vmid), "create")
 

@@ -684,7 +684,8 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 			return err
 		}
 	}
-	if err := requireExtraForcePerm(c, extra, "container", clusterID); err != nil {
+	restore, err := requireExtraRestorePerm(c, extra, true, clusterID)
+	if err != nil {
 		return err
 	}
 
@@ -727,7 +728,7 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 		Action:       "create",
 		UPID:         upid,
 		Description:  "create CT " + strconv.Itoa(vmid),
-		Extra:        map[string]any{"vmid": vmid},
+		Extra:        createDetails(vmid, restore, p.String("ostemplate"), extra),
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(vmid), "create")
 

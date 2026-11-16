@@ -1207,6 +1207,15 @@ VM or container create, `start_after` and `live_import` on a VM import,
 not stopped. Without it the answer is `403` naming the permission, and nothing is
 asked of Proxmox.
 
+**A create's `extra` cannot stand in for its typed parameters.** A key in
+`extra` that a typed parameter of the same create sets (`start`, `vmid`,
+`name`/`hostname`, `pool`, `ostemplate`, `password`, …) is refused with `400`
+naming it: use the typed parameter. An `extra` that makes the create a restore
+(`archive` on a VM, `restore` other than `0` on a container) also needs
+`manage:backup` on the cluster, as the restore route does, and the task and audit
+entry record `restore`, the `archive` volume and `force`. A VM's `live-restore`
+in `extra` starts it, so it needs `execute:vm`.
+
 **Overwriting a guest needs `delete` on its kind.** A `force` restore, and a
 create whose `extra` object carries a `force` key, replace the guest at that VMID
 as deleting it would, so they need what its delete route needs: `delete:vm` for

@@ -2161,15 +2161,56 @@ func requireGuestPowerPerm(c fiber.Ctx, resource string, clusterID uuid.UUID, wh
 	return requireGuestActionPerm(c, "execute", resource, clusterID, what)
 }
 
-// requireExtraForcePerm holds a create whose extra object carries Proxmox's
-// force to the restore's rule: beside an archive (qemu) or restore (lxc) it
-// overwrites the guest holding the VMID, so it needs delete on the create's kind.
-// Any value but "" (never sent) and "0" counts, a superset of Proxmox's true.
-func requireExtraForcePerm(c fiber.Ctx, extra map[string]string, resource string, clusterID uuid.UUID) error {
-	if v := extra["force"]; v == "" || v == "0" {
-		return nil
+// extraFlag is a create-call flag in extra: any value but "" (never sent) and
+// "0" counts, a superset of what Proxmox takes as true.
+func extraFlag(extra map[string]string, key string) bool {
+	v := extra[key]
+	return v != "" && v != "0"
+}
+
+// requireExtraRestorePerm holds a create whose extra object carries Proxmox's
+// own restore options to the rules the restore and power routes apply, and says
+// whether it is a restore: qemu-server's archive (VM) or pve-container's restore
+// flag (container) makes it one, which needs manage:backup on the cluster, as
+// POST …/restore asks first. force overwrites the guest at that VMID, so it needs
+// delete on the kind, with or without the restore key (decided from the request).
+// A VM's live-restore boots it while its disks stream in: execute:vm, as an
+// import's live_import needs.
+func requireExtraRestorePerm(c fiber.Ctx, extra map[string]string, container bool, clusterID uuid.UUID) (bool, error) {
+	restore := extraFlag(extra, "restore")
+	if !container {
+		restore = extra["archive"] != ""
 	}
-	return requireGuestActionPerm(c, "delete", resource, clusterID, "Restoring over an existing guest")
+	if restore {
+		if err := requireGuestActionPerm(c, "manage", "backup", clusterID, "A create that restores a backup"); err != nil {
+			return false, err
+		}
+	}
+	resource := guestResource(container)
+	if extraFlag(extra, "force") {
+		if err := requireGuestActionPerm(c, "delete", resource, clusterID, "Restoring over an existing guest"); err != nil {
+			return false, err
+		}
+	}
+	if !container && extraFlag(extra, "live-restore") {
+		if err := requireGuestPowerPerm(c, resource, clusterID, "Starting the VM while it restores or imports"); err != nil {
+			return false, err
+		}
+	}
+	return restore, nil
+}
+
+// createDetails is a create's task and audit details: a create that restores
+// says so, with the archive volume it named and whether it overwrote, as the
+// restore route records them. Volume ids and flags only: a Viewer reads these.
+func createDetails(vmid int, restore bool, archive string, extra map[string]string) map[string]any {
+	details := map[string]any{"vmid": vmid}
+	if restore {
+		details["restore"] = true
+		details["archive"] = archive
+		details["force"] = extraFlag(extra, "force")
+	}
+	return details
 }
 
 // requireGuestActionPerm refuses what a guest's own route would refuse:

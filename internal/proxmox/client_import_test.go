@@ -100,10 +100,9 @@ func TestBuildImportCreateParams_MapsTypedFieldsAndDisks(t *testing.T) {
 
 	want := map[string]string{
 		// Data disks are remapped from the source's scsi bus onto SATA for bootability;
-		// efidisk0 keeps its identity.
+		// efidisk0 keeps its identity, on its typed field (checked below).
 		"sata0":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01.vmdk,format=qcow2",
 		"sata1":                  "local-lvm:0,import-from=esxi:ha/ds/web01/web01_1.vmdk,format=qcow2",
-		"efidisk0":               "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram,format=qcow2",
 		"import-working-storage": "local",
 		"live-restore":           "1",
 	}
@@ -111,6 +110,9 @@ func TestBuildImportCreateParams_MapsTypedFieldsAndDisks(t *testing.T) {
 		if p.Extra[k] != v {
 			t.Errorf("Extra[%s] = %q, want %q", k, p.Extra[k], v)
 		}
+	}
+	if p.EFIDisk0 != "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram,format=qcow2" {
+		t.Errorf("EFIDisk0 = %q", p.EFIDisk0)
 	}
 	if p.Net0 != "vmxnet3=AA:BB:CC:DD:EE:FF,bridge=vmbr0" {
 		t.Errorf("Net0 = %q", p.Net0)
@@ -298,7 +300,7 @@ func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 	if p.Extra["sata1"] != "ceph:0,import-from=nas:import/win.ova/win-disk2.vmdk" {
 		t.Errorf("sata1 = %q", p.Extra["sata1"])
 	}
-	if _, ok := p.Extra["scsi0"]; ok {
+	if p.SCSI0 != "" {
 		t.Error("scsi0 should have been remapped off the pvscsi bus")
 	}
 	if p.Boot != "order=sata0;sata1" {
@@ -307,8 +309,8 @@ func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 	if p.ScsiHW != "virtio-scsi-single" {
 		t.Errorf("ScsiHW = %q, want virtio-scsi-single (pvscsi replaced)", p.ScsiHW)
 	}
-	if p.Extra["efidisk0"] != "ceph:1,efitype=4m" {
-		t.Errorf("efidisk0 = %q, want a synthesised EFI disk", p.Extra["efidisk0"])
+	if p.EFIDisk0 != "ceph:1,efitype=4m" {
+		t.Errorf("efidisk0 = %q, want a synthesised EFI disk", p.EFIDisk0)
 	}
 }
 
@@ -327,8 +329,8 @@ func TestBuildImportCreateParams_SynthesisesEfidiskForOVMF(t *testing.T) {
 		},
 	}
 	p := BuildImportCreateParams(ovmf, ImportCreateOptions{VMID: 104, TargetStorage: "ceph"})
-	if p.Extra["efidisk0"] != "ceph:1,efitype=4m" {
-		t.Errorf("efidisk0 = %q, want %q", p.Extra["efidisk0"], "ceph:1,efitype=4m")
+	if p.EFIDisk0 != "ceph:1,efitype=4m" {
+		t.Errorf("efidisk0 = %q, want %q", p.EFIDisk0, "ceph:1,efitype=4m")
 	}
 
 	// SeaBIOS guests must NOT get an efidisk.
@@ -343,14 +345,14 @@ func TestBuildImportCreateParams_SynthesisesEfidiskForOVMF(t *testing.T) {
 		},
 	}
 	ps := BuildImportCreateParams(seabios, ImportCreateOptions{VMID: 105, TargetStorage: "ceph"})
-	if _, ok := ps.Extra["efidisk0"]; ok {
-		t.Errorf("seabios guest should not get an efidisk0, got %q", ps.Extra["efidisk0"])
+	if ps.EFIDisk0 != "" {
+		t.Errorf("seabios guest should not get an efidisk0, got %q", ps.EFIDisk0)
 	}
 
 	// When the source DOES carry an EFI vars disk (e.g. ESXi nvram), keep the imported one —
 	// don't clobber it with a synthesised blank. sampleMetadata has an efidisk0 nvram disk.
 	pk := BuildImportCreateParams(sampleMetadata(), ImportCreateOptions{VMID: 106, TargetStorage: "local-lvm"})
-	if got := pk.Extra["efidisk0"]; got != "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram" {
+	if got := pk.EFIDisk0; got != "local-lvm:0,import-from=esxi:ha/ds/web01/web01.nvram" {
 		t.Errorf("imported efidisk0 was overwritten: %q", got)
 	}
 }

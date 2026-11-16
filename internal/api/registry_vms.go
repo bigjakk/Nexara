@@ -1193,7 +1193,9 @@ func createVMParams() apischema.Properties {
 			Typetext: "<object>",
 			Description: "Additional Proxmox config keys as a flat object of string values — " +
 				"further disks (scsi1, sata0, virtio0), CD-ROM slots and anything else this schema does not name. " +
-				"A force key (which with archive restores over an existing VM) also requires delete:vm.",
+				"A key a typed parameter of this route sets (start, vmid, name, pool, …) is refused with 400: " +
+				"use the typed parameter. An archive key makes the create a restore, which also requires " +
+				"manage:backup and is recorded as one; force also requires delete:vm, and live-restore execute:vm.",
 		},
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1080,8 +1081,50 @@ func (c *Client) RollbackCTSnapshot(ctx context.Context, node string, vmid int, 
 	}
 	return upid, nil
 }
+
+// vmCreateOwnedKeys and ctCreateOwnedKeys are the form keys CreateVM and
+// CreateCT set from a typed field, whether or not this call sets that field.
+// Extra is merged last, so an owned key in it would override what the caller
+// checked, tracked and audited (extra.start skipping the execute check).
+// TestCreateOwnedKeysCoverTheTypedFormKeys holds them to the functions' form.Set calls.
+var (
+	vmCreateOwnedKeys = keySet("vmid", "name", "memory", "cores", "sockets", "scsi0", "ide2", "net0",
+		"ostype", "boot", "cdrom", "start", "ciuser", "cipassword", "ipconfig0", "sshkeys", "citype",
+		"nameserver", "searchdomain", "bios", "machine", "scsihw", "efidisk0", "tpmstate0", "agent",
+		"cpu", "numa", "balloon", "vga", "onboot", "hotplug", "tablet", "description", "tags", "pool")
+	ctCreateOwnedKeys = keySet("vmid", "ostemplate", "hostname", "storage", "rootfs", "memory", "swap",
+		"cores", "net0", "password", "ssh-public-keys", "unprivileged", "start", "description", "tags",
+		"pool", "nameserver", "searchdomain")
+)
+
+func keySet(keys ...string) map[string]bool {
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out
+}
+
+// checkCreateExtra refuses an Extra key that a typed create parameter owns.
+func checkCreateExtra(owned map[string]bool, extra map[string]string) error {
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		if owned[k] {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	slices.Sort(keys)
+	return fmt.Errorf("%w: extra.%s is a typed create parameter; set it there, not in extra", ErrInvalidInput, keys[0])
+}
+
 func (c *Client) CreateVM(ctx context.Context, node string, params CreateVMParams) (string, error) {
 	if err := validateNodeName(node); err != nil {
+		return "", err
+	}
+	if err := checkCreateExtra(vmCreateOwnedKeys, params.Extra); err != nil {
 		return "", err
 	}
 	if params.VMID <= 0 {
@@ -1233,6 +1276,9 @@ func (c *Client) CreateCT(ctx context.Context, node string, params CreateCTParam
 	}
 	if params.OSTemplate == "" {
 		return "", fmt.Errorf("ostemplate is required")
+	}
+	if err := checkCreateExtra(ctCreateOwnedKeys, params.Extra); err != nil {
+		return "", err
 	}
 	form := url.Values{}
 	form.Set("vmid", strconv.Itoa(params.VMID))

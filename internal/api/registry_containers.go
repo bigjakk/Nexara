@@ -392,8 +392,10 @@ func createCTParams() apischema.Properties {
 			Typetext: "<object>",
 			Description: "Additional Proxmox LXC config keys as a flat object of string values — " +
 				"features, cpulimit, cpuunits, arch, onboot, protection, startup, cmode and anything " +
-				"else this schema does not name. A force key (which with restore overwrites an existing " +
-				"container) also requires delete:container.",
+				"else this schema does not name. A key a typed parameter of this route sets (start, vmid, " +
+				"hostname, ostemplate, password, pool, …) is refused with 400: use the typed parameter. A restore " +
+				"key (any value but 0) makes the create a restore, which also requires manage:backup and is " +
+				"recorded as one; force also requires delete:container.",
 		},
 	}
 }
