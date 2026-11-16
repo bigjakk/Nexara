@@ -133,7 +133,7 @@ ON CONFLICT (upid) DO NOTHING;
 -- would leave migration_jobs.upid empty and this row visible again. Do not
 -- read that as self-healing: pgxpool transparently replaces a dead connection,
 -- so a conn-level failure on the UPDATE can be followed by a perfectly
--- successful InsertTaskHistory on a fresh one, leaving upid = '' beside a live
+-- successful InsertTaskHistory on a fresh one, leaving an empty upid beside a live
 -- running row with both guards off. Only ctx cancellation reliably takes the
 -- next statement down too.
 --
@@ -144,7 +144,7 @@ ON CONFLICT (upid) DO NOTHING;
 -- permanent when forgotten. A failed UPDATE is at least loud. That is the
 -- choice, not a claim that this dominates.
 --
--- The `<> ''` keeps the two empty-string sentinels from joining to each other.
+-- The not-empty test keeps the two empty-string sentinels from joining to each other.
 --
 -- No index on migration_jobs(upid) on purpose: the table holds one row per
 -- migration ever requested and is never pruned, and at that size the anti-join
@@ -211,7 +211,7 @@ WHERE upid = $1 AND status = 'running';
 -- value simply matches no CASE branch and falls through to the default order.
 --
 -- Sort keys order on the value the CELL RENDERS, not the raw column:
---   * blank text ('' node / task_type) sorts as absent, because the cell shows
+--   * blank text (an empty node or task_type) sorts as absent, because the cell shows
 --     an em dash for it;
 --   * description falls back to the UPID, exactly as the cell does;
 --   * cluster and vm sort by the joined NAME — the cell shows a name, and
@@ -362,7 +362,7 @@ WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR cluster_id = sqlc.narg('cluster_
 -- an alert that says a backup failed on that evidence is claiming more than it
 -- knows.
 --
--- @task_type '' matches any type; 'vzdump' narrows it to backups.
+-- An empty @task_type matches any type; 'vzdump' narrows it to backups.
 --
 -- failed_count counts ROWS (three failures of one job are three failures), but
 -- the name list is DISTINCT and ordered most-recent-first: a job that retried

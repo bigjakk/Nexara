@@ -29,7 +29,7 @@ type AssignVMToFolderParams struct {
 	FolderID  uuid.UUID `json:"folder_id"`
 }
 
-// AssignVMToFolder returns the folder the guest was filed in before, ” when
+// AssignVMToFolder returns the folder the guest was filed in before, an empty string when
 // none, for the audit row to name (from_folder_id): the folder it left has no
 // other record of it. The subquery reads the table as it stood when the
 // statement began, so it sees the row this upsert replaces — under

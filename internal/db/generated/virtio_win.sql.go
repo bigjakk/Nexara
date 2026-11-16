@@ -20,7 +20,7 @@ UPDATE virtio_win_releases SET is_stable = false WHERE is_stable AND version <> 
 // ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
 // partial index on is_stable only ever matches the row the source just named.
 //
-// Passing ” clears EVERY row, which is the answer when the source could not
+// Passing an empty string clears EVERY row, which is the answer when the source could not
 // name a stable version at all — a mirror has no stable-virtio/ redirect to
 // copy. No version string is empty, so the <> holds nothing back.
 func (q *Queries) ClearVirtioWinStableFlag(ctx context.Context, version string) error {

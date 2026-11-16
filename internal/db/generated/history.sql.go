@@ -1336,10 +1336,10 @@ type ListHistoryRow struct {
 // count(*) OVER the filtered set, computed before LIMIT — the Items and the
 // Total come from one query and so cannot be counted under different filters.
 // An empty page of a capped read — past its end, or of a stretch with nothing
-// in it — is one row with no entry (entry_id ”), there only to carry
+// in it — is one row with no entry (an empty entry_id), there only to carry
 // searched_from.
 // An empty page of a capped read still says how far back it searched: one
-// row with no entry (entry_id ”), which the handler reads only for that.
+// row with no entry (an empty entry_id), which the handler reads only for that.
 func (q *Queries) ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error) {
 	rows, err := q.db.Query(ctx, listHistory,
 		arg.Vmids,

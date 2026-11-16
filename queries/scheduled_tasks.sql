@@ -129,7 +129,7 @@ WHERE id = $1;
 --
 -- Success or failure is task_history.status as the collector writes it
 -- (classifyTaskExit in internal/collector, which applies proxmox.TaskSucceeded:
--- '' / 'OK' / 'WARNINGS: N' are 'completed'), not a second reading of
+-- an empty one, 'OK' and 'WARNINGS: N' are 'completed'), not a second reading of
 -- exit_status. Only 'completed' and 'failed' settle a run. Nothing else
 -- finalizes a task any other way: 'stopped', or an empty status, came only
 -- from a hand-made PUT /api/v1/tasks/:upid, which could write one before this

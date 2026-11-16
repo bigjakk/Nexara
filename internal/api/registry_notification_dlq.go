@@ -121,8 +121,8 @@ func registerNotificationDLQEndpoints(reg *Registry, h *handlers.NotificationDLQ
 		Handler: h.List,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodGet,
-		Path:        dlqScope + "/summary",
+		Method: fiber.MethodGet,
+		Path:   dlqScope + "/summary",
 		Description: "Return the dead-letter counts per state, for the alerts page's queue widget. Entries " +
 			"for UPS alerts are counted only for a holder of the instance-wide view:ups, as the listing " +
 			"shows them.",

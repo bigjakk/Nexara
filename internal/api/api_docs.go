@@ -47,9 +47,9 @@ func docEndpoints(reg *Registry) []handlers.APIEndpoint {
 			// Those last words say nothing an operator can act on, so a
 			// route whose permission cannot be stated here has to state it
 			// in its Description instead — which is what endpointMeta did
-			// for the two convert/clone-to-template routes, and what
-			// TestGuard_DeclarationDropsNoDocumentedPermission now holds
-			// every declaration to.
+			// for the two convert/clone-to-template routes. No test holds a
+			// declaration to it any more: the guard that did was retired with
+			// endpointMeta (see api_docs_payload_test.go).
 			Permission: e.Permissions.Describe(),
 			Group:      e.Group,
 			// The reason an API key is refused here, when it is: what a reader

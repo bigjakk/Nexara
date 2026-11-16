@@ -27,7 +27,7 @@ SELECT * FROM virtio_win_releases WHERE is_stable ORDER BY version DESC LIMIT 1;
 -- ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
 -- partial index on is_stable only ever matches the row the source just named.
 --
--- Passing '' clears EVERY row, which is the answer when the source could not
+-- Passing an empty string clears EVERY row, which is the answer when the source could not
 -- name a stable version at all — a mirror has no stable-virtio/ redirect to
 -- copy. No version string is empty, so the <> holds nothing back.
 -- name: ClearVirtioWinStableFlag :exec

@@ -27,7 +27,7 @@ type Querier interface {
 	// a no-op for active jobs, whose terminal transition sets the flag itself.
 	ArmJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	AssignUserRole(ctx context.Context, arg AssignUserRoleParams) (UserRole, error)
-	// AssignVMToFolder returns the folder the guest was filed in before, '' when
+	// AssignVMToFolder returns the folder the guest was filed in before, an empty string when
 	// none, for the audit row to name (from_folder_id): the folder it left has no
 	// other record of it. The subquery reads the table as it stood when the
 	// statement began, so it sees the row this upsert replaces — under
@@ -250,13 +250,13 @@ type Querier interface {
 	//
 	// What counts is the caller's rules (observer_explain.go), one JSON object
 	// each: the kind and direction of change it applies to, the audit rows it
-	// reads — by resource_type ('' any), and by match_key: 'id' the change's own
+	// reads — by resource_type (empty: any), and by match_key: 'id' the change's own
 	// resource_id, 'node' its node, 'vmid' its guest, 'sid' the guest of an HA
 	// sid, 'cluster' any row of the cluster, 'details:<k>' a row whose
 	// details-><k> is the change's resource_id — and which of those rows: by
-	// action and UPID worker type (anchored patterns, '' any), never an action
+	// action and UPID worker type (anchored patterns, empty: any), never an action
 	// matching except_re, only a row with no task when untasked, only a row whose
-	// details carry a non-empty detail_key ('' any: an alias update that renamed
+	// details carry a non-empty detail_key (empty: any; an alias update that renamed
 	// it; !<k> only a row whose details carry no <k>, or an empty one: a pool
 	// update that added rather than removed), and with detail_value, one where it
 	// is that value. object and member_of name what the row is about, as "<source>:<format>"
@@ -286,7 +286,7 @@ type Querier interface {
 	//
 	// A change is explained when everything it changed is: each member that joined
 	// or left a list of ids (members_joined, members_left), each other field in
-	// its fields — covered by a rule's field_re ('' any) and member pin — or, for
+	// its fields — covered by a rule's field_re (empty: any) and member pin — or, for
 	// an object added or removed, the change itself. A disk move explains the disk it
 	// moved, not the memory someone changed in the GUI meanwhile; a guest's
 	// destroy explains that guest leaving a pool, not another guest leaving it.
@@ -346,7 +346,7 @@ type Querier interface {
 	// ClearVirtioWinStableFlag reasserts the flag after a catalog refresh, so the
 	// partial index on is_stable only ever matches the row the source just named.
 	//
-	// Passing '' clears EVERY row, which is the answer when the source could not
+	// Passing an empty string clears EVERY row, which is the answer when the source could not
 	// name a stable version at all — a mirror has no stable-virtio/ redirect to
 	// copy. No version string is empty, so the <> holds nothing back.
 	ClearVirtioWinStableFlag(ctx context.Context, version string) error
@@ -988,7 +988,7 @@ type Querier interface {
 	// an alert that says a backup failed on that evidence is claiming more than it
 	// knows.
 	//
-	// @task_type '' matches any type; 'vzdump' narrows it to backups.
+	// An empty @task_type matches any type; 'vzdump' narrows it to backups.
 	//
 	// failed_count counts ROWS (three failures of one job are three failures), but
 	// the name list is DISTINCT and ordered most-recent-first: a job that retried
@@ -1770,7 +1770,7 @@ type Querier interface {
 	// ingestTask's INSERT. Different writes, different call paths, and the tests
 	// cross-check that removing either leaves the other's test still passing.
 	//
-	// `upid <> ''` because that is migration_jobs.upid's not-yet-dispatched
+	// upid must not be the empty string because that is migration_jobs.upid's not-yet-dispatched
 	// default; without it a job parked at pending would match a task row that
 	// somehow carried an empty UPID.
 	ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error)
@@ -2233,10 +2233,10 @@ type Querier interface {
 	// count(*) OVER the filtered set, computed before LIMIT — the Items and the
 	// Total come from one query and so cannot be counted under different filters.
 	// An empty page of a capped read — past its end, or of a stretch with nothing
-	// in it — is one row with no entry (entry_id ''), there only to carry
+	// in it — is one row with no entry (an empty entry_id), there only to carry
 	// searched_from.
 	// An empty page of a capped read still says how far back it searched: one
-	// row with no entry (entry_id ''), which the handler reads only for that.
+	// row with no entry (an empty entry_id), which the handler reads only for that.
 	ListHistory(ctx context.Context, arg ListHistoryParams) ([]ListHistoryRow, error)
 	// ListHistoryAlsoChanged is, for one page of a History, what each of its audit
 	// rows (audit_ids) covered in Proxmox without naming it (explained_unnamed,
@@ -2427,7 +2427,7 @@ type Querier interface {
 	// would leave migration_jobs.upid empty and this row visible again. Do not
 	// read that as self-healing: pgxpool transparently replaces a dead connection,
 	// so a conn-level failure on the UPDATE can be followed by a perfectly
-	// successful InsertTaskHistory on a fresh one, leaving upid = '' beside a live
+	// successful InsertTaskHistory on a fresh one, leaving an empty upid beside a live
 	// running row with both guards off. Only ctx cancellation reliably takes the
 	// next statement down too.
 	//
@@ -2438,7 +2438,7 @@ type Querier interface {
 	// permanent when forgotten. A failed UPDATE is at least loud. That is the
 	// choice, not a claim that this dominates.
 	//
-	// The `<> ''` keeps the two empty-string sentinels from joining to each other.
+	// The not-empty test keeps the two empty-string sentinels from joining to each other.
 	//
 	// No index on migration_jobs(upid) on purpose: the table holds one row per
 	// migration ever requested and is never pruned, and at that size the anti-join
@@ -2507,7 +2507,7 @@ type Querier interface {
 	// value simply matches no CASE branch and falls through to the default order.
 	//
 	// Sort keys order on the value the CELL RENDERS, not the raw column:
-	//   * blank text ('' node / task_type) sorts as absent, because the cell shows
+	//   * blank text (an empty node or task_type) sorts as absent, because the cell shows
 	//     an em dash for it;
 	//   * description falls back to the UPID, exactly as the cell does;
 	//   * cluster and vm sort by the joined NAME — the cell shows a name, and
@@ -2873,7 +2873,7 @@ type Querier interface {
 	//
 	// Success or failure is task_history.status as the collector writes it
 	// (classifyTaskExit in internal/collector, which applies proxmox.TaskSucceeded:
-	// '' / 'OK' / 'WARNINGS: N' are 'completed'), not a second reading of
+	// an empty one, 'OK' and 'WARNINGS: N' are 'completed'), not a second reading of
 	// exit_status. Only 'completed' and 'failed' settle a run. Nothing else
 	// finalizes a task any other way: 'stopped', or an empty status, came only
 	// from a hand-made PUT /api/v1/tasks/:upid, which could write one before this

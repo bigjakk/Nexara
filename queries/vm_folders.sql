@@ -68,7 +68,7 @@ FROM vm_folder_memberships m
 JOIN vms v ON v.cluster_id = m.cluster_id AND v.vmid = m.vmid
 WHERE m.cluster_id = $1;
 
--- AssignVMToFolder returns the folder the guest was filed in before, '' when
+-- AssignVMToFolder returns the folder the guest was filed in before, an empty string when
 -- none, for the audit row to name (from_folder_id): the folder it left has no
 -- other record of it. The subquery reads the table as it stood when the
 -- statement began, so it sees the row this upsert replaces — under

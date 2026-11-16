@@ -92,9 +92,10 @@ func buildAllClusterIssues(ctx context.Context, q *db.Queries) map[uuid.UUID][]h
 	// Proxmox call for the cluster fails the handshake, but the collector
 	// fails over to another member (failoverCluster) and keeps inventory and
 	// metrics flowing, so the cluster looks healthy everywhere else while the
-	// UI's live tabs return 502. The collector's own tls_fingerprint_mismatch
-	// audit entry only fires when the whole sync fails, which failover
-	// prevents.
+	// UI's live tabs return 502. The collector does record a
+	// tls_fingerprint_mismatch audit entry when it fails over for this reason
+	// (reportEndpointSubstitution, rate-limited), but that is a row in the
+	// audit log, not a health issue anyone sees on the dashboard.
 	//
 	// Compared against the per-node fingerprint the collector re-reads each
 	// sync, so this reflects the certificate actually being served — not a

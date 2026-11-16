@@ -171,7 +171,7 @@ func main() {
 		// instance the HTTP handlers use. The WS subscribe path uses it to
 		// enforce per-cluster view permissions on metric / alert / event
 		// channels (security review H1). If application.RBAC is nil here,
-		// the WS server warns at startup and falls open on cluster channels.
+		// the WS server warns at startup and fails closed on cluster channels.
 		RBACEngine: application.RBAC,
 		// Origin allow-list for /ws, /ws/console, /ws/vnc upgrades.
 		// Empty/wildcard preserves the legacy "accept any origin"

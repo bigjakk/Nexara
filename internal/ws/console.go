@@ -26,9 +26,9 @@ import (
 // MaxBrowserConsoleMessageBytes caps the size of a single WebSocket message
 // we'll accept from the browser side of a console / VNC proxy.
 //
-// This is the per-frame limit applied via fasthttp/websocket's SetReadLimit.
+// This is the per-message limit applied via fasthttp/websocket's SetReadLimit.
 // Hitting it sends a close frame to the peer and returns ErrReadLimit on the
-// next read — i.e. a single oversized frame cleanly tears down the
+// next read — i.e. a single oversized message cleanly tears down the
 // connection rather than letting the read loop allocate unbounded memory.
 //
 // Sized for the actual workload:

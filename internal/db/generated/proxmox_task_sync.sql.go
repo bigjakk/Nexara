@@ -372,7 +372,7 @@ WHERE migration_type = 'cross-cluster'
 // ingestTask's INSERT. Different writes, different call paths, and the tests
 // cross-check that removing either leaves the other's test still passing.
 //
-// `upid <> ”` because that is migration_jobs.upid's not-yet-dispatched
+// upid must not be the empty string because that is migration_jobs.upid's not-yet-dispatched
 // default; without it a job parked at pending would match a task row that
 // somehow carried an empty UPID.
 func (q *Queries) ListCrossClusterMigrationUPIDs(ctx context.Context, upids []string) ([]string, error) {

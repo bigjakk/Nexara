@@ -73,8 +73,8 @@ type ServerConfig struct {
 	TestPermissionLoader PermissionLoader
 	// AllowedOrigins, when non-empty, enables strict Origin checking on
 	// the /ws, /ws/console, and /ws/vnc upgrade endpoints. Each entry is
-	// matched against the request's Origin header byte-for-byte (so the
-	// scheme + host + port must match exactly, e.g.
+	// matched against the request's Origin header, ignoring case (so the
+	// scheme + host + port must match, e.g.
 	// `https://nexara.example.com`). A nil/empty value preserves the
 	// permissive default — appropriate for dev/lab installs but logged
 	// as a warning at startup so production deploys catch the gap.

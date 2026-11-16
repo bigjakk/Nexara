@@ -379,11 +379,11 @@ func (s *Server) setupMiddleware() {
 	//     either runs.
 	//
 	// It does not read the body, and it does not close the connection itself:
-	// closeConnectionsLeftMidBody (body_framing.go), which sees every answer
-	// the server gives, closes the connection after any answer that leaves a
-	// body unread — this refusal's, as it does the 401, 404, 405, 413 and 429
-	// answers — so what is left of the body is never read as the next
-	// request. TestUnreadBodyClosesTheConnection holds it to that for this
+	// closeConnectionsLeftMidBody (body_framing.go), which wraps the server's
+	// handler and so sees every answer a middleware or route gives, closes the
+	// connection after any answer that leaves a body unread — this refusal's,
+	// as it does the 401, 404, 405, 413 and 429 answers — so what is left of
+	// the body is never read as the next request. TestUnreadBodyClosesTheConnection holds it to that for this
 	// refusal too.
 	s.app.Use(refuseTrailingSlashWrites)
 

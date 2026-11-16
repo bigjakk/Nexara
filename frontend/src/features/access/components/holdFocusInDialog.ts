@@ -4,7 +4,7 @@ import type { MouseEvent } from "react";
  * Moves focus from the button just pressed to the dialog around it, as the
  * request it sends goes out.
  *
- * The request disables the dialog's buttons, and a modal's focus trap (Radix's
+ * The request disables the dialog's footer buttons, and a modal's focus trap (Radix's
  * FocusScope) pulls focus back by refocusing the last element that had it
  * inside, which does nothing once that is a disabled button. Focus that gets
  * out then stays out. A click on the backdrop drops it to the page, and Tab or

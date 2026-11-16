@@ -162,7 +162,7 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 				Minimum:     apischema.Ptr(10.0),
 				Maximum:     apischema.Ptr(86400.0),
 				Typetext:    "<integer>",
-				Description: "How often the collector polls this cluster, in seconds.",
+				Description: "Seconds. Despite the name, it does not set how often the collector polls the cluster: it sizes the timeout of one sync pass, four times this value with a two-minute floor.",
 			},
 			"allow_private_address": optFlag(
 				"Confirm an api_url that resolves to a private, loopback or link-local address, which a " +
@@ -254,7 +254,7 @@ func registerClusterEndpoints(reg *Registry, h *handlers.ClusterHandler,
 				Minimum:     apischema.Ptr(10.0),
 				Maximum:     apischema.Ptr(86400.0),
 				Typetext:    "<integer>",
-				Description: "New collector poll interval in seconds. Omitted, the stored one is kept.",
+				Description: "Seconds. Despite the name, it does not set how often the collector polls the cluster: it sizes the timeout of one sync pass, four times this value with a two-minute floor. Omitted, the stored one is kept.",
 			},
 			"is_active": {
 				Type:     apischema.Boolean,

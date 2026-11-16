@@ -269,10 +269,10 @@ export function NodeDetailPage() {
                 node={node}
                 canEdit={canEditSettings}
               />
-              {/* Keyed on the node: the page is the same component for every
-                  node it is routed to, and a dialog that survived a change of
-                  node would PUT the old node's snapshot to the new one. Each
-                  has its own key, because siblings cannot share one. */}
+              {/* Keyed on the node, not only rebuilt by AppShell's pathname
+                  key: a dialog that survived a change of node would PUT the
+                  old node's snapshot to the new one. Each has its own key,
+                  because siblings cannot share one. */}
               <NodeOptionsCard
                 key={`options-${node.id}`}
                 clusterId={clusterId}

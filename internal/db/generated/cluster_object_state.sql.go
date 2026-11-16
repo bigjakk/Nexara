@@ -532,13 +532,13 @@ type ClassifyObservedChangesParams struct {
 //
 // What counts is the caller's rules (observer_explain.go), one JSON object
 // each: the kind and direction of change it applies to, the audit rows it
-// reads — by resource_type (” any), and by match_key: 'id' the change's own
+// reads — by resource_type (empty: any), and by match_key: 'id' the change's own
 // resource_id, 'node' its node, 'vmid' its guest, 'sid' the guest of an HA
 // sid, 'cluster' any row of the cluster, 'details:<k>' a row whose
 // details-><k> is the change's resource_id — and which of those rows: by
-// action and UPID worker type (anchored patterns, ” any), never an action
+// action and UPID worker type (anchored patterns, empty: any), never an action
 // matching except_re, only a row with no task when untasked, only a row whose
-// details carry a non-empty detail_key (” any: an alias update that renamed
+// details carry a non-empty detail_key (empty: any; an alias update that renamed
 // it; !<k> only a row whose details carry no <k>, or an empty one: a pool
 // update that added rather than removed), and with detail_value, one where it
 // is that value. object and member_of name what the row is about, as "<source>:<format>"
@@ -568,7 +568,7 @@ type ClassifyObservedChangesParams struct {
 //
 // A change is explained when everything it changed is: each member that joined
 // or left a list of ids (members_joined, members_left), each other field in
-// its fields — covered by a rule's field_re (” any) and member pin — or, for
+// its fields — covered by a rule's field_re (empty: any) and member pin — or, for
 // an object added or removed, the change itself. A disk move explains the disk it
 // moved, not the memory someone changed in the GUI meanwhile; a guest's
 // destroy explains that guest leaving a pool, not another guest leaving it.
