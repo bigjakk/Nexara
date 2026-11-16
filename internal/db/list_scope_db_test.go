@@ -35,20 +35,11 @@ var (
 	dlqBare    = uuid.MustParse("715ce000-0000-4000-8000-0000000000e2")
 )
 
-// TestListScope_AlertRulesAndMigrationJobs executes the two genuinely novel
-// scope shapes against Postgres. The audit clause is covered by
-// TestAuditScope_NullClusterRowsAreGlobal; these two are different:
-//
-//   - alert_rules.cluster_id is NULLABLE like audit_log's, and a NULL marks a
-//     GLOBAL rule that only a holder of global view:alert may see. The clause
-//     has to exclude it from a scoped caller through three-valued logic alone.
-//   - migration_jobs has TWO NOT NULL cluster columns, and a job is visible if
-//     EITHER end is accessible. That OR across two columns is the one shape in
-//     this change set that no other query uses, so it is the one most worth
-//     executing rather than reasoning about.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it).
-// Seeds and deletes its own rows; never migrates the schema down.
+// TestListScope_AlertRulesAndMigrationJobs executes the two novel scope shapes: alert_rules'
+// NULLABLE cluster_id, where a NULL global rule must drop out of a scoped caller's read by
+// three-valued logic alone, and migration_jobs' two NOT NULL cluster columns, visible if EITHER
+// end is accessible, an OR no other query uses. Skipped without NEXARA_TEST_DB_URL; seeds and
+// deletes its own rows.
 func TestListScope_AlertRulesAndMigrationJobs(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

@@ -15,23 +15,10 @@ import (
 	"github.com/bigjakk/nexara/migrations"
 )
 
-// TestMigration057_RoundTripPreservesChannelIds is the data-preservation
-// check that 4.8a's stricter rollback bar requires (REMEDIATION_PLAN.md
-// 2026-05-08): seed a cve_notification_configs row with channel_ids =
-// [u1, u2], migrate up to 57 (creates join table + backfills), assert the
-// join table holds exactly the same two pairs the array did, migrate back
-// down to 56 (drops join table), assert the array column is untouched.
-//
-// A generic empty-DB harness can't catch this — it would only verify the
-// schema round-trips, not that real seed data survives the up + down cycle
-// losslessly.
-//
-// Skipped unless NEXARA_TEST_DB_URL points at a Postgres instance the test
-// can create/drop schema in. The test runs every migration up from 0 to 57
-// and back down to 56, so it expects an empty database (or one whose state
-// it's allowed to overwrite). The dev stack precedent (REMEDIATION_PLAN.md
-// 2.3 "fresh DB CLI test") used a throwaway nexara_freshtest database in
-// the same Postgres instance — same shape applies here.
+// TestMigration057_RoundTripPreservesChannelIds: a cve_notification_configs row with channel_ids
+// [u1, u2] goes up to 57 (join table backfilled with exactly those pairs) and down to 56 (array
+// untouched), with real data, which an empty-database round trip cannot check. Skipped without
+// NEXARA_TEST_DB_URL: it runs 0 to 57 and back to 56, so it needs a throwaway database.
 func TestMigration057_RoundTripPreservesChannelIds(t *testing.T) {
 	dbURL := testDBURL(t)
 
@@ -72,17 +59,9 @@ func TestMigration057_RoundTripPreservesChannelIds(t *testing.T) {
 	channelA := uuid.MustParse("33333333-3333-4333-8333-333333333333")
 	channelB := uuid.MustParse("44444444-4444-4444-8444-444444444444")
 
-	// Best-effort cleanup so a re-run on the same DB doesn't trip on FK
-	// constraints. Order matches the FK dependency tree.
-	//
-	// Deliberately a defer rather than t.Cleanup: Go runs a test function's
-	// defers BEFORE its t.Cleanup callbacks, so by the time a t.Cleanup ran,
-	// `defer pool.Close()` above had already closed the pool — every delete
-	// failed, the errors were discarded, and the fixtures leaked into the next
-	// run. Registering the defer here, after that one, makes it run first
-	// under LIFO while the pool is still open. It carries its own context so it
-	// stays correct if the ordering ever shifts. Same shape as
-	// migration_068_test.go and migration_075_test.go.
+	// Best-effort cleanup in FK order. A defer, not t.Cleanup: cleanups run after `defer
+	// pool.Close()`, so every delete failed silently and fixtures leaked into the next run; this
+	// defer runs first, on its own context. Same shape as migration_068_test.go and 075's.
 	purge := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

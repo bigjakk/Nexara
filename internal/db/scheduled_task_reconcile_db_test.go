@@ -50,46 +50,11 @@ const parkedMessage = `disabled: cron expression never comes round: "0 8 31 4 *"
 // task (exit_status 'vanished' after staleTaskGrace with no status).
 const unknownOutcome = "Proxmox never reported how this task ended; Nexara stopped following it after 24 hours"
 
-// TestReconcileDispatchedScheduledTasks_SettlesEachRunFromItsOwnTask drives the
-// reconcile against the real schema, with every row written through the same
-// generated queries production uses: UpdateTaskLastRun and
-// DisableScheduledTaskForBadSchedule for the schedules, InsertTaskHistory /
-// InsertExternalTaskHistory and the collector's ReconcileTaskHistory for the
-// tasks.
-//
-// Each schedule differs from a plain dispatched run in ONE respect, so a
-// failure names the rule that broke:
-//
-//	succeeded        its task completed                       → success
-//	failed           its task failed                          → failed, Proxmox's exit status
-//	stillRunning     its task has not ended                   → untouched
-//	superseded       an OLDER run's task failed; its own runs → untouched
-//	offsite          its UPID's task is on the other cluster  → untouched
-//	external         task ingested by the collector, not
-//	                 recorded by the scheduler, WARNINGS: 1   → success
-//	parkedFailed     disabled, its task failed                → failed, "<exit>; disabled: …"
-//	parkedSucceeded  disabled, its task completed             → success, "disabled: …" kept
-//	emptyExit        task failed with no exit status          → failed, a fixed reason
-//	stoppedByHand    task set to 'stopped' by hand            → untouched
-//	neverDispatched  failed before dispatch, no UPID          → untouched
-//	vanished         the collector gave up on its task        → failed, "outcome unknown"
-//
-// superseded is the late-finishing-run case: a run that finishes after the
-// next one has started must not write its outcome over the newer run's.
-// vanished must settle — left dispatched, it would read Running until the
-// next run — but not with the bare sentinel: the collector wrote it because
-// Proxmox stopped reporting, which is not evidence that the task failed.
-// offsite is the cluster predicate's own fixture — every other task sits on
-// the schedule's cluster. neverDispatched is there so a query that settled
-// rows by some other key than last_upid would have a failed row to trample.
-//
-// The second pass is the idempotence check, and the status predicate's
-// fixture: settled rows no longer read 'dispatched', so nothing matches again.
-// Without the predicate the failed rows would gain another copy of their exit
-// status on every tick.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it).
-// Seeds and deletes its own rows; never migrates the schema down.
+// The reconcile against the real schema, rows written by the generated queries production uses.
+// Each schedule differs from a plain dispatched run in ONE respect (its name says which), so a
+// failure names the rule: superseded must not overwrite a newer run, vanished settles but not as
+// a bare failure, offsite and neverDispatched pin the cluster and last_upid keys. A second pass
+// checks idempotence. Skipped without NEXARA_TEST_DB_URL; seeds and deletes its own rows.
 func TestReconcileDispatchedScheduledTasks_SettlesEachRunFromItsOwnTask(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -237,23 +202,10 @@ func TestReconcileDispatchedScheduledTasks_SettlesEachRunFromItsOwnTask(t *testi
 	}
 }
 
-// TestClaimDueTasks_ClearsThePreviousRunsUPIDAndError pins what a claim takes
-// and what it leaves behind.
-//
-// What it takes: a due row whatever its previous run left — including one
-// still reading 'dispatched', whose task has not finished. 'running' is the
-// claim's in-flight marker and 'dispatched' is not, so a long task never holds
-// its schedule out of its next slot; the status then follows the newer run,
-// and the older run's outcome stays in task_history.
-//
-// What it leaves: 'running', with neither the previous run's error nor its
-// UPID, which belong to that run — the error would show beside Running in the
-// Schedules tab, and the UPID would name a task the row no longer describes.
-//
-// And the reconcile must not settle a claimed row. The cleared UPID already
-// makes that impossible, so to test the reconcile's OWN status predicate the
-// old UPID is put back by hand afterwards: the predicate is then the only thing
-// standing between a run being started and the previous run's failure.
+// TestClaimDueTasks_ClearsThePreviousRunsUPIDAndError: a claim takes a due row even if it still
+// reads 'dispatched' (a long task never holds its schedule), and leaves 'running' without the
+// previous run's error or UPID, which belong to that run. The old UPID is then put back by hand,
+// so the reconcile's own status predicate is all that keeps it from settling a claimed row.
 func TestClaimDueTasks_ClearsThePreviousRunsUPIDAndError(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

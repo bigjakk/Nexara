@@ -43,24 +43,10 @@ func testDBURL(t *testing.T) string {
 	return dbURL
 }
 
-// assertThrowawayDB returns nil only when dbURL names a disposable database.
-// A name is disposable when some '_'/'-'-separated segment of it is "test"
-// or ends in "test" — accepting the names in real use (nexara_chaintest,
-// nexara_test in CI, nexara_freshtest) while rejecting live-shaped names
-// (nexara, nexara_dev, prod).
-//
-// The database name is resolved the way pgx actually resolves it: from the
-// URL path, then overridden by a dbname/database query parameter if present
-// (pgconn's parseURLSettings applies query params after the path, and
-// golang-migrate forwards every non-x- param through). Checking only the
-// path would let ?dbname=nexara silently retarget a guard-passing URL at
-// the live database.
-//
-// Scope: this constrains the database NAME only — the host is deliberately
-// unconstrained (CI and dev point at different servers), so a *_test
-// database on any reachable server is fair game. Keyword/value DSNs are
-// rejected outright: golang-migrate needs a scheme anyway, and the parse
-// below would treat the whole DSN as an opaque path.
+// assertThrowawayDB passes only a disposable database: a '_'/'-' segment of its name is or ends
+// in "test" (nexara_chaintest, nexara_test, nexara_freshtest), never nexara, nexara_dev, prod. The
+// name is resolved as pgx does, a dbname/database query parameter overriding the path, or
+// ?dbname=nexara would retarget a passing URL. Hosts are unconstrained; keyword DSNs are refused.
 func assertThrowawayDB(dbURL string) error {
 	if !strings.HasPrefix(dbURL, "postgres://") && !strings.HasPrefix(dbURL, "postgresql://") {
 		return fmt.Errorf("NEXARA_TEST_DB_URL must be a postgres:// URL, not a keyword/value DSN")
@@ -102,17 +88,9 @@ func migrateUp(t *testing.T, m *migrate.Migrate) {
 	}
 }
 
-// migrationTestEnv is the shared scaffolding every migration round-trip
-// test needs. Constructing the pgx pool, opening the embedded migrations
-// fs, and wiring golang-migrate are pure ceremony — `setupMigration`
-// hands back a ready-to-use environment so tests can focus on seeding
-// rows + asserting the up/down behaviour.
-//
-// Phase 5.10: this harness was carved out to lower the bar for adding
-// future round-trip tests. Existing TestMigration057 / TestMigration058
-// still inline their own setup (changing them risks invalidating the
-// load-bearing 4.8a/4.8c data-preservation locks); new tests should
-// prefer this helper.
+// migrationTestEnv is the shared scaffolding of a migration round-trip test (pool, embedded
+// migrations, golang-migrate), so a test only seeds and asserts. TestMigration057 and 058 keep
+// their own setup, since changing them risks their data-preservation locks; new tests use this.
 type migrationTestEnv struct {
 	Ctx     context.Context
 	Pool    *pgxpool.Pool
@@ -120,21 +98,10 @@ type migrationTestEnv struct {
 	Cleanup func()
 }
 
-// setupMigration returns a ready migrationTestEnv. Skips the test if
-// NEXARA_TEST_DB_URL is unset (locally throwaway DB inside the dev
-// nexara-db container; CI sets this from a fresh Postgres job
-// service). Caller MUST defer Cleanup() — it closes the pool, the
-// migrate instance, and the iofs source.
-//
-// Delete your seeded rows with a `defer` registered AFTER `defer
-// env.Cleanup()`, never with t.Cleanup. Go runs a test function's defers
-// BEFORE its t.Cleanup callbacks, so a t.Cleanup delete fires once
-// env.Cleanup has already closed Pool and cancelled Ctx: the delete
-// errors out, the error is discarded, and the rows leak into the next
-// run's counts. Registering the defer after env.Cleanup's makes it run
-// first (LIFO), while the pool is still open. Give it its own
-// context.Background() timeout rather than env.Ctx so it survives a
-// reordering. See migration_075_test.go for the pattern.
+// setupMigration returns a ready migrationTestEnv, skipping without NEXARA_TEST_DB_URL; the
+// caller must defer Cleanup(). Delete seeded rows with a defer registered AFTER that one, never
+// t.Cleanup: cleanups run after the pool is closed, the error is discarded and rows leak. Give
+// that defer its own context. See migration_075_test.go.
 func setupMigration(t *testing.T) *migrationTestEnv {
 	t.Helper()
 

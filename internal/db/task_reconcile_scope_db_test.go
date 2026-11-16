@@ -13,24 +13,11 @@ import (
 	"github.com/bigjakk/nexara/internal/migration"
 )
 
-// A cross-cluster migration hands Proxmox the target cluster's decrypted API
-// token inside the `target-endpoint` property string, and PVE may echo a
-// rejected parameter back in the worker's die message. The migration
-// orchestrator scrubs the secret out of the exit_status it writes; the
-// collector's reconciler, which finalizes the same row through the same
-// `upid = $1 AND status = 'running'` predicate, writes PVE's text raw and has
-// no way to scrub it.
-//
-// Identically-scoped writers make that first-write-wins: the losing write
-// updates zero rows and reports no error. So "the scrubbed value is in the
-// column" is exactly the assertion that can pass by luck — it holds whenever
-// the orchestrator happened to get there first, which at the shipped intervals
-// (5s poll vs. a 30s sync tick) is most of the time.
-//
-// These two tests pin the property that removes the race instead of racing it:
-// the collector's listing does not return the row at all, and the SQL literal
-// that decides which rows those are is the same string the Go code means by
-// TypeCrossCluster.
+// PVE may echo a cross-cluster migration's target-endpoint (the target's token) in its die
+// message. The orchestrator scrubs it; the collector's reconciler writes PVE's text raw through
+// the same predicate, first write wins, so "the scrubbed value is in the column" passes by luck
+// most of the time. These pin what removes the race: the collector's listing withholds the row,
+// by the same type string the Go code means by TypeCrossCluster.
 
 // crossClusterFilterRe matches the anti-join that withholds a cross-cluster
 // migration's task row from ListRunningTaskHistoryByCluster. Deliberately
@@ -51,17 +38,9 @@ var crossClusterJoinRe = regexp.MustCompile(`(?i)\bmj\.upid\s*=\s*th\.upid\b`)
 // against a second hard-coded copy of the same string.
 var crossClusterLiteralRe = regexp.MustCompile(`(?i)migration_type\s*=\s*'([^']*)'`)
 
-// TestGuard_RunningTaskListNamesTheCrossClusterType keeps the SQL literal and
-// migration.TypeCrossCluster from drifting apart.
-//
-// The two can only be compared from a test, since sqlc has no way to
-// interpolate a Go constant into a query. A drift would be silent in the worst
-// possible way: the filter would still parse, still run, and match nothing —
-// the collector would quietly resume reconciling migration rows and writing
-// their unscrubbed exit status, with the query still looking guarded.
-//
-// Needs no database, so it runs on every push rather than only where
-// NEXARA_TEST_DB_URL is set.
+// TestGuard_RunningTaskListNamesTheCrossClusterType: sqlc cannot interpolate
+// migration.TypeCrossCluster, so only a test can compare them, and a drift would match nothing
+// silently, resuming unscrubbed writes. Needs no database.
 func TestGuard_RunningTaskListNamesTheCrossClusterType(t *testing.T) {
 	t.Parallel()
 
@@ -152,40 +131,11 @@ var (
 	reconcileScopeTargetClust = uuid.MustParse("103b0000-0000-4000-8000-00000000000d")
 )
 
-// TestListRunningTaskHistoryByCluster_WithholdsCrossClusterMigrations proves the
-// exclusion against the real schema and the real generated query, because that
-// is the only place it exists — there is no second copy in Go to unit-test, and
-// a second copy is exactly what would make neither killable.
-//
-// Five rows, the same shape apart from the thing under test. Each is withheld
-// or returned by exactly ONE predicate, so a failure names the predicate that
-// broke:
-//
-//	cross     source cluster, running, cross-cluster job  → withheld
-//	intra     source cluster, running, intra-cluster job  → returned
-//	plain     source cluster, running, no job at all      → returned
-//	finished  source cluster, completed, no job at all    → withheld
-//	offsite   TARGET cluster, running, no job at all      → withheld
-//
-// The intra and plain rows are not padding. Without them the test would pass
-// just as well against a query that returned nothing, and "returns nothing" is
-// the shape a mistyped literal or a botched anti-join actually produces.
-//
-// DO NOT give the finished row a migration job. It has none on purpose: it is
-// the only thing pinning the pre-existing status filter, and it can only do
-// that while the anti-join has no opinion about it. The first draft gave it a
-// cross-cluster job, which made the assertion vacuous — the anti-join withheld
-// the row whatever the status filter did, so deleting `AND th.status =
-// 'running'` from the query left this test green. A fixture that satisfies two
-// predicates at once cannot discriminate between them; that is a recorded
-// defect class here, and this is where it would come back.
-//
-// The offsite row is the same defence for the cluster_id filter, which nothing
-// else here would notice the loss of: every other row sits on the cluster being
-// queried.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it).
-// Seeds and deletes its own rows; never migrates the schema down.
+// The exclusion exists only in the generated query, so it is proven against the real schema.
+// Five rows, each withheld or returned by exactly ONE predicate: intra and plain are returned
+// (so "returns nothing" fails), finished pins the status filter and must NOT get a migration job
+// (the anti-join would then withhold it either way, as a first draft did), offsite pins cluster_id.
+// Skipped without NEXARA_TEST_DB_URL; seeds and deletes its own rows.
 func TestListRunningTaskHistoryByCluster_WithholdsCrossClusterMigrations(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

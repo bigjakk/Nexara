@@ -11,41 +11,16 @@ import (
 	"testing"
 )
 
-// Every statement that inserts a session must be the conditional one.
-//
-// A session is minted for a sign-in whose credential check may be minutes old, and
-// the one thing that ties it to the revoke-alls that have happened since is the
-// condition on the user's row — auth_epoch the check read, is_active, and the FOR
-// SHARE lock that orders the insert against a revoke-all (queries/sessions.sql,
-// CreateSessionAtEpoch). A second statement that inserts a session without them —
-// the plain INSERT this replaced, written again by someone who did not know — would
-// be a path around all of it that nothing else notices: every test of the
-// conditional one would still pass.
-//
-// So this reads the SQL, three ways: the queries, the generated copy of them that
-// actually runs, and the Go code, where no raw INSERT INTO sessions has any
-// business being. Static, no database, so it runs in the normal `go test` pass.
+// Every statement that inserts a session must be the conditional one (CreateSessionAtEpoch: the
+// epoch the check read, is_active, FOR SHARE against a revoke-all). A plain insert written again
+// would bypass all of it while every test of the conditional one still passed. So this reads the
+// queries, the generated copy that runs, and the Go code; static, no database.
 
-// sessInsertRe finds a statement that writes the sessions table, however it is
-// spelled: INSERT INTO or MERGE INTO, with any whitespace (a newline included)
-// between the words; the table quoted ("sessions"); any schema before it, bare or
-// quoted — public.sessions, nexara.sessions, "nexara"."sessions", "my schema".sessions,
-// even three parts, with or without spaces around the dots; and the quotes escaped the
-// way a Go interpreted string has to write them (\"nexara\".\"sessions\"), because the
-// Go half of the guard reads source. It does not match another table whose name
-// merely contains the word (veeam_sessions, sessions_archive), in any schema.
-//
-// What it cannot see is a statement assembled at run time — `"INSERT INTO " + table`,
-// fmt.Sprintf with the table name — and the two other ways into the table, which
-// sessCopySQLRe and sessCopyRe find.
-//
-// The guard is a tripwire for the realistic mistake, someone writing the plain insert
-// again, and not a defence against someone who is hiding one. It deliberately does
-// not chase what no honest spelling needs: a block comment between the words
-// (`INSERT /* x */ INTO sessions`), a \n or \t escape between them in an interpreted
-// string (the source holds a backslash and a letter, not whitespace), a name with
-// four parts or more, a table named through a variable. Whoever goes to those lengths
-// is not reading a guard; review is what reads them.
+// sessInsertRe finds INSERT or MERGE INTO the sessions table, any whitespace, quoted or not,
+// behind up to two schema parts, and with the escaped quotes of a Go interpreted string; not a
+// table that merely contains the word. A tripwire for the honest mistake: it cannot see a
+// statement built at run time, a block comment between the words, or a name from a variable.
+// COPY is sessCopySQLRe's and sessCopyRe's.
 var sessInsertRe = regexp.MustCompile(`(?is)\b(?:insert|merge)\s+into\s+(?:(?:\\?"[^"]+"|\w+)\s*\.\s*){0,2}(?:\\?"sessions\\?"|sessions\b)`)
 
 // sessCopySQLRe finds a COPY statement that loads the sessions table — COPY sessions

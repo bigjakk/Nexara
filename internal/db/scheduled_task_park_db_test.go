@@ -18,26 +18,10 @@ var (
 	parkTask    = uuid.MustParse("96000000-0000-4000-8000-000000000002")
 )
 
-// TestDisableScheduledTaskForBadSchedule_StopsTheClaimLoop locks the reason
-// this table needs its own remedy for an unusable cron.
-//
-// scheduled_tasks matches `next_run_at IS NULL OR next_run_at <= now()`, so a
-// NULL next_run_at means DUE NOW here — the opposite of report_schedules,
-// whose bare `next_run_at <= now()` makes NULL inert. That asymmetry is what
-// makes "just write NULL and move on" wrong on this table: a schedule that can
-// never fire has no future timestamp to write, so the row would be claimed,
-// RUN, and re-queued on every tick, repeating whatever action it carries — a
-// snapshot, or a reboot.
-//
-// Two properties, in the order that makes the second meaningful:
-//
-//  1. A NULL next_run_at really is claimed. Without this the second assertion
-//     would pass against a row that was never due to begin with.
-//  2. After the disable, the same row is not claimed — and the reason why is
-//     recorded on it rather than left for someone to infer.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB).
+// TestDisableScheduledTaskForBadSchedule_StopsTheClaimLoop: here a NULL next_run_at means DUE
+// NOW (unlike report_schedules), so a cron that never fires cannot just write NULL: the row
+// would run its action, a snapshot or a reboot, every tick. First a NULL row is shown to be
+// claimed; after the disable it is not, with the reason recorded on it.
 func TestDisableScheduledTaskForBadSchedule_StopsTheClaimLoop(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

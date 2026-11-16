@@ -27,34 +27,11 @@ var (
 	scopeTestRowGlobal  = uuid.MustParse("5c09e000-0000-4000-8000-0000000000f1")
 )
 
-// TestAuditScope_NullClusterRowsAreGlobal executes the real generated queries
-// against Postgres and pins the behaviour that TestScopeSQL_ScopedClausesExcludeNullCluster
-// can only pin the shape of.
-//
-// audit_log.cluster_id is nullable, unlike task_history's. A NULL cluster_id
-// marks a global entry — a settings change, a login — that only a holder of
-// global view:audit may read, and AuditHandler's per-row guards enforce exactly
-// that. The SQL has to agree, and it does so through three-valued logic rather
-// than a predicate of its own: `cluster_id = ANY(array)` evaluates to NULL, not
-// true, for a NULL cluster_id, so the row fails a scoped caller's WHERE clause.
-//
-// The three scopes below are the three states clusterAccess.ScopedIDs can
-// produce, and each is asserted against all three scoped queries:
-//
-//	nil  → global view:audit → every row, NULL-cluster entries included
-//	{A}  → scoped to A       → A's rows only, NEVER the NULL-cluster entry
-//	{}   → no grant anywhere  → nothing
-//
-// An entry also outlives a removed cluster (000122), keeping an id that names no
-// clusters row. Only global view:audit reads it, named by the name kept for it
-// (none for the id of a cluster that never was), with the removed flag set.
-// {A, R, U} is a scoped caller whose assignments for clusters that are gone were
-// not deleted with them: their ids are in the array, and their entries still
-// must not appear.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it;
-// see .github/workflows/ci.yml). It seeds and deletes its own rows and does not
-// migrate the schema down.
+// TestAuditScope_NullClusterRowsAreGlobal: a NULL cluster_id is a global entry only global
+// view:audit may read, and the SQL agrees through three-valued logic (NULL = ANY(...) is not
+// true). Scopes nil, {A} and {} are asserted on all three queries; an entry outliving its removed
+// cluster (000122) is likewise global-only, and stale assignments in the array must not reveal it.
+// Skipped without NEXARA_TEST_DB_URL; seeds and deletes its own rows.
 func TestAuditScope_NullClusterRowsAreGlobal(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

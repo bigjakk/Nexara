@@ -6,26 +6,11 @@ import (
 	"testing"
 )
 
-// A cross-cluster read that shipped, and the guard that stops the next one.
-//
-// ListCVEScanVulnsByNode filtered on `scan_node_id = $1` alone while every
-// sibling listing in queries/cve.sql filtered on `scan_id`. Its endpoint —
-// GET /clusters/:cluster_id/cve-scans/:scan_id/vulnerabilities — authorizes
-// the CLUSTER in the path and then checks the SCAN belongs to it, but
-// ?node_id= is a value the caller picks freely. So a caller holding
-// view:cve_scan on one cluster could name a scan-node row belonging to
-// another cluster's scan and read its vulnerabilities.
-//
-// It sat unnoticed because no Nexara client ever sent ?node_id=. Declaring
-// the parameter in the endpoint's registry schema is what made it
-// discoverable: a declared parameter is published in the API docs.
-//
-// This is a SQL-source guard rather than a DB-backed test on purpose, and
-// the trade is worth naming. It cannot prove the filter WORKS — only that
-// every read carries it. What it does do is cover queries added later, in
-// any file, without anyone remembering to extend a list; the DB-backed
-// tests in scope_db_test.go are the pattern for proving behaviour, and a
-// row-level test for this belongs there once it can run.
+// ListCVEScanVulnsByNode once filtered on the caller-chosen scan_node_id alone, so a caller with
+// view:cve_scan on one cluster could read another cluster's scan (queries/cve.sql says why
+// scan_id is in the filter). A SQL-source guard: it cannot prove the filter works, only that
+// every read carries it, including queries added later in any file; scope_db_test.go is where a
+// behavioural test belongs.
 
 // readsCVEScanVulnsRe identifies a query that READS cve_scan_vulns, through
 // FROM or a JOIN, schema-qualified or quoted. An INSERT has neither, so it

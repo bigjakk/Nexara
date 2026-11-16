@@ -13,17 +13,10 @@ import (
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The SQL half of the change-password compare-and-swap (queries/users.sql,
-// UpdatePassword): what it does against Postgres, including the interleaving of
-// two requests that verified the same old password, driven with a real row lock on
-// separate connections rather than described. The Go half — how a row count
-// becomes a 409, and what the handler does around it — is pinned without a
-// database in internal/api/handlers/auth_change_password_test.go, against a
-// stand-in that implements the same predicate; these tests are what keep that
-// stand-in honest.
-//
-// They skip without NEXARA_TEST_DB_URL like every test here that needs a database,
-// and live in this package for the reason given in session_rotation_db_test.go.
+// The SQL half of the change-password compare-and-swap (UpdatePassword), against Postgres,
+// including two requests that verified the same old password, with a real row lock on separate
+// connections. These keep honest the stand-in auth_change_password_test.go pins the Go half
+// with. Skipped without NEXARA_TEST_DB_URL.
 
 // A fixed id so a run that aborts before its purge leaves a row the next run's
 // up-front purge can find.
@@ -262,20 +255,10 @@ func TestUpdatePassword_ARacingChangeWaitsForTheRowLockAndThenMatchesNothing(t *
 	}
 }
 
-// TestGetPasswordHashForSettle_WaitsForATransactionThatIsStillRunning is the
-// interleaving the settle read exists for. A change-password COMMIT went out and its
-// answer was lost; the server finishes a commit it has received even when its
-// client has gone, and until the commit is done every other session still sees the
-// old row. The change-password transaction is A: it has run the compare-and-swap
-// update and has not ended — which, to everyone else, is exactly what a COMMIT the
-// server is still executing looks like.
-//
-// A plain read on another connection answers at once with the OLD hash. That is the
-// false negative: asked "did it land?", it says no about a change that is about to.
-// The locking read does not answer: Postgres reports it waiting on A's row lock. When
-// A commits it returns the NEW hash — under READ COMMITTED a locking read that
-// waited for a writer returns the newest committed version — and the control, A
-// rolling back, returns the OLD hash, which is then a true negative.
+// TestGetPasswordHashForSettle_WaitsForATransactionThatIsStillRunning: a COMMIT whose answer was
+// lost may still be executing, which to others looks like an open transaction A. A plain read
+// returns the OLD hash at once (a false negative); the locking read waits on A's row lock and,
+// at READ COMMITTED, returns the NEW hash when A commits, or the OLD one when A rolls back.
 func TestGetPasswordHashForSettle_WaitsForATransactionThatIsStillRunning(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -383,17 +366,10 @@ func TestGetPasswordHashForSettle_WaitsForATransactionThatIsStillRunning(t *test
 	})
 }
 
-// TestAnUnsentCommitIsSafeToRetryAndTheServerRollsBack pins two facts about the
-// driver that commitOutcomeUnknown (internal/api/handlers/db_errors.go) is built
-// on, and that nothing else here would notice changing.
-//
-// A COMMIT whose context had ended before it was sent is refused by pgconn without
-// sending anything, and says so — pgconn.SafeToRetry — and the server then rolls
-// the transaction back (pgx closes the connection of a transaction it could not
-// commit): the write made inside it is gone and its row lock is released. So "the
-// COMMIT never went out" is a known outcome, not an unknown one. A statement cut
-// off while it ran is the opposite: it was sent, and pgconn does not say it is safe
-// to retry — which is why a deadline error alone is not a known outcome.
+// TestAnUnsentCommitIsSafeToRetryAndTheServerRollsBack pins a driver fact commitOutcomeUnknown
+// rests on: a COMMIT whose context ended before sending is refused unsent with SafeToRetry, and
+// the server rolls back (write gone, lock released): a known outcome. A statement cut off while
+// running was sent and is not SafeToRetry, so a deadline alone is not a known outcome.
 func TestAnUnsentCommitIsSafeToRetryAndTheServerRollsBack(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

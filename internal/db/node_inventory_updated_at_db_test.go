@@ -31,38 +31,11 @@ var nodeInventoryTables = []string{
 	"node_pci_devices",
 }
 
-// TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange is the data lock for the
-// updated_at semantics on the node_* inventory tables.
-//
-// The defect it fixes: these three tables are written by exactly one statement
-// each — their collector upsert — and that upsert bumped last_seen_at but never
-// touched updated_at. Unlike nodes/vms/storage_pools they carry no
-// set_updated_at trigger, and unlike nodes/vms they have no targeted UPDATE
-// statements either, so updated_at had no writer at all. It sat at row-insert
-// time forever (observed on a live install: updated_at months behind
-// last_seen_at on every row).
-//
-// Setting it unconditionally to now() would have made it a duplicate of
-// last_seen_at, so the upsert compares the content columns and moves
-// updated_at only on a real change.
-//
-// That comparison later grew a second job: it also gates whether the row is
-// written AT ALL. Bumping last_seen_at every tick rewrote every row of static
-// hardware on every sweep, and on an NFS-backed data directory each of those
-// tuples cost a WAL flush and an fsync. The upsert now writes only on a content
-// change or an expired heartbeat. Five properties:
-//
-//  1. A re-sync that changes nothing, inside the heartbeat window, writes
-//     nothing — neither updated_at nor last_seen_at moves.
-//  2. Once the heartbeat window expires, an unchanged re-sync advances
-//     last_seen_at only, so the grace-windowed prune never deletes a live row.
-//  3. A re-sync that changes content writes immediately and moves updated_at.
-//  4. A batch repeating one conflict key does not error.
-//  5. None of these tables grows a set_updated_at trigger, which would
-//     override the CASE and make properties 1-3 unenforceable.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB).
+// The node_* inventory upserts had no writer for updated_at, and now move it only on a content
+// change, which also gates whether the row is written at all (every tick rewrote static
+// hardware, a WAL flush and fsync each on NFS). Pinned: no write inside the heartbeat; after it,
+// last_seen_at only; a change writes at once; a repeated key in a batch does not error; and no
+// set_updated_at trigger, which would override the CASE. Skipped without NEXARA_TEST_DB_URL.
 func TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

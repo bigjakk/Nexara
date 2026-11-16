@@ -7,51 +7,11 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 )
 
-// TestMigrationChain_FullUpDownUp exercises every migration's `.up.sql`
-// and `.down.sql` end-to-end against a real Postgres + TimescaleDB
-// database. The check is "does the full chain compose without errors,"
-// which is the cheapest possible smoke test for things like
-//   - a `.down.sql` that's syntactically broken or missing
-//   - a `DROP MATERIALIZED VIEW` for a TimescaleDB continuous
-//     aggregate that fails inside a transaction
-//   - a hypertable conversion whose down-side `SELECT
-//     decompress_chunk` reference goes out of sync with the up-side
-//   - a privilege/extension dependency that's only present at certain
-//     versions
-//
-// What it does NOT check: data preservation. That's the job of the
-// per-migration round-trip tests under migration_NNN_test.go (see 057
-// and 058 for the canonical shape — seed real rows, up, assert, down,
-// assert the seed survived).
-//
-// Sequence:
-//
-//  1. migrate down to 0 (clean slate). Any state left from previous test
-//     runs is rolled back. Errors here mean a previous migration's
-//     down-side is broken or the DB has hand-applied changes the chain
-//     doesn't know about.
-//  2. migrate all the way up. Asserts every .up.sql succeeds against a
-//     fresh schema.
-//  3. migrate all the way back down to 0. Asserts every .down.sql
-//     succeeds — the load-bearing assertion of this test.
-//  4. migrate all the way back up again. Catches "down accidentally
-//     drops something the up doesn't recreate" — re-running up after
-//     down should land in the exact same shape as a fresh up from 0.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set — locally use a throwaway
-// database inside the dev nexara-db container (e.g.
-// `nexara_chaintest`). The chain test takes ~10–30s on a warm
-// container; if it hangs past the harness's 120s ctx, something is
-// genuinely broken with one of the migrations.
-//
-// Phase 5.10 added this test alongside the migrationTestEnv helper.
-// At the time of authoring, the chain ran cleanly through all 58
-// migrations both directions including the four continuous-aggregate
-// tear-downs (000002 / 000006 / 000007 metric rollups + the 000010
-// DRS migration's history-table flip). If a future migration's
-// down-side gets the TimescaleDB-in-transaction interaction wrong,
-// this test will fail loudly at PR time rather than during a real
-// rollback.
+// TestMigrationChain_FullUpDownUp runs every migration down to 0, up, down to 0 and up again,
+// so a broken or missing .down.sql, a continuous aggregate dropped inside a transaction, or a
+// down that drops what the up does not recreate fails here, not in a real rollback. It does not
+// check data preservation (the migration_NNN tests do). Skipped without NEXARA_TEST_DB_URL (a
+// throwaway database); 10-30 s warm, so a hang past 120 s is a real fault.
 func TestMigrationChain_FullUpDownUp(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -92,16 +52,8 @@ func TestMigrationChain_FullUpDownUp(t *testing.T) {
 		t.Fatalf("step 4 landed at version %d, expected %d (matches step 2)", reUpVersion, upVersion)
 	}
 
-	// Final cleanup: bring the DB back down to a known clean state so
-	// the throwaway test database doesn't carry forward schema across
-	// runs. Errors here are non-fatal — the operator can recreate the
-	// throwaway DB if cleanup fails.
-	//
-	// Deliberately a defer rather than t.Cleanup: Go runs a test function's
-	// defers BEFORE its t.Cleanup callbacks, so a t.Cleanup ran only after
-	// `defer env.Cleanup()` (line ~57) had already called m.Close() — the Down
-	// then did nothing and the comment above described something that never
-	// happened. The defer registered here runs first under LIFO, while the
-	// migrate instance is still open.
+	// Bring the throwaway database back to 0, non-fatally. A defer, not t.Cleanup: cleanups run
+	// after `defer env.Cleanup()` has closed the migrate instance, so the Down did nothing; this
+	// defer runs first.
 	defer func() { _ = env.Migrate.Down() }()
 }

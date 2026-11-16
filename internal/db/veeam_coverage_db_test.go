@@ -19,20 +19,10 @@ var (
 	vcUnmapped = uuid.MustParse("9c000000-0000-4000-8000-000000000005")
 )
 
-// TestVeeamCoverageQueries locks the two properties the coverage view depends
-// on and that nothing else would catch:
-//
-//   - Per-guest AGGREGATION. A guest appears in as many backup objects as it
-//     has backups — three on the lab, across daily, weekly and offsite jobs.
-//     A query that does not fold them reports the guest three times, each with
-//     a third of its restore points and a different "latest backup", and the
-//     resulting RPO is simply wrong.
-//   - NULL handling where a guest or orphan has NO restore points. That is not
-//     an exotic case: it is what a fully pruned backup looks like, and it is
-//     the state most worth reporting. sqlc types an aggregate as NOT NULL, so
-//     a query written the obvious way scans NULL into a time.Time and 500s.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database).
+// TestVeeamCoverageQueries locks per-guest AGGREGATION (a guest is in one backup object per job;
+// unfolded, it is reported three times with a third of its points each, and a wrong RPO) and
+// NULL handling for a guest with no restore points (a fully pruned backup), which sqlc types
+// NOT NULL and the obvious query 500s on. Skipped without NEXARA_TEST_DB_URL.
 func TestVeeamCoverageQueries(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

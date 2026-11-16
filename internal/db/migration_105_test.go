@@ -20,27 +20,11 @@ var (
 	m105Revoked     = uuid.MustParse("a3050000-0000-4000-8000-000000000003")
 )
 
-// TestMigration105_AddsThePreviousTokenColumnsAndKeepsEverySession is the
-// data-preservation lock for migration 000105, which adds sessions.previous_token_hash
-// and sessions.rotated_at.
-//
-// The migration is additive and a deployed install is mid-session when it runs, so
-// what has to hold is that nobody is signed out and nothing is revoked by it:
-//
-//  1. At 104 the columns do not exist and the sessions are seeded the way the
-//     previous release wrote them — which is what makes the assertions below about
-//     an upgrade rather than about a fresh schema.
-//  2. After 105 both columns exist and are nullable, every seeded session is intact
-//     (hash, revoked flag, role) with NULL in the new columns, and the previous
-//     release's own statement shape — a rotation that names neither column — still
-//     works. The partial index exists.
-//  3. The new statements work on those rows: a live pre-upgrade session rotates and
-//     then has a previous hash; a revoked one does not rotate.
-//  4. The down migration drops the columns and the index and leaves the sessions
-//     exactly as they were, current hash included.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the live
-// nexara DB, since this round-trips the schema up and down).
+// TestMigration105_AddsThePreviousTokenColumnsAndKeepsEverySession: sessions seeded at 104 as
+// the previous release wrote them survive 105 intact with NULL in the two new nullable columns,
+// the old rotation statement still works, the partial index exists, a live session then rotates
+// (a revoked one does not), and down restores everything, current hash included. Skipped
+// without NEXARA_TEST_DB_URL (a throwaway database: this round-trips the schema).
 func TestMigration105_AddsThePreviousTokenColumnsAndKeepsEverySession(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

@@ -15,32 +15,10 @@ import (
 	"github.com/bigjakk/nexara/migrations"
 )
 
-// TestMigration058_DropArrayRoundTripsViaJoinTable is the data-preservation
-// regression lock for Phase 4.8c — the data-loss release that drops
-// cve_notification_configs.channel_ids.
-//
-// Per the stricter rollback bar set 2026-05-08, every migration that
-// moves user data ships a Go test that round-trips real seed rows. The
-// 4.8c down migration rebuilds the dropped column via array_agg over the
-// join table; if the join table held the same channels at the moment
-// 4.8c was applied (which the dual-write of 4.8a guarantees, and which
-// 4.8b's read-flip locks in), the rebuild on rollback is exact. This
-// test exercises that round-trip end-to-end.
-//
-// Sequence:
-//
-//  1. migrate up to 57 (the 4.8a state — both representations exist)
-//  2. seed config + 2 channels + populate BOTH the array and the join
-//     table with [u1, u2] (mimics what 4.8a's transactional dual-write
-//     would have produced)
-//  3. migrate up to 58 (the 4.8c state — array column dropped, join
-//     table is the only source of truth). Assert the column is gone
-//     and the join table still holds [u1, u2].
-//  4. migrate down to 57 (the rollback path). Assert the column is
-//     back AND its contents match [u1, u2] — rebuilt by the .down.sql
-//     via array_agg over the join table.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set.
+// TestMigration058_DropArrayRoundTripsViaJoinTable locks Phase 4.8c, which drops
+// cve_notification_configs.channel_ids: at 57 both forms hold [u1, u2] (4.8a's dual-write); 58
+// drops the column and the join table keeps them; down to 57 rebuilds the column exactly by
+// array_agg over the join table. Skipped without NEXARA_TEST_DB_URL.
 func TestMigration058_DropArrayRoundTripsViaJoinTable(t *testing.T) {
 	dbURL := testDBURL(t)
 

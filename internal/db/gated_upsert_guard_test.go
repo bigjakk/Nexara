@@ -9,22 +9,10 @@ import (
 	"testing"
 )
 
-// The node_* inventory upserts write a node's whole hardware table in one
-// statement and skip rows that have not changed. Three column lists have to
-// agree for that to be correct, and nothing but this test notices when they
-// drift:
-//
-//	SET col = EXCLUDED.col   — the columns the upsert writes
-//	updated_at = CASE WHEN (...) IS DISTINCT FROM (...)  — content-change clock
-//	WHERE (...) IS DISTINCT FROM (...)                   — the write gate itself
-//
-// A column added to the SET list but missed in the WHERE gate is the dangerous
-// one: the gate decides the row is unchanged, the statement writes nothing, and
-// the new value is silently never persisted. Nothing fails, no error is logged,
-// and the column just reads stale forever. It is the same shape as a guard whose
-// input cannot express disagreement — reading the query does not reveal it.
-//
-// Static analysis only: no database, so it runs in the normal `go test` pass.
+// The node_* inventory upserts skip unchanged rows, so three column lists must agree: SET
+// col = EXCLUDED.col, the updated_at CASE, and the WHERE gate. A column in SET but missed by the
+// gate is silently never persisted: the gate calls the row unchanged and nothing is written or
+// logged. Static; no database.
 var gatedUpsertQueries = []string{
 	"node_pci_devices",
 	"node_network_interfaces",

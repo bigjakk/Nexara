@@ -23,36 +23,11 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (key, scope, scope_id)
 DO UPDATE SET value = EXCLUDED.value, updated_at = now()`
 
-// TestMigration075_DedupsAndPreventsSharedScopeDuplicates is the
-// data-preservation + regression lock for migration 000075, which swaps the
-// settings uniqueness constraint from a plain `UNIQUE (key, scope, scope_id)`
-// to `UNIQUE NULLS NOT DISTINCT (...)` after deduping the rows the old form
-// allowed to accumulate.
-//
-// Under a plain UNIQUE, Postgres treats NULLs as distinct, so no two rows with
-// scope_id IS NULL ever conflict — and every shared-scope settings row is keyed
-// that way. The ON CONFLICT inference above could therefore never match one,
-// and each write APPENDED a row instead of updating. Three properties are
-// asserted end-to-end:
-//
-//  1. The defect reproduces at 74 — three shared-scope upserts of one key leave
-//     three rows. This is the "before" half of the lock; without it the "after"
-//     assertions could pass against a schema that never had the bug.
-//  2. Dedup + preservation — 075 collapses each duplicated (key, scope) group to
-//     its NEWEST row (the value the admin last saved, not the stale one an
-//     unordered LIMIT 1 tended to return), and leaves per-user rows alone.
-//  3. THE REGRESSION LOCK — after 075 the same upsert UPDATES IN PLACE, so a
-//     shared-scope key can never grow a second row again.
-//
-// The dedup partitions on (key, scope) rather than filtering to scope='global',
-// because before the scope allow-list landed a 'cluster'-scoped write also fell
-// through to scope_id = NULL; that path is covered too.
-//
-// The down migration is round-tripped: the plain UNIQUE comes back and the
-// surviving row is untouched.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB, since this round-trips the schema up and down).
+// TestMigration075_DedupsAndPreventsSharedScopeDuplicates: under a plain UNIQUE, NULL scope_ids
+// never conflict, so every shared-scope write appended a row. At 74 the defect reproduces (three
+// rows); 075 keeps each (key, scope) group's NEWEST row, per-user rows untouched, partitioned on
+// scope too (a 'cluster' write also fell through to NULL); after it the upsert updates in place.
+// Down round-trips. Skipped without NEXARA_TEST_DB_URL (a throwaway database).
 func TestMigration075_DedupsAndPreventsSharedScopeDuplicates(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -149,17 +124,10 @@ func TestMigration075_DedupsAndPreventsSharedScopeDuplicates(t *testing.T) {
 		t.Fatalf("cluster-scope duplicates at 74: got %d row(s), want 2", n)
 	}
 
-	// Per-user rows were always covered by the constraint and must survive 075
-	// untouched, which is what makes the dedup safe to run unconditionally.
-	//
-	// TWO users under one key, differing only by scope_id, is the case that
-	// actually locks the dedup's `WHERE scope_id IS NULL` guard. A lone per-user
-	// row proves nothing: it sits alone in its (key, scope) partition and gets
-	// rn = 1 whether or not the guard is there. With two, dropping the guard
-	// makes PARTITION BY (key, scope) span both users and delete the older —
-	// verified on PG16, where three users' rows collapse to one. Real installs
-	// share keys across users exactly like this (user.preferences,
-	// dashboard.layout, dashboard.presets).
+	// Per-user rows were always covered and must survive 075 untouched. TWO users under one key are
+	// what lock the dedup's `WHERE scope_id IS NULL` guard: a lone row is rn = 1 either way, while
+	// without the guard two collapse to one (verified on PG16). Real installs share keys across users
+	// like this (user.preferences, dashboard.layout, dashboard.presets).
 	perUser := []struct {
 		scopeID pgtype.UUID
 		seed    string

@@ -17,24 +17,10 @@ var (
 	inPlaceClusterID = uuid.MustParse("102a0000-0000-4000-8000-00000000000c")
 )
 
-// TestMigration102_InPlaceDefaultsPreserveDrainingBehaviour is the upgrade-safety
-// lock for migration 000102.
-//
-// The migration adds drain_guests to rolling_update_jobs and reboot_required to
-// rolling_update_nodes. Both exist to let a job upgrade a node WITHOUT emptying
-// it first — which is the only shape a single-node cluster can run, since the
-// drain fails outright when there is no other online node to migrate to.
-//
-// The defaults are the whole safety argument for shipping this as an ordinary
-// additive migration: every job that already exists, and every job created by a
-// client that does not know the field, must keep draining exactly as before. A
-// default that came out false would silently convert every scheduled rolling
-// update on every existing install into an in-place one, which would reboot
-// nodes under running guests. That is worth a test rather than a reading of the
-// DDL.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it).
-// Seeds and deletes its own rows; never migrates the schema down.
+// TestMigration102_InPlaceDefaultsPreserveDrainingBehaviour: drain_guests and reboot_required
+// allow an in-place upgrade (the only shape a single-node cluster can run). Existing jobs, and
+// jobs from clients that omit the field, must keep draining: a false default would reboot nodes
+// under running guests on every existing install. Skipped without NEXARA_TEST_DB_URL.
 func TestMigration102_InPlaceDefaultsPreserveDrainingBehaviour(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

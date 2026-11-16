@@ -26,22 +26,11 @@ var drsRuleClusterRe = regexp.MustCompile(`(?i)(?:^|[^\w.])(?:\w+\.)?cluster_id\
 // present and still not bind: `id = $1 OR cluster_id = $2`.
 var drsRuleOrRe = regexp.MustCompile(`(?i)\bor\b`)
 
-// TestDRSRuleSQL_EveryByIDStatementNamesTheCluster holds every statement that
-// addresses a drs_rules row by its id to the cluster as well.
-//
-// A rule id says nothing about which cluster the rule belongs to, and the
-// routes authorize the cluster in the PATH, so a statement keyed on the id
-// alone lets manage:drs on one cluster reach a rule on another. DeleteDRSRule
-// was exactly that. The handler test (drs_rule_scope_test.go) holds the one
-// route that exists; this holds the query file, so a route added later cannot
-// pick up an unscoped Get or Update because one is sitting there to be used.
-//
-// A by-id statement's WHERE clause must carry a `cluster_id =` predicate and
-// no OR — the shape of `WHERE id = $1 OR cluster_id = $2`, which names the
-// cluster and binds nothing. Any parameter spelling sqlc accepts counts ($N,
-// @name, sqlc.arg), as does an aliased column, and a RETURNING or ORDER BY
-// may follow. It reads the .sql sources, as the other guards in this package
-// do, so an edit to queries/drs.sql is what it sees.
+// TestDRSRuleSQL_EveryByIDStatementNamesTheCluster: routes authorize the cluster in the path, so
+// a statement keyed on a rule id alone lets manage:drs on one cluster reach another's
+// (DeleteDRSRule was). Every by-id WHERE must carry `cluster_id =` and no OR, in any parameter
+// spelling sqlc accepts, aliases allowed. It reads queries/drs.sql, so a later route cannot pick
+// up an unscoped statement.
 func TestDRSRuleSQL_EveryByIDStatementNamesTheCluster(t *testing.T) {
 	t.Parallel()
 

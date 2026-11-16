@@ -14,25 +14,11 @@ import (
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The first registration decides who is the administrator, and — since an
-// administrator's registration stopped signing the new account in — who gets a
-// session out of it. Two concurrent registrations on a fresh install must not both
-// be told they are the first. What serialises them is the advisory lock Register
-// takes before it counts the users (internal/api/handlers/auth.go); what makes the
-// count that follows the lock see the registration that held it is the isolation
-// level, and these tests run the transaction as the handler runs it against Postgres
-// to show both halves.
-//
-// Register itself cannot run here: package handlers' tests have no database, for the
-// reason internal/api/handlers/auth_refresh_race_test.go gives. So these REPLAY its
-// transaction in test code (registerFirst), and they are the proof of the Postgres
-// semantics — what the lock and the isolation level do — and not of the handler. The
-// handler's own tests pin what production Register does: that the level is asked for
-// by name (TestRegister_TheTransactionIsPinnedToReadCommitted) and that its first
-// statement is the advisory lock, before the count
-// (TestRegister_TheTransactionTakesTheAdvisoryLockBeforeItCounts). Neither half
-// substitutes for the other: a Register that dropped the lock would pass every test
-// here, and one that kept it at the wrong level would pass every test there.
+// Two concurrent first registrations must not both be told they are first (administrator, and a
+// session). Register's advisory lock serialises them, its isolation level makes the count see the
+// holder. Register cannot run here, so these REPLAY its transaction to prove the Postgres
+// semantics; the handler's tests pin that Register asks for READ COMMITTED and locks before it
+// counts. Neither substitutes for the other.
 
 // registerLockKey is handlers.firstUserAdvisoryLockKey, whose value that package's
 // TestRegister_FirstUserAdvisoryLockKeyIsStable pins.
@@ -113,21 +99,11 @@ func adminCount(t *testing.T, env *migrationTestEnv) int {
 	return n
 }
 
-// TestRegister_TwoConcurrentFirstRegistrations puts two first registrations on the
-// advisory lock in a fixed order — the first holds it with its administrator created
-// and uncommitted, the second blocks on it — and lets the first commit. The second
-// then counts, and what it reads is the point:
-//
-//   - at READ COMMITTED, the level Register asks for, its CountUsers takes a fresh
-//     snapshot after the lock was granted and sees the first administrator: it is not
-//     the first, creates nothing, and is the 403. One administrator exists, and the
-//     session the first registration is signed in with is the only one.
-//   - at REPEATABLE READ the same two transactions end with TWO administrators: the
-//     snapshot is taken by the lock request itself, before it blocks, so the count
-//     that follows reads the table as it was before the first committed. This is the
-//     failure the pin exists for, and it is shown here so that it is known, not
-//     assumed: if it ever stops failing, Postgres changed what a snapshot sees and the
-//     reasoning in Register can be revisited.
+// TestRegister_TwoConcurrentFirstRegistrations: the first holds the lock with its administrator
+// uncommitted, the second blocks, the first commits. At READ COMMITTED the second's count sees
+// it and is the 403. At REPEATABLE READ there are TWO administrators (the lock request took the
+// snapshot), shown so it is known: if that stops failing, Postgres changed and Register's
+// reasoning can be revisited.
 func TestRegister_TwoConcurrentFirstRegistrations(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -251,17 +227,10 @@ func TestRegister_TwoConcurrentFirstRegistrations(t *testing.T) {
 	})
 }
 
-// TestRegister_ManyConcurrentFirstRegistrationsMakeOneAdministrator is the same
-// guarantee without a chosen order: several registrations on a fresh install start
-// together at READ COMMITTED, and however Postgres interleaves them exactly one is
-// the first. Which one it is is not defined; that there is one is.
-//
-// Every registrant has a connection of its own, opened BEFORE the start barrier. A
-// pool opens its connections lazily, and the first registrant to get one would finish
-// its whole transaction before the others had even connected: the run would pass with
-// the lock removed (it did, twelve times in twelve). With the connections ready the
-// registrants meet at the lock, and what the test measures is the lock — removed from
-// the replay, or run at REPEATABLE READ, it fails every time.
+// TestRegister_ManyConcurrentFirstRegistrationsMakeOneAdministrator: unordered, exactly one is
+// first. Each registrant opens its connection BEFORE the start barrier: with a lazy pool the
+// first finished before the others connected and the run passed with the lock removed (twelve
+// times in twelve). Without the lock, or at REPEATABLE READ, it now fails every time.
 func TestRegister_ManyConcurrentFirstRegistrationsMakeOneAdministrator(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

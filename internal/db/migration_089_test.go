@@ -20,18 +20,10 @@ var (
 	m089Platform = uuid.MustParse("89000000-0000-4000-8000-000000000005")
 )
 
-// TestMigration089_CorrelatesBackupObjectsToGuests is the behaviour lock for
-// migration 000089 and the CorrelateVeeamBackupObjects statement it exists to
-// support.
-//
-// Correlation is the whole point of the Veeam integration: Veeam's console can
-// say "job X failed", and only Nexara can say "these guests on THIS cluster
-// have no restore point". Every property below is one that, if it broke, would
-// make that sentence a lie in a way nothing else would catch — most of them
-// silently, and in the direction of reporting a guest protected when it is not.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB).
+// TestMigration089_CorrelatesBackupObjectsToGuests locks CorrelateVeeamBackupObjects: only
+// Nexara can say which guests on THIS cluster have no restore point, and each property below,
+// broken, would make that a lie, mostly silently and towards reporting a guest protected when it
+// is not. Skipped without NEXARA_TEST_DB_URL (a throwaway database).
 func TestMigration089_CorrelatesBackupObjectsToGuests(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -349,17 +341,10 @@ var (
 	m089SecondCluster = uuid.MustParse("89000000-0000-4000-8000-000000000014")
 )
 
-// TestVeeamPlatform_AutoMapsOnDiscoveryOnly pins the two halves of the
-// single-cluster convenience: a platform maps itself the first time it is
-// seen, and a sync NEVER re-maps one an operator has deliberately unmapped.
-//
-// The second half is the load-bearing one. The mapping is what every
-// cluster-scoped Veeam permission resolves through, so unmapping is an
-// operator revoking access — and an earlier draft implemented the convenience
-// as a recurring "fill anything still NULL" sweep, which put the mapping back
-// on the next sync tick, minutes later, with nothing to show it had happened.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database).
+// TestVeeamPlatform_AutoMapsOnDiscoveryOnly: a platform maps itself when first seen, and a sync
+// NEVER re-maps one an operator unmapped: the mapping is what cluster-scoped Veeam permissions
+// resolve through, so unmapping revokes access. An earlier draft's "fill anything NULL" sweep put
+// it back within minutes, silently. Skipped without NEXARA_TEST_DB_URL.
 func TestVeeamPlatform_AutoMapsOnDiscoveryOnly(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

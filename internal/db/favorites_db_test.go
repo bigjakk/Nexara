@@ -26,25 +26,11 @@ const (
 	favVMID     = 101
 )
 
-// TestFavorites_SurviveVMRowChurn is the reason the table is keyed the way it
-// is, executed rather than reasoned about.
-//
-// The collector prunes and re-inserts a vms row whenever Proxmox transiently
-// stops listing a guest — most often during a live migration — and the
-// re-insert draws a fresh gen_random_uuid(). Migration 000068 had to unpick
-// exactly this for folder memberships, which were surrogate-keyed with an
-// ON DELETE CASCADE and silently vanished. user_favorites keys on
-// (cluster_id, vmid) with no reference to vms at all, so:
-//
-//  1. deleting the vms row must NOT delete the favorite, and
-//  2. the listing must re-resolve target_id to the NEW row id, so the sidebar
-//     link keeps working rather than 404ing.
-//
-// A test that only asserted (1) would pass against a design that stored a stale
-// target_id, which is why (2) is asserted on the actual generated query.
-//
-// Skipped unless NEXARA_TEST_DB_URL names a throwaway database (CI sets it).
-// Seeds and deletes its own rows; never migrates the schema down.
+// TestFavorites_SurviveVMRowChurn: the collector re-inserts a vms row with a fresh UUID when
+// Proxmox briefly stops listing a guest (as 000068 unpicked for folders). user_favorites keys on
+// (cluster_id, vmid) without referencing vms, so deleting the row keeps the favorite, and the
+// listing re-resolves target_id to the new row, or the sidebar link 404s. Skipped without
+// NEXARA_TEST_DB_URL.
 func TestFavorites_SurviveVMRowChurn(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

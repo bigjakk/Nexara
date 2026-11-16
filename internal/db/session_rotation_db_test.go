@@ -18,18 +18,11 @@ import (
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The SQL half of the refresh/sign-out race (migration 000105, queries/sessions.sql):
-// what RotateSessionToken and GetSessionByPreviousTokenHash do against Postgres,
-// including the interleavings of a refresh and a revoke, driven with real row
-// locks on separate connections rather than described.
-//
-// These skip without NEXARA_TEST_DB_URL, like every test here that needs a
-// database, so the Go half — how a row count becomes a 401, which statements each
-// entry point may send — is pinned without one in internal/auth/session_test.go
-// and internal/api/handlers/auth_refresh_race_test.go. They live in this package
-// because CI exports the URL for the whole of `go test ./...` and the migration
-// chain test here drops the shared database to zero: a database test in another
-// package would be pulled out from under mid-run.
+// The SQL half of the refresh/sign-out race (000105): RotateSessionToken and
+// GetSessionByPreviousTokenHash against Postgres, interleaved with real row locks on separate
+// connections; internal/auth and handlers pin the Go half without a database. In this package
+// because the chain test here drops the shared database to zero mid-run, which would pull it out
+// from under a database test in another package.
 
 // Fixed ids so a run that aborts before its purge leaves rows the next run's
 // up-front purge can find. sessions cascades from users.
@@ -106,17 +99,10 @@ func (sr *sessionRace) newSession(t *testing.T, user uuid.UUID, token string) ge
 	return sr.newSessionWithRole(t, user, token, sessionFixtureRole)
 }
 
-// newSessionWithRole is newSession with the recorded role of the caller's
-// choosing, "" included: that is what a session issued before migration 000055
-// holds.
-//
-// The session is created through the one statement that creates sessions,
-// CreateSessionAtEpoch, against the user's CURRENT epoch — what a credential check
-// that had just read the user would pass. The harness has to read it: a test that
-// ends the user's sessions through the manager bumps the epoch (every revoke-all
-// does, 000106), and a later fixture created against the epoch the user had at the
-// start would be refused, which is the very behaviour session_epoch_db_test.go
-// pins and not what these fixtures are for.
+// newSessionWithRole is newSession with a chosen role ("" is what a pre-000055 session holds),
+// created through CreateSessionAtEpoch at the user's CURRENT epoch: a revoke-all bumps it, and a
+// fixture at a stale epoch would be refused, which is session_epoch_db_test.go's subject, not
+// these fixtures'.
 func (sr *sessionRace) newSessionWithRole(t *testing.T, user uuid.UUID, token, role string) gen.Session {
 	t.Helper()
 	s, err := sr.q.CreateSessionAtEpoch(sr.ctx, gen.CreateSessionAtEpochParams{
@@ -550,23 +536,11 @@ var sessionRevokers = []revoker{
 	},
 }
 
-// TestRotateSessionToken_RevokeInterleavings puts a refresh and each way of
-// ending a session on one row in each order, against Postgres, and requires the
-// session to end revoked and the refresh to issue nothing it should not.
-//
-//	a. The refresh validated, the revoke committed, then the refresh's rotation
-//	   ran. The rotation must see the revoke: 0 rows, and nothing written. This is
-//	   the race the change exists for, and LogoutAll is one of its two revokers.
-//	b. The rotation holds the row lock in a transaction that has not committed;
-//	   the revoke arrives and waits; the rotation commits. The refresh won, and the
-//	   revoke then applies on top of the rotated row: the session ends revoked.
-//	c. The revoke holds the row lock; the rotation arrives and waits; the revoke
-//	   commits. The rotation re-evaluates its WHERE against the revoked row (this
-//	   is READ COMMITTED's re-check, and the reason the statement can be a single
-//	   conditional UPDATE): 0 rows, and nothing written.
-//
-// In b and c the blocked statement is shown to be blocked, by Postgres, before
-// the lock is released — see lockedPair.
+// TestRotateSessionToken_RevokeInterleavings: (a) revoke commits between validate and rotate,
+// so the rotation sees it: 0 rows; (b) the rotation holds the lock, the revoke waits and applies
+// on top: revoked; (c) the revoke holds it, the rotation waits and READ COMMITTED's re-check of
+// its WHERE gives 0 rows, why one conditional UPDATE suffices. Blocking is shown by Postgres
+// before release (lockedPair).
 func TestRotateSessionToken_RevokeInterleavings(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -946,18 +920,10 @@ func TestFindSessionForLogout_AgainstPostgres(t *testing.T) {
 	}
 }
 
-// TestSignOutRacingARefresh_EndToEnd walks the two scenarios the change exists
-// for through the production wrappers, against Postgres, from the session being
-// created to the state each cookie ends in.
-//
-//   - A refresh rotates, and the sign-out that was sent a moment earlier — so it
-//     still carries the OLD cookie — arrives after. It must revoke the session,
-//     and the new cookie the refresh just handed out must be dead.
-//   - A refresh validates, LogoutAll lands, then the refresh rotates. The rotation
-//     must refuse: nothing issued, and no hash written to a session that is gone.
-//
-// The session list (ListUserSessions) is the user-visible half: the first
-// scenario's failure mode was a session that kept showing as active.
+// TestSignOutRacingARefresh_EndToEnd, through the production wrappers: a sign-out carrying the
+// OLD cookie arriving after a rotation must revoke the session and kill the new cookie; LogoutAll
+// landing between validate and rotate must leave the rotation refused, issuing and writing
+// nothing. ListUserSessions is the visible half: the bug kept showing the session active.
 func TestSignOutRacingARefresh_EndToEnd(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -1050,20 +1016,10 @@ func TestSignOutRacingARefresh_EndToEnd(t *testing.T) {
 	})
 }
 
-// TestRefusalSparesCookie_AgainstPostgres runs the question Refresh asks of every
-// refusal — was this the loser of a race? — over real sessions, through the
-// production method and not just the query.
-//
-// It is true only for the token a LIVE session replaced within
-// auth.ConcurrentRefreshTolerance, and each way of being otherwise is a row: just
-// outside the tolerance, a minute ago, a revoked session (the sign-out race), an
-// expired one, a token two rotations old, the session's own current token, a
-// token nobody holds, a rotation with no timestamp. The first rows are the
-// controls for the rest: the same harness does answer true.
-//
-// The tolerance is the SHORT window, and the rows prove it is not the sign-out
-// one: a token replaced a minute ago is inside the window Logout uses and must not
-// spare a cookie.
+// TestRefusalSparesCookie_AgainstPostgres: true only for the token a LIVE session replaced within
+// auth.ConcurrentRefreshTolerance; each other case is a row (outside it, a minute ago, revoked,
+// expired, two rotations old, current, unknown, no timestamp), with the first rows as controls.
+// A minute ago is inside Logout's window and must not spare: the tolerance is the short one.
 func TestRefusalSparesCookie_AgainstPostgres(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -1161,17 +1117,10 @@ func TestRefusalSparesCookie_AgainstPostgres(t *testing.T) {
 	}
 }
 
-// TestRefusedRefreshAfterAConcurrentWinner_AgainstPostgres is the 0-row branch of
-// Refresh against real locks: the loser has VALIDATED, the winner rotates and has
-// not committed, the loser's rotation waits on the row, the winner commits, and
-// the loser's rotation comes back refused. What Refresh does next is ask whether
-// that refusal was a race — and here it was, so the cookie is spared (409). The
-// same sequence with the session revoked before the loser asks is the sign-out
-// race, and is not spared (401, cookie cleared).
-//
-// The loser's rotation is the production helper, RotateRefreshToken, and the
-// session it rotates is the one ValidateRefreshToken returned, so the
-// hash it is conditional on is the one a real refresh would carry.
+// TestRefusedRefreshAfterAConcurrentWinner_AgainstPostgres: the loser has validated, the winner
+// rotates uncommitted, the loser's rotation waits, the winner commits, the loser is refused; that
+// refusal was a race, so the cookie is spared (409). Revoked before it asks, it is the sign-out
+// race: 401, cookie cleared. Through RotateRefreshToken on ValidateRefreshToken's session.
 func TestRefusedRefreshAfterAConcurrentWinner_AgainstPostgres(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -1279,17 +1228,10 @@ func TestLookupsThatCouldNotBeMade_AgainstPostgres(t *testing.T) {
 	}
 }
 
-// TestRotateSessionToken_RecordsTheRoleOfTheRefresh pins the write nothing else
-// pins: a rotation stores the role it is GIVEN, whatever the session held.
-//
-// It matters most for the empty role. A session issued before migration 000055
-// has an empty user_role — Refresh's role-rotation guard accepts that once, "so
-// the upgrade path does not log out every existing user; it gets populated" by
-// the first rotation — and a rotation that did not write the role would leave it
-// empty for good, so the guard would stay open for that session for ever. Every
-// other fixture creates a session whose role equals the one it is rotated with,
-// which cannot tell a rotation that writes the role from one that does not.
-// A refused rotation writes nothing, the role included.
+// TestRotateSessionToken_RecordsTheRoleOfTheRefresh: a rotation stores the role it is GIVEN.
+// A pre-000055 session has an empty role, which Refresh's guard accepts once so the upgrade
+// signs nobody out; a rotation that did not write it would leave that guard open for good.
+// Other fixtures rotate with the role they hold and cannot tell. A refused rotation writes nothing.
 func TestRotateSessionToken_RecordsTheRoleOfTheRefresh(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

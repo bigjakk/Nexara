@@ -25,29 +25,11 @@ var (
 	m084DeadVMUUID = uuid.MustParse("84000000-0000-4000-8000-0000000000ff")
 )
 
-// TestMigration084_BackfillsAndResolvesGuestIdentity is the data lock for
-// migration 000084, which denormalizes the guest VMID onto audit_log.
-//
-// The defect it fixes: resource_vmid / resource_name were derived at read time
-// from `LEFT JOIN vms v ON v.id::text = a.resource_id`, and that join misses
-// whenever the guest's vms row has been churned by the collector (it is
-// deleted and re-inserted with a fresh UUID on resync), whenever the guest has
-// been destroyed, and for the handlers that record a VMID rather than a UUID
-// in resource_id. On a live install that left both fields empty on ~73% of
-// entries — including every `destroy`, which is where the record matters most.
-//
-// Four properties, end to end:
-//
-//  1. The backfill resolves each of its four arms, and leaves genuinely
-//     guest-less rows NULL rather than inventing a 0.
-//  2. The read query answers for a DESTROYED guest — the headline case, which
-//     no join against vms can ever satisfy.
-//  3. The read query answers across vms.id CHURN, via (cluster_id, vmid).
-//  4. New inserts derive vmid themselves, so app code cannot forget it, and
-//     the down migration drops the column cleanly.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB, since this round-trips the schema up and down).
+// TestMigration084_BackfillsAndResolvesGuestIdentity: resource_vmid and resource_name came from
+// a join on vms.id, which misses after collector churn, after a destroy, and for handlers that
+// record a VMID (about 73% of entries on a live install). Pinned: each backfill arm resolves and
+// guest-less rows stay NULL; the read answers for a destroyed guest and across churn; new inserts
+// derive vmid; down drops the column. Skipped without NEXARA_TEST_DB_URL (a throwaway database).
 func TestMigration084_BackfillsAndResolvesGuestIdentity(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

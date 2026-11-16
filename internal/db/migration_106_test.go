@@ -20,30 +20,11 @@ var (
 	m106Session  = uuid.MustParse("a3060100-0000-4000-8000-000000000003")
 )
 
-// TestMigration106_AddsTheAuthEpochAndKeepsEveryUserAndSession is the
-// data-preservation lock for migration 000106, which adds users.auth_epoch.
-//
-// The migration is additive and a deployed install has users and live sessions when
-// it runs, so what has to hold is that nobody is signed out, nobody is locked out,
-// and the new column starts at 0 for everyone:
-//
-//  1. At 105 the column does not exist, and the users and the session are seeded
-//     the way the previous release wrote them — which is what makes the assertions
-//     below about an upgrade rather than about a fresh schema.
-//  2. After 106 the column exists, is bigint NOT NULL with default 0, every seeded
-//     user holds 0 and keeps its other columns (the inactive one included), and the
-//     session is intact. The previous release's own statements — a user insert that
-//     names no epoch, an unconditional session insert — still apply, which is the
-//     guarantee for a rolling restart where the old binary is still serving after
-//     the schema has moved.
-//  3. The new statements work on those rows: a pre-upgrade user at epoch 0 can have
-//     a session created at 0 and is refused at 1; the bump moves it; the inactive
-//     user is refused whatever the epoch.
-//  4. The down migration drops the column and leaves every user and the session
-//     exactly as they were, and applying 106 again starts everyone at 0 once more.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the live
-// nexara DB, since this round-trips the schema up and down).
+// TestMigration106_AddsTheAuthEpochAndKeepsEveryUserAndSession: seeded at 105 as the previous
+// release wrote them, after 106 every user holds auth_epoch 0 (bigint NOT NULL default 0) with
+// everything else and the session intact, the old release's statements still apply (a rolling
+// restart), and the new ones work on those rows; down and up again restore it all. Skipped
+// without NEXARA_TEST_DB_URL (a throwaway database: this round-trips the schema).
 func TestMigration106_AddsTheAuthEpochAndKeepsEveryUserAndSession(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

@@ -15,22 +15,11 @@ import (
 // edits, and because the generated package's query strings are unexported.
 const queriesGlob = "../../queries/*.sql"
 
-// scopeClauseRe matches the exact predicate an RBAC-scoped read must carry:
-// the NULL guard followed by one or more `<col>cluster_id = ANY(<same narg>)`
-// disjuncts and nothing else inside the parens, introduced by WHERE or AND.
-//
-// Matching the whole shape rather than searching for fragments is what makes
-// this a guard. `COALESCE(cluster_id, …) = ANY(…)`, `cluster_id IS NOT DISTINCT
-// FROM ANY(…)` and an added `cluster_id IS NULL` arm all fail to match, so a
-// query "repaired" into any of them reads as unscoped and the guard fires.
-// The one-or-more repetition admits migration_jobs, which tests two columns
-// because a job straddles a source and a target cluster.
-//
-// Comparison is against a whitespace-normalized, lowercased body, so reflowing
-// or re-casing the SQL is fine; changing its structure is not. What it does NOT
-// verify is that the clause sits at the top level of the WHERE — a clause
-// nested inside an OR branch would still match. Pinning that needs a parser;
-// the DB-backed tests in scope_db_test.go are what hold the behaviour.
+// scopeClauseRe matches the whole predicate an RBAC-scoped read must carry (the NULL guard, then
+// one or more `<col>cluster_id = ANY(<same narg>)`, by WHERE or AND), so a COALESCE, IS NOT
+// DISTINCT FROM or an added IS NULL arm reads as unscoped. The repetition admits migration_jobs'
+// two columns. Compared lowercased and whitespace-normalised; it cannot see a clause nested in
+// an OR branch (scope_db_test.go holds the behaviour).
 var scopeClauseRe = regexp.MustCompile(
 	`(?:where|and) \(sqlc\.narg\('accessible_cluster_ids'\)::uuid\[\] is null` +
 		`(?: or [a-z_]*\.?[a-z_]*cluster_id = any\(sqlc\.narg\('accessible_cluster_ids'\)::uuid\[\]\))+\)`)
@@ -146,27 +135,10 @@ func TestAuditScopeSQL_EveryReadIsScopedOrExempt(t *testing.T) {
 	}
 }
 
-// TestScopeSQL_ScopedClausesExcludeNullCluster pins the property that makes
-// every scope clause correct on a NULLABLE cluster column — the way audit_log,
-// alert_rules and alert_history differ from task_history, migration_jobs and
-// the report tables, whose columns are NOT NULL.
-//
-// A NULL cluster_id marks a GLOBAL row: an audit entry for a settings change or
-// a login, an alert rule that watches every cluster, an alert fired by one.
-// Only a holder of the global view permission may read those, and each
-// handler's per-row guard says so by requiring access.HasGlobal. In SQL it
-// falls out of three-valued logic for free: `cluster_id = ANY(array)` evaluates
-// to NULL, not true, for such a row, so a scoped caller's WHERE clause drops it
-// without a predicate of its own.
-//
-// Applied to EVERY query carrying the clause, not just the audit ones: the same
-// "repair" is available in each file, and on the nullable tables it has the same
-// effect — handing every global row to every cluster-scoped user. On the NOT
-// NULL tables the check simply never has anything to complain about.
-//
-// This pins the clause's SHAPE. The tests in scope_db_test.go execute the real
-// queries against Postgres and pin the BEHAVIOUR; they need NEXARA_TEST_DB_URL,
-// which CI sets and a local run usually does not, so both exist.
+// TestScopeSQL_ScopedClausesExcludeNullCluster: on a nullable cluster column a NULL is a global
+// row only global view may read, and `cluster_id = ANY(array)` drops it by three-valued logic.
+// Applied to every query carrying the clause, since a NULL-admitting "repair" would hand every
+// global row to every scoped user. This pins the shape; scope_db_test.go pins the behaviour.
 func TestScopeSQL_ScopedClausesExcludeNullCluster(t *testing.T) {
 	t.Parallel()
 

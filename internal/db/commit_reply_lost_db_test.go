@@ -18,22 +18,11 @@ import (
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// What pgx reports for a COMMIT that the server EXECUTED and whose reply never
-// reached the client. internal/api/handlers/db_errors.go (commitOutcomeUnknown)
-// tells such a COMMIT, whose outcome is unknown, from one that was never sent and
-// so was rolled back, and it has to read a fact about the driver that nothing else
-// here would notice changing: the driver's error for a lost reply says
-// pgconn.SafeToRetry — it is a "conn closed" error, a *pgconn.connLockError — and
-// carries no context error, although the transaction committed. SafeToRetry alone
-// is therefore not proof that nothing was sent; only SafeToRetry together with the
-// context's own error is (TestAnUnsentCommitIsSafeToRetryAndTheServerRollsBack pins
-// that half). A classifier that trusted SafeToRetry alone would answer "your
-// password was NOT changed" for a change that was made.
-//
-// The lost reply is made with a TCP proxy in front of the database that forwards
-// the client's COMMIT, lets the server execute it, and closes both sockets instead
-// of forwarding the reply. It needs a database reachable over TCP without TLS; one
-// that is not skips these tests.
+// What pgx reports for a COMMIT the server executed whose reply was lost: SafeToRetry (a "conn
+// closed" connLockError) with no context error, although it committed. So SafeToRetry alone is
+// not proof nothing was sent (db_errors.go); trusting it would say "NOT changed" for a change
+// that was made. Made with a TCP proxy that forwards the COMMIT and drops the reply; skips
+// without a non-TLS database reachable over TCP.
 
 // lostReplyProxy is the proxy. Armed, it drops the reply to the next "commit"
 // query it forwards, once; everything else passes through untouched.

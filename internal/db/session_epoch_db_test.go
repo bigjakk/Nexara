@@ -20,18 +20,11 @@ import (
 	gen "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The SQL half of "no session from a credential check that a revoke-all has since
-// invalidated" (migration 000106, queries/sessions.sql CreateSessionAtEpoch,
-// auth.RevokeAllUserSessionsIn): what the conditional insert and the bump do
-// against Postgres, including every interleaving of a sign-in's insert with a
-// revoke-all, driven with real row locks on separate connections rather than
-// described. The Go half — how a refused insert becomes a 401, which statements
-// each handler sends — is pinned without a database in internal/auth and
-// internal/api/handlers.
-//
-// They skip without NEXARA_TEST_DB_URL, like every test here that needs a
-// database, and live in this package for the reason given in
-// session_rotation_db_test.go.
+// The SQL half of "no session from a credential check a revoke-all has since invalidated"
+// (000106, CreateSessionAtEpoch, auth.RevokeAllUserSessionsIn): the conditional insert and the
+// bump against Postgres, every interleaving with real row locks on separate connections; the Go
+// half is pinned without a database in internal/auth and handlers. Here for the reason
+// session_rotation_db_test.go gives.
 
 // Fixed ids so a run that aborts before its purge leaves rows the next run's
 // up-front purge can find. sessions cascades from users.
@@ -410,18 +403,10 @@ func TestBumpUserAuthEpoch(t *testing.T) {
 	}
 }
 
-// TestRevokeAllUserSessionsIn_EveryPathMovesTheEpochAndEndsTheSessions runs each
-// way the application ends a user's sessions — through the production entry points,
-// against Postgres — and requires the same three things of each: every live session
-// is revoked, the epoch has moved by exactly one, and a sign-in whose check read the
-// old epoch is refused through the manager (ErrSessionRefused) with nothing written
-// and no Redis row, while one that reads the new epoch is not (a deactivation
-// excepted: the account is no longer active).
-//
-// The three paths are the sign-out of all devices on the pool, a password change
-// (the revoke inside the transaction of the update), and a deactivation (the revoke
-// inside the transaction of the profile change). Each is the shape of its handler;
-// that the handler uses it is pinned in internal/api/handlers.
+// TestRevokeAllUserSessionsIn_EveryPathMovesTheEpochAndEndsTheSessions: sign-out of all devices,
+// a password change and a deactivation (each its handler's shape) must each revoke every live
+// session, move the epoch by exactly one, and leave a sign-in at the old epoch refused through
+// the manager with nothing written, while one at the new epoch succeeds (unless deactivated).
 func TestRevokeAllUserSessionsIn_EveryPathMovesTheEpochAndEndsTheSessions(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -564,32 +549,11 @@ func TestRevokeAllUserSessionsIn_EveryPathMovesTheEpochAndEndsTheSessions(t *tes
 	}
 }
 
-// TestSessionInsertAgainstARevokeAll puts the insert and the revoke-all on the user
-// row in each order, against Postgres, and requires every session to end in one of
-// two states: refused (nothing written), or created and revoked. A session that is
-// created and LIVE after a revoke-all that began later is the failure this whole
-// change exists to prevent.
-//
-//	a. The revoke-all committed before the insert ran. The insert reads the new
-//	   epoch: 0 rows.
-//	b. The insert holds the row lock, in a transaction that has not committed; the
-//	   revoke-all arrives and waits — its FIRST statement, the bump, is what waits;
-//	   the insert commits. The session was created, the revoke-all then lists it and
-//	   revokes it: it ends revoked, and is among the ids whose Redis rows are
-//	   deleted. (Rolled back instead, nothing was created and the revoke-all simply
-//	   goes through.)
-//	c. The revoke-all holds the row lock (its bump has run, its transaction is
-//	   open); the insert arrives and waits; the revoke-all commits. The insert
-//	   re-evaluates its conditions against the row the revoke-all wrote — READ
-//	   COMMITTED's re-check — and finds a different epoch: 0 rows. Rolled back
-//	   instead, the epoch is unchanged and the insert goes ahead: nothing was
-//	   revoked, so nothing is refused.
-//	d. The same as c with the user DEACTIVATED, in a transaction with the revoke-all
-//	   and — separately — with no revoke-all at all, which leaves the epoch alone and
-//	   so shows that is_active refuses by itself.
-//
-// In b, c and d the second statement is shown to be blocked, by Postgres, before
-// the lock is released — see epochPair.
+// TestSessionInsertAgainstARevokeAll: every session must end refused or created-and-revoked,
+// never LIVE after a later revoke-all. (a) revoke-all first: 0 rows. (b) the insert holds the
+// lock, the bump waits; the session is listed and revoked. (c) the revoke-all holds it; the
+// insert's READ COMMITTED re-check sees the new epoch: 0 rows (rolled back, it proceeds). (d) c
+// deactivated, and with no revoke-all: is_active refuses alone. Blocking shown via epochPair.
 func TestSessionInsertAgainstARevokeAll(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -789,23 +753,10 @@ func TestSessionInsertAgainstARevokeAll(t *testing.T) {
 	})
 }
 
-// TestRevokeAll_TheWrongShapesLeaveASessionLive is the negative control for the
-// interleavings above, and the reason RevokeAllUserSessionsIn is three statements in
-// the order it is. It runs the two tempting alternatives against the very
-// interleaving b — an insert in progress when the revoke-all arrives — and shows
-// that each leaves the session LIVE, which is the state every test above forbids:
-//
-//   - one statement, a data-modifying CTE that bumps the epoch and revokes the
-//     sessions: it takes ONE snapshot when it starts, so a session the insert
-//     commits while the statement waits for the row lock is invisible to its UPDATE
-//     of sessions;
-//   - revoke first, bump afterwards: the revoke runs and finishes while the insert
-//     is open, and the bump that follows waits — the session was committed after
-//     the revoke had looked.
-//
-// If Postgres ever changed so that either of these held, these would fail and the
-// three-statement shape could be revisited; until then they are what shows that the
-// tests above can fail, and for the reason the code comment gives.
+// TestRevokeAll_TheWrongShapesLeaveASessionLive: the negative control for interleaving b. One
+// statement (a CTE bumping and revoking) takes one snapshot before the insert commits; revoke
+// then bump lets the session commit after the revoke looked. Both leave it LIVE, which is why
+// RevokeAllUserSessionsIn is three statements in its order; if this stops failing, revisit that.
 func TestRevokeAll_TheWrongShapesLeaveASessionLive(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -865,25 +816,11 @@ func TestRevokeAll_TheWrongShapesLeaveASessionLive(t *testing.T) {
 	}
 }
 
-// TestRevokeAllUserSessions_OverlappingRevokeAllsDoNotDeadlock drives the statement
-// that ends a user's sessions against ITSELF, the way two sign-outs of all devices
-// overlap on the pool (each is three separate statements there, not one transaction):
-// several workers revoke the same user's sessions again and again, half of them
-// already revoked.
-//
-// The statement used to rewrite every session row of the user, revoked ones included,
-// on every call. Each rewrite moves the rows to new places in the table, so two
-// overlapping statements met each other's rows in different orders, waited on each
-// other's row locks and deadlocked (SQLSTATE 40P01, found by the server after its
-// deadlock_timeout), the loser's sign-out failing for nothing. Writing only the rows
-// that are still live gives the second statement nothing left to rewrite once the first
-// has committed, and no cycle can form.
-//
-// The count is of deadlocks and of any other error: with the predicate there are none,
-// and the run is fast, because after the first pass every statement matches no row.
-// Without it the same workload deadlocks repeatedly (a quarter to a third of the
-// statements in the runs that calibrated these numbers) and each deadlock costs the
-// server's deadlock_timeout, so the failure is both loud and slow.
+// TestRevokeAllUserSessions_OverlappingRevokeAllsDoNotDeadlock: overlapping sign-outs of all
+// devices once deadlocked (40P01) because the statement rewrote revoked rows too (see
+// queries/sessions.sql). Workers revoke the same user's sessions repeatedly, half already
+// revoked; any deadlock or error fails. Without the predicate a quarter to a third deadlocked,
+// each costing deadlock_timeout, so the failure is loud and slow.
 func TestRevokeAllUserSessions_OverlappingRevokeAllsDoNotDeadlock(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -1004,22 +941,11 @@ func (sh revokeShape) run(env *migrationTestEnv, q *gen.Queries, iso pgx.TxIsoLe
 	return ids, nil
 }
 
-// TestRevokeAllTransactions_AgainstASignInInProgress puts each production revoke-all
-// transaction on the user row with a sign-in's insert in progress, in both orders, and
-// requires the same two outcomes as the interleavings at the bump: created and
-// revoked, or refused.
-//
-//	insert first: the insert holds the row lock (FOR SHARE, uncommitted) and the
-//	  transaction's FIRST statement — the password write or the inactive flag — blocks
-//	  on it; the insert commits; the transaction runs to its end, and its listing, taken
-//	  after that commit, finds the session and the revoke ends it.
-//	transaction first: the transaction has run its first statement and the revoke-all
-//	  (the row lock is held until it commits); the insert blocks, and after the commit
-//	  re-evaluates against the new epoch and is refused.
-//
-// The transaction is begun READ COMMITTED, as the deactivation handler begins its own
-// (it names the level; the password change will be pinned the same way when it is
-// reworked). TestRevokeAll_UnderRepeatableReadALateInsertSurvives is why that matters.
+// TestRevokeAllTransactions_AgainstASignInInProgress: each production revoke-all transaction
+// against an in-progress insert, both orders, must end created-and-revoked (the transaction's
+// first statement waits on the FOR SHARE, so its later listing sees the session) or refused (the
+// insert waits and re-checks the new epoch). At READ COMMITTED, as the deactivation names it;
+// TestRevokeAll_UnderRepeatableReadALateInsertSurvives is why.
 func TestRevokeAllTransactions_AgainstASignInInProgress(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -1079,18 +1005,10 @@ func TestRevokeAllTransactions_AgainstASignInInProgress(t *testing.T) {
 	}
 }
 
-// TestRevokeAll_UnderRepeatableReadALateInsertSurvives is the negative control for the
-// isolation level, and the reason the deactivation transaction names READ COMMITTED
-// instead of trusting the server's default. The same interleaving as above — a
-// sign-in's insert in progress when the transaction starts, committing while it waits —
-// run at REPEATABLE READ leaves the session LIVE: the transaction's snapshot is taken
-// by its first statement, which is before the insert committed, so the listing finds
-// nothing and the revoke does not see the row. The bump has done its part (the epoch
-// moved), but the session that committed through the gap is not ended.
-//
-// If this ever stops failing — the statement errors, or Postgres changes what a
-// snapshot sees — the dependence on READ COMMITTED is gone and the reasoning in
-// RevokeAllUserSessionsIn and CreateSessionAtEpoch can be revisited.
+// TestRevokeAll_UnderRepeatableReadALateInsertSurvives: the same interleaving at REPEATABLE READ
+// leaves the session LIVE, since the first statement's snapshot predates the insert's commit, so
+// the listing misses it. It is why the deactivation names READ COMMITTED; if it stops failing,
+// the reasoning in RevokeAllUserSessionsIn and CreateSessionAtEpoch can be revisited.
 func TestRevokeAll_UnderRepeatableReadALateInsertSurvives(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()

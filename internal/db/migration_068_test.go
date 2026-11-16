@@ -15,26 +15,10 @@ import (
 	"github.com/bigjakk/nexara/migrations"
 )
 
-// TestMigration068_RekeyPreservesAndDecouplesMembership is the data-preservation
-// + regression lock for migration 000068, which re-keys vm_folder_memberships
-// from the ephemeral surrogate vms.id to the stable Proxmox identity
-// (cluster_id, vmid) and removes the ON DELETE CASCADE to vms.
-//
-// Two properties must hold and are both asserted end-to-end:
-//
-//  1. Preservation — an existing assignment seeded under the old surrogate key
-//     survives the up migration, re-keyed to (cluster_id, vmid).
-//  2. Decoupling (the actual bug fix) — once re-keyed, deleting and re-inserting
-//     the vms row (exactly what the collector's stale prune did during a live
-//     migration's cutover window, minting a fresh vms.id) no longer drops the
-//     membership. Under the old schema the vm_id ON DELETE CASCADE nuked it and
-//     the guest silently fell back to "Discovered"; now it must stay put.
-//
-// The down migration is also round-tripped: vm_id is restored and re-derived
-// from the current vms row, so a rollback loses no assignments.
-//
-// Skipped unless NEXARA_TEST_DB_URL is set (a throwaway database — never the
-// live nexara DB, since this round-trips the schema up and down).
+// TestMigration068_RekeyPreservesAndDecouplesMembership: an assignment under the old vms.id key
+// survives the re-key to (cluster_id, vmid), and deleting and re-inserting the vms row (the
+// collector's prune during a migration's cutover) no longer drops it, as the old ON DELETE
+// CASCADE did. Down restores vm_id from the current row. Skipped without NEXARA_TEST_DB_URL.
 func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
 	dbURL := testDBURL(t)
 
@@ -67,18 +51,10 @@ func TestMigration068_RekeyPreservesAndDecouplesMembership(t *testing.T) {
 	folderID := uuid.MustParse("68000000-0000-4000-8000-0000000000f0")
 	const vmid = 100
 
-	// Deleting the cluster cascades nodes, vms, folders and memberships in both
-	// the 67 and 68 schema shapes, so cleanup is version-agnostic.
-	//
-	// Deliberately a defer rather than t.Cleanup: t.Cleanup runs AFTER the test
-	// function's defers, by which point the `defer pool.Close()` and `defer
-	// cancel()` above have already fired, so the deletes would run against a
-	// closed pool and a cancelled context — and their errors are discarded, so
-	// nothing would surface. Registering the defer here, after those, makes it
-	// run first (LIFO), while the pool is still open. It carries its own context
-	// so it stays correct if the ordering ever shifts. The up-front call clears
-	// rows left by a run that aborted before its defers. Same shape as
-	// migration_075_test.go.
+	// Deleting the cluster cascades everything in both the 67 and 68 shapes. A defer, not
+	// t.Cleanup: cleanups run after the defers above have closed the pool and cancelled the context,
+	// and their errors are discarded, so nothing would surface. The up-front call clears rows an
+	// aborted run left. Same shape as migration_075_test.go.
 	purge := func() {
 		pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer pcancel()
