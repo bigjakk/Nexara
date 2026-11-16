@@ -310,6 +310,25 @@ func (s *Server) setupMiddleware() {
 		},
 	}))
 
+	// Sign-out limiter — 60/min/IP, a bucket of its own. Logout is public (the
+	// refresh cookie is its credential), reads a body and makes a session lookup
+	// before anything is authenticated, and the general limiter skips the auth
+	// subtree, so it had no cap at all. It is not in the Auth bucket on purpose:
+	// that one is shared with login and anyone can drain it, and a sign-out must
+	// not be refused because a stranger sent fifteen logins. An honest client
+	// signs out once per session, far under the cap even for a few dozen people
+	// behind one address.
+	s.app.Use(limiter.New(limiter.Config{
+		Max:        logoutRateLimit,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() + ":logout"
+		},
+		Next: func(c fiber.Ctx) bool {
+			return limiterPath(c) != logoutLimitedPath
+		},
+	}))
+
 	// Snapshot-resync limiter — each call makes one Proxmox listing plus one
 	// DB write per snapshot, and the endpoint is view-gated, so without a
 	// dedicated cap a read-only account could pin both the DB and PVE well
@@ -1151,6 +1170,10 @@ const (
 
 	// wsTokenLimitedPath is capped separately, at 60/min/IP.
 	wsTokenLimitedPath = "/api/v1/auth/ws-token"
+
+	// logoutLimitedPath is capped separately, at logoutRateLimit a minute per IP.
+	logoutLimitedPath = "/api/v1/auth/logout"
+	logoutRateLimit   = 60
 )
 
 // routerFold lower-cases path the way Fiber's router does for its detection path

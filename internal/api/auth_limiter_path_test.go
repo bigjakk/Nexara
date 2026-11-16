@@ -71,3 +71,31 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 		})
 	}
 }
+
+// TestLogout_HasABudgetOfItsOwn: sign-out had no cap at all (the general limiter
+// skips the auth subtree). It gets one per address, and it is NOT the Auth bucket:
+// an address that has spent that on logins must still be able to sign out.
+func TestLogout_HasABudgetOfItsOwn(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t)
+	post := func(path string) int {
+		t.Helper()
+		resp, err := s.app.Test(httptest.NewRequest(http.MethodPost, path, nil))
+		if err != nil {
+			t.Fatalf("Test: %v", err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for range 20 {
+		post("/api/v1/auth/login")
+	}
+	for i := 1; i <= logoutRateLimit; i++ {
+		if code := post("/api/v1/auth/logout"); code == fiber.StatusTooManyRequests {
+			t.Fatalf("sign-out %d of %d answered 429 after the Auth bucket was spent", i, logoutRateLimit)
+		}
+	}
+	if code := post("/api/v1/auth/logout"); code != fiber.StatusTooManyRequests {
+		t.Errorf("sign-out %d = %d, want 429: the cap does not hold", logoutRateLimit+1, code)
+	}
+}

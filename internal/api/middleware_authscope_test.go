@@ -81,7 +81,7 @@ func TestCompressionExclusion_TracksTheRefreshCookiePath(t *testing.T) {
 // that were never meant to be.
 func TestRateLimitedAuthPaths_LieUnderTheCookieScope(t *testing.T) {
 	paths := make([]string, 0, 2+len(authLimitedPaths))
-	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath)
+	paths = append(paths, refreshLimitedPath, wsTokenLimitedPath, logoutLimitedPath)
 	for p := range authLimitedPaths {
 		paths = append(paths, p)
 	}
