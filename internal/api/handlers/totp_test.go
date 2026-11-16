@@ -17,6 +17,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/auth"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // totpTestKey is a valid 64-hex (32-byte) AES key shared with the auth tests.
@@ -483,5 +484,47 @@ func TestTOTP_VerifyLogin_ARightCodeClearsAndTheLastWrongOneLocks(t *testing.T) 
 	}
 	if a.redis.Exists("totp:pending:" + token) {
 		t.Error("the pending token survived the lock")
+	}
+}
+
+// TestTOTP_VerifyLogin_RecoveryCodesHaveABudgetOfTheirOwn: at the sign-in step, a lock
+// armed by wrong authenticator codes leaves a recovery code usable, and one armed by wrong
+// recovery codes leaves an authenticator code usable. Someone holding only the password
+// must not be able to shut the owner's way back in by spending the codes' budget.
+func TestTOTP_VerifyLogin_RecoveryCodesHaveABudgetOfTheirOwn(t *testing.T) {
+	t.Parallel()
+	for _, lockWith := range []string{"code", "recovery_code"} {
+		t.Run("locked by wrong "+lockWith+"s", func(t *testing.T) {
+			t.Parallel()
+			user, plain := epochTOTPUser(t, epochLoginEmail, 0)
+			store := newEpochStore(user)
+			recoveryPlain, hashes, err := auth.NewTOTPService(totpTestKey).GenerateRecoveryCodes(1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store.recoveryCodes[user.ID] = []db.ListRecoveryCodesRow{{ID: uuid.New(), CodeHash: hashes[0]}}
+			a := newEpochApp(t, store, epochOptions{totp: true})
+
+			wrong, threshold := epochWrongCode(t, plain), totpLockoutThreshold
+			if lockWith == "recovery_code" {
+				wrong, threshold = "WRNG-CODE", totpRecoveryLockoutThreshold
+			}
+			token := epochFirstStep(t, a, epochLoginEmail)
+			status := 0
+			for range threshold {
+				status = a.post(t, "/auth/totp/verify-login", `{"totp_pending_token":"`+token+`","`+lockWith+`":"`+wrong+`"}`).StatusCode
+			}
+			if status != http.StatusTooManyRequests {
+				t.Fatalf("the last wrong %s = %d, want the 429 of the lock it arms", lockWith, status)
+			}
+
+			body := `{"totp_pending_token":"` + epochFirstStep(t, a, epochLoginEmail) + `","recovery_code":"` + recoveryPlain[0] + `"}`
+			if lockWith == "recovery_code" {
+				body = epochVerifyBody(t, epochFirstStep(t, a, epochLoginEmail), plain)
+			}
+			if resp := a.post(t, "/auth/totp/verify-login", body); resp.StatusCode != http.StatusOK {
+				t.Errorf("the other kind of code after the lock = %d, want 200: one lock shut both ways in", resp.StatusCode)
+			}
+		})
 	}
 }

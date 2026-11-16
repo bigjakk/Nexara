@@ -104,7 +104,8 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Path:   totpScope + "/verify-login",
 		Description: "Complete a two-step login with a TOTP code or a recovery code. The pending token " +
 			"comes from the login response; it survives a typo but self-destructs after five attempts, " +
-			"and a per-user cooldown catches an attacker cycling fresh tokens. The session is created " +
+			"and a per-user cooldown catches an attacker cycling fresh tokens: one for authenticator codes " +
+			"and one for recovery codes, so a lock on one leaves the other usable. The session is created " +
 			"against the state of the account the password step saw: if its sessions were ended in " +
 			"between (a password change, a sign-out of all devices, a deactivation and reactivation) the " +
 			"token is refused before the code is looked at, as an expired token (401), spending no " +
