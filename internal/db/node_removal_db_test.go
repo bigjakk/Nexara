@@ -24,7 +24,7 @@ var (
 )
 
 // TestDeleteClusterNodes_KeepsHistory protects the collector's node removal
-// (migration 000149 + DeleteClusterNodes): removing a node row takes its guest
+// (migration 000148 + DeleteClusterNodes): removing a node row takes its guest
 // rows and nothing that is history — CVE scans, alert rules and the alerts they
 // raised, maintenance windows — and never the cluster's last row. A node rule
 // with no cluster_id gets its node's, so deleting the cluster still removes it.
@@ -45,15 +45,15 @@ func TestDeleteClusterNodes_KeepsHistory(t *testing.T) {
 	purge()
 	defer purge()
 
-	// Seed below 000149, where the rule's NULL cluster_id is the one to fill.
+	// Seed below 000148, where the rule's NULL cluster_id is the one to fill.
 	src, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		t.Fatalf("iofs: %v", err)
 	}
 	defer func() { _ = src.Close() }()
-	prev, err := src.Prev(149)
+	prev, err := src.Prev(148)
 	if err != nil {
-		t.Fatalf("the migration before 000149: %v", err)
+		t.Fatalf("the migration before 000148: %v", err)
 	}
 	if err := m.Migrate(prev); err != nil {
 		t.Fatalf("migrate to %d: %v", prev, err)

@@ -107,7 +107,7 @@ func planNodeRemovals(rows []db.Node, listed []proxmox.NodeListEntry, status []p
 // change. The node's guest rows go with it (vms ON DELETE CASCADE): Proxmox
 // lists them on a node that is not a member, which nothing can reach, and they
 // come back by the normal path once their configs are on a member. History,
-// audit and task rows keep theirs (migrations/000149).
+// audit and task rows keep theirs (migrations/000148).
 func (s *Syncer) pruneRemovedNodes(ctx context.Context, cluster db.Cluster, listed []proxmox.NodeListEntry,
 	status []proxmox.ClusterStatusEntry, statusErr error) bool {
 	prev, _ := s.nodeAbsent.Load(cluster.ID)
