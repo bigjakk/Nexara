@@ -316,7 +316,10 @@ const bodyReadTimeout = 5 * time.Minute
 // and return the first entry that is NOT itself a trusted proxy, so a client can't
 // prepend a spoofed IP to land in an oddly-keyed bucket — everything it controls sits
 // left of the real hop and is skipped. (Fiber v3.5 changed this: it used to return the
-// left-most valid IP, which the client could forge.)
+// left-most valid IP, which the client could forge.) Since Fiber v3.7 (req.go,
+// extractIPFromHeader) an entry that is not a bare IP — "ip:port", "[v6]:port",
+// "unknown" — ends that walk: c.IP() is then the leftmost trusted address seen, or
+// the remote (the proxy) itself, where v3.6 skipped the entry and read on leftwards.
 //
 // Fiber v3 rename: EnableTrustedProxyCheck → TrustProxy, and the TrustedProxies list
 // moved into TrustProxyConfig.Proxies. The TrustProxyConfig.{Loopback,LinkLocal,

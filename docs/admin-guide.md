@@ -2294,7 +2294,7 @@ Navigate to **Admin > Branding**.
 Two environment variables matter for any production deployment — see the [Installation Guide](installation.md#configuration-reference) for the full reference:
 
 - **`WS_ALLOWED_ORIGINS`** — exact-match allow-list of `Origin` values accepted on WebSocket upgrades (`/ws`, `/ws/console`, `/ws/vnc`). Set it to your public origin (e.g. `https://nexara.example.com`) so a malicious page on another domain can't open a WebSocket through a logged-in user's browser. Empty or `*` accepts any origin — fine for labs, and warned about at startup.
-- **`TRUSTED_PROXIES`** — when Nexara sits behind nginx/Traefik/Caddy, set this to the proxy's IP or CIDR so the per-IP rate limiters key on the real client address instead of the proxy's. Without it, all proxied traffic shares one rate-limit bucket. Pair with `PROXY_HEADER` if your proxy uses a non-standard header.
+- **`TRUSTED_PROXIES`** — when Nexara sits behind nginx/Traefik/Caddy, set this to the proxy's IP or CIDR so the per-IP rate limiters key on the real client address instead of the proxy's. Without it, all proxied traffic shares one rate-limit bucket. The proxy must append the client's bare IP address to the header, as nginx, Traefik and Caddy do. If it appends anything else, such as an address with a port or `unknown`, every client is counted as the proxy: they share one rate-limit bucket, and the request log and audit show the proxy's address. Pair with `PROXY_HEADER` if your proxy uses a non-standard header.
 
 Also consider `SECURE_COOKIES=always` behind a TLS-terminating proxy, and `HSTS_MAX_AGE` for HTTPS-only deployments with a trusted certificate.
 
