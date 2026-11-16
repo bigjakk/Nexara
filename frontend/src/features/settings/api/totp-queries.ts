@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   TOTPSetupResponse,
   TOTPConfirmResponse,
@@ -17,8 +18,11 @@ export function useTOTPStatus() {
 
 /**
  * Begins the setup, which the server hands out only to the account's owner: an
- * account that signs in with a Nexara password sends the current one, and an
- * LDAP or single sign-on account sends none (it needs a recent sign-in instead).
+ * account that signs in with a Nexara password sends the current one, an LDAP
+ * account its directory password, and a single sign-on account none (it has
+ * confirmed with its identity provider first: useTOTPSSOStepUp). Its only
+ * caller, SecurityPage, shows a failure in its dialog and settles it through
+ * useSaveOutcome, so the global toast stays out of it.
  */
 export function useTOTPSetup() {
   return useMutation({
@@ -28,6 +32,23 @@ export function useTOTPSetup() {
     // mutation as soon as nothing observes it, and the dialog resets it when
     // it closes (SecurityPage), so the password goes when the dialog does.
     gcTime: 0,
+    ...errorsHandledLocally,
+  });
+}
+
+/**
+ * Starts a single sign-on account's confirmation at its identity provider,
+ * which the setup needs: the answer is the URL to send the browser to, and the
+ * provider sends it back to the Security page. Settled like useTOTPSetup.
+ */
+export function useTOTPSSOStepUp() {
+  return useMutation({
+    mutationFn: () =>
+      apiClient.post<{ redirect_url: string }>(
+        apiPath`/api/v1/auth/totp/setup/sso-step-up`,
+        {},
+      ),
+    ...errorsHandledLocally,
   });
 }
 

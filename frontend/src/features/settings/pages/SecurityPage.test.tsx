@@ -17,7 +17,7 @@ const mockedPost = vi.mocked(apiClient.post);
 const SETUP = "/api/v1/auth/totp/setup";
 
 /** The page's reads, for an account that signs in as authSource says. */
-function serve(authSource: "local" | "ldap") {
+function serve(authSource: "local" | "ldap" | "oidc") {
   mockedGet.mockImplementation((path) =>
     Promise.resolve(
       String(path) === "/api/v1/auth/me"
@@ -39,9 +39,10 @@ function serve(authSource: "local" | "ldap") {
 const secret = { secret: "JBSWY3DPEHPK3PXP", otpauth_url: "otpauth://totp/x" };
 
 // Enable 2FA asks the owner to prove it is them before the secret is shown:
-// the current password for an account that has one, which a wrong one leaves the
-// dialog open to retry, and nothing for an LDAP or SSO account, which the server
-// holds to a recent sign-in instead.
+// the current password for a local account, which a wrong one leaves the dialog
+// open to retry, the directory password
+// for an LDAP account, and for an SSO account a round trip through its identity
+// provider, after which the setup continues by itself.
 describe("SecurityPage: beginning a 2FA setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -131,21 +132,71 @@ describe("SecurityPage: beginning a 2FA setup", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("asks an LDAP or SSO account for no password", async () => {
+  it("asks an LDAP account for its directory password", async () => {
     serve("ldap");
     mockedPost.mockResolvedValueOnce(secret);
     const user = userEvent.setup({ delay: null });
     renderWithProviders(<SecurityPage />);
 
     await user.click(await screen.findByRole("button", { name: "Enable 2FA" }));
-    expect(
-      await screen.findByText(/sign-in from the last 10 minutes/),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+    await user.type(
+      await screen.findByLabelText("Directory password"),
+      "directory-password",
+    );
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(
       await screen.findByText(/Step 1: Scan the QR code/),
     ).toBeInTheDocument();
-    expect(mockedPost).toHaveBeenCalledWith(SETUP, {});
+    expect(mockedPost).toHaveBeenCalledWith(SETUP, {
+      current_password: "directory-password",
+    });
   });
+
+  it("sends an SSO account to its identity provider", async () => {
+    serve("oidc");
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    mockedPost.mockResolvedValueOnce({
+      redirect_url: "https://idp.example.com/auth",
+    });
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<SecurityPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Enable 2FA" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Confirm with your identity provider",
+      }),
+    );
+    expect(mockedPost).toHaveBeenCalledWith(
+      "/api/v1/auth/totp/setup/sso-step-up",
+      {},
+    );
+    await vi.waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("https://idp.example.com/auth");
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["confirmed", "?sso_step_up=confirmed", /Step 1: Scan the QR code/, 1],
+    [
+      "refused",
+      "?sso_step_up_error=Nothing%20was%20confirmed.",
+      /Nothing was confirmed\./,
+      0,
+    ],
+  ])(
+    "picks the setup up where it was when the provider has %s",
+    async (_, query, shown, setups) => {
+      serve("oidc");
+      mockedPost.mockResolvedValueOnce(secret);
+      renderWithProviders(<SecurityPage />, {
+        router: { initialEntries: ["/settings/security" + query] },
+      });
+
+      expect(await screen.findByText(shown)).toBeInTheDocument();
+      expect(mockedPost).toHaveBeenCalledTimes(setups);
+    },
+  );
 });

@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { Copy, Download, Loader2, RefreshCw } from "lucide-react";
 
@@ -18,11 +20,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiClientError } from "@/lib/api-client";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ActiveSessionsCard } from "../components/ActiveSessionsCard";
 import { useProfile } from "../api/profile-queries";
 import {
   useTOTPStatus,
   useTOTPSetup,
+  useTOTPSSOStepUp,
   useTOTPConfirm,
   useTOTPDisable,
   useRegenerateRecoveryCodes,
@@ -31,14 +35,18 @@ import {
 type SetupStep = "idle" | "qr" | "verify" | "recovery";
 
 export function SecurityPage() {
+  const { t } = useTranslation("settings");
   const { data: status, isLoading: statusLoading } = useTOTPStatus();
-  // An account with no Nexara password (LDAP, single sign-on) has none to
-  // confirm: the server asks it for a recent sign-in instead. Undecided until
-  // the profile has loaded, so nobody is asked for a password they do not have.
+  // How the account proves it is the owner before the secret is shown: its
+  // Nexara password (local), its directory password (LDAP), or a fresh sign-in
+  // at its identity provider (single sign-on). Undecided until the profile has
+  // loaded, so nobody is asked for a password they do not have.
   const { data: profile, isError: profileFailed } = useProfile();
+  const source = profile?.auth_source;
   const hasPassword =
-    profile === undefined ? undefined : profile.auth_source === "local";
+    source === undefined ? undefined : source === "local" || source === "ldap";
   const setupMutation = useTOTPSetup();
+  const stepUpMutation = useTOTPSSOStepUp();
   const confirmMutation = useTOTPConfirm();
   const disableMutation = useTOTPDisable();
   const regenMutation = useRegenerateRecoveryCodes();
@@ -50,13 +58,29 @@ export function SecurityPage() {
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [error, setError] = useState("");
 
-  // Enable 2FA first proves it is the owner, in a dialog of its own. Each close
-  // moves setupAttempt on, so an answer that lands after the dialog was closed
-  // is dropped instead of opening the QR step or an error nobody asked for.
+  // Enable 2FA first proves it is the owner, in a dialog of its own. Its saves
+  // are settled against the dialog (useSaveOutcome), so an answer that lands
+  // after it was closed opens neither the QR step nor an error in it.
   const [setupDialogOpen, setSetupDialogOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [setupError, setSetupError] = useState("");
-  const setupAttempt = useRef(0);
+  const settleSetup = useSaveOutcome(setupDialogOpen);
+
+  // Back from the identity provider: the callback says whether it confirmed
+  // the sign-in. Confirmed, the setup continues in the dialog by itself (the
+  // effect below, once the dialog is on screen); refused, the dialog opens on
+  // the reason. The query is dropped either way, so a reload does neither.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const stepUpConfirmed = searchParams.get("sso_step_up") === "confirmed";
+  const stepUpError = searchParams.get("sso_step_up_error");
+  const [continueAfterStepUp, setContinueAfterStepUp] = useState(false);
+  useEffect(() => {
+    if (!stepUpConfirmed && stepUpError === null) return;
+    setSearchParams({}, { replace: true });
+    setSetupError(stepUpError ?? "");
+    setContinueAfterStepUp(stepUpConfirmed);
+    setSetupDialogOpen(true);
+  }, [stepUpConfirmed, stepUpError, setSearchParams]);
 
   const [disableDialogOpen, setDisableDialogOpen] = useState(false);
   // Where focus goes when Disable 2FA closes: the section, whose Disable 2FA
@@ -70,34 +94,63 @@ export function SecurityPage() {
   // The password is kept only while the dialog is open: here, and in the
   // mutation's variables, which reset() drops.
   const closeSetupDialog = () => {
-    setupAttempt.current++;
     setSetupDialogOpen(false);
     setCurrentPassword("");
     setSetupError("");
+    setContinueAfterStepUp(false);
     setupMutation.reset();
+    stepUpMutation.reset();
   };
 
-  const handleStartSetup = async () => {
-    setSetupError("");
-    const attempt = setupAttempt.current;
-    try {
-      const res = await setupMutation.mutateAsync(
-        hasPassword ? { current_password: currentPassword } : {},
-      );
-      if (attempt !== setupAttempt.current) return;
-      setOtpauthUrl(res.otpauth_url);
-      setManualSecret(res.secret);
-      closeSetupDialog();
-      setSetupStep("qr");
-    } catch (err) {
-      if (attempt !== setupAttempt.current) return;
-      if (err instanceof ApiClientError) {
-        setSetupError(err.body.message);
-      } else {
-        setSetupError("Failed to start setup");
-      }
-    }
+  const showSetupError = (err: unknown, fallback: string) => {
+    setSetupError(err instanceof ApiClientError ? err.body.message : fallback);
   };
+
+  const handleStartSetup = () => {
+    setSetupError("");
+    settleSetup(
+      setupMutation.mutateAsync(
+        hasPassword ? { current_password: currentPassword } : {},
+      ),
+      {
+        action: t("setupAction"),
+        onSuccess: (res) => {
+          setOtpauthUrl(res.otpauth_url);
+          setManualSecret(res.secret);
+          closeSetupDialog();
+          setSetupStep("qr");
+        },
+        onError: (err) => {
+          showSetupError(err, "Failed to start setup");
+        },
+      },
+    );
+  };
+
+  // A single sign-on account leaves for its identity provider, which sends it
+  // back here (the effect above).
+  const handleStartStepUp = () => {
+    setSetupError("");
+    settleSetup(stepUpMutation.mutateAsync(), {
+      action: t("setupAction"),
+      onSuccess: (res) => {
+        window.location.assign(res.redirect_url);
+      },
+      onError: (err) => {
+        showSetupError(err, t("setupSSOStartFailed"));
+      },
+    });
+  };
+
+  // The setup that continues once the identity provider has confirmed, sent
+  // after the dialog is on screen so that useSaveOutcome counts it as its own.
+  useEffect(() => {
+    if (!continueAfterStepUp || !setupDialogOpen) return;
+    setContinueAfterStepUp(false);
+    handleStartSetup();
+    // handleStartSetup is a new function every render; this runs once per return.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [continueAfterStepUp, setupDialogOpen]);
 
   const handleVerify = async () => {
     setError("");
@@ -404,18 +457,26 @@ export function SecurityPage() {
           <DialogHeader>
             <DialogTitle>Enable two-factor authentication</DialogTitle>
             <DialogDescription>
-              {hasPassword === undefined
+              {source === undefined
                 ? profileFailed
                   ? "Your account could not be loaded. Reload the page to set up 2FA."
                   : "Loading your account…"
-                : hasPassword
+                : source === "local"
                   ? "Enter your current password to continue. You will then scan a QR code with your authenticator app."
-                  : "Your account signs in through LDAP or single sign-on, so there is no Nexara password to confirm. Setup needs a sign-in from the last 10 minutes: if yours is older, sign out and sign in again first."}
+                  : source === "ldap"
+                    ? t("setupDirectoryDescription")
+                    : setupMutation.isPending
+                      ? t("setupSSOContinuing")
+                      : t("setupSSODescription")}
             </DialogDescription>
           </DialogHeader>
           {hasPassword && (
             <div className="space-y-2">
-              <Label htmlFor="setup-current-password">Current password</Label>
+              <Label htmlFor="setup-current-password">
+                {source === "ldap"
+                  ? t("directoryPassword")
+                  : "Current password"}
+              </Label>
               <Input
                 id="setup-current-password"
                 type="password"
@@ -435,19 +496,29 @@ export function SecurityPage() {
             <Button variant="ghost" onClick={closeSetupDialog}>
               Cancel
             </Button>
-            <Button
-              disabled={
-                hasPassword === undefined ||
-                (hasPassword && !currentPassword) ||
-                setupMutation.isPending
-              }
-              onClick={() => void handleStartSetup()}
-            >
-              {setupMutation.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Continue
-            </Button>
+            {source === "oidc" ? (
+              <Button
+                disabled={stepUpMutation.isPending || setupMutation.isPending}
+                onClick={handleStartStepUp}
+              >
+                {(stepUpMutation.isPending || setupMutation.isPending) && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {t("confirmWithIdentityProvider")}
+              </Button>
+            ) : (
+              <Button
+                disabled={
+                  !hasPassword || !currentPassword || setupMutation.isPending
+                }
+                onClick={handleStartSetup}
+              >
+                {setupMutation.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                Continue
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

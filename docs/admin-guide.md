@@ -782,10 +782,12 @@ refused once; start it again.
 1. Open **Security** from the user menu (your name, top right)
 2. Click **Enable 2FA**
 3. Enter your current password. Five wrong passwords within an hour, here and at **Change Password** together, lock
-   both for 30 minutes on that sign-in. An LDAP account enters its directory password instead: Nexara checks it with the
+   both for 30 minutes on that sign-in. An LDAP account enters its **Directory password** instead: Nexara checks it with the
    directory, and wrong ones count toward the account's sign-in lockout, so ten of them lock signing in for 15 minutes.
-   An account that signs in through single sign-on has no password to enter: it needs a sign-in from the last 10 minutes
-   instead, so sign out and back in first if yours is older
+   An account that signs in through single sign-on has no password to enter: click **Confirm with your identity
+   provider**, sign in there again, and you come back to this page with the setup continuing. Nexara accepts the
+   confirmation only if the provider says you signed in within the last 5 minutes, only in the browser and for the
+   sign-in that asked for it, and only once
 4. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
 5. Enter the 6-digit code to verify
 6. Save the recovery codes in a secure location: 10 single-use `XXXX-XXXX` codes, shown once. **Regenerate Recovery Codes** needs a code from your authenticator
