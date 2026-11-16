@@ -163,6 +163,7 @@ const emptyForm: OIDCConfigRequest = {
   default_role_id: null,
   auto_provision: true,
   allowed_domains: [],
+  relaxed_step_up: false,
 };
 
 function configToForm(cfg: OIDCConfig): OIDCConfigRequest {
@@ -181,6 +182,7 @@ function configToForm(cfg: OIDCConfig): OIDCConfigRequest {
     default_role_id: cfg.default_role_id,
     auto_provision: cfg.auto_provision,
     allowed_domains: cfg.allowed_domains,
+    relaxed_step_up: cfg.relaxed_step_up,
   };
 }
 
@@ -799,6 +801,19 @@ export function OIDCPage() {
                     setDomainsText(e.target.value);
                   }}
                   placeholder="example.com, corp.example.com"
+                />
+              </SettingRow>
+              <SettingRow
+                label="Allow relaxed 2FA confirmation for a provider that cannot report a fresh sign-in"
+                description="Before 2FA setup, accept a completed sign-in round trip at the provider as the confirmation. This still keeps out someone who has only a stolen session token. It does not keep out someone at the owner's unlocked browser while their provider session is open."
+                htmlFor="oidc-relaxed-step-up"
+              >
+                <Switch
+                  id="oidc-relaxed-step-up"
+                  checked={form.relaxed_step_up === true}
+                  onCheckedChange={(relaxed_step_up) => {
+                    setForm({ ...form, relaxed_step_up });
+                  }}
                 />
               </SettingRow>
               {!isNew && activeConfig != null && (

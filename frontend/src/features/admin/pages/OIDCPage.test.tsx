@@ -67,6 +67,7 @@ function oidcConfig(id: string, name: string): OIDCConfig {
     auto_provision: true,
     allowed_domains: [],
     allow_private_address: false,
+    relaxed_step_up: false,
     linked_accounts: 0,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -241,6 +242,25 @@ describe("an OIDC configuration save that settles", () => {
     expect(mockedPut.mock.calls[0]?.[1]).not.toHaveProperty(
       "allow_private_address",
     );
+  });
+
+  it("saves the relaxed 2FA confirmation the operator turns on", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await openEdit(user);
+    await user.click(
+      screen.getByRole("switch", {
+        name: /Allow relaxed 2FA confirmation for a provider that cannot report a fresh sign-in/,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedPut.mock.calls[0]?.[1]).toMatchObject({
+      relaxed_step_up: true,
+    });
   });
 
   it("asks to confirm an issuer on a private address, and resends the save confirmed", async () => {

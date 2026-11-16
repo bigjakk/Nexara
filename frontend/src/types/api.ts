@@ -148,6 +148,8 @@ export interface OIDCConfig {
   allowed_domains: string[];
   /** The operator confirmed this configuration's issuer on a private network address. */
   allow_private_address: boolean;
+  /** A 2FA setup's step-up accepts a completed round trip without a fresh sign-in time. */
+  relaxed_step_up: boolean;
   /** Accounts bound to an identity of this issuer: refused at sign-in if the issuer moves. */
   linked_accounts: number;
   created_at: string;
@@ -169,6 +171,8 @@ export interface OIDCConfigRequest {
   default_role_id: string | null;
   auto_provision: boolean;
   allowed_domains: string[];
+  /** The relaxed 2FA confirmation; a PUT that omits it keeps the stored value. */
+  relaxed_step_up?: boolean;
   /**
    * Confirms a plain-http callback on anything but loopback. The authorization
    * code rides back on that URL, so off loopback it crosses the network in the
