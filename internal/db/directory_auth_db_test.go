@@ -145,7 +145,7 @@ func TestLDAPSyncState_SQL(t *testing.T) {
 // each answering to its own spelling and neither to a third. The lookup has its index.
 func TestUserByEmail_IgnoresCaseWhenUnique(t *testing.T) {
 	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
-		for _, e := range []string{"Carol@example.com", "dave@example.com", "DAVE@example.com"} {
+		for _, e := range []string{"Carol@example.com", "dave@example.com", "DAVE@example.com", "irin@example.com"} {
 			if _, err := tx.Exec(ctx, `INSERT INTO users (email, password_hash, display_name) VALUES ($1, '', 'x')`, e); err != nil {
 				t.Fatal(err)
 			}
@@ -155,6 +155,9 @@ func TestUserByEmail_IgnoresCaseWhenUnique(t *testing.T) {
 			"DAVE@example.com":  "DAVE@example.com",
 			"dave@example.com":  "dave@example.com",
 			"Dave@example.com":  "",
+			// lower() makes U+0130 "i", the lockout's fold does not: a non-ASCII spelling
+			// matches exactly or not at all, or it would have a sign-in budget of its own.
+			"\u0130rin@example.com": "",
 		} {
 			u, err := q.GetUserByEmail(ctx, typed)
 			if want == "" && !errors.Is(err, pgx.ErrNoRows) || want != "" && (err != nil || u.Email != want) {
@@ -169,6 +172,12 @@ func TestUserByEmail_IgnoresCaseWhenUnique(t *testing.T) {
 		}
 		if taken, err := q.EmailTakenIgnoringCase(ctx, "CAROL@EXAMPLE.COM"); err != nil || !taken {
 			t.Errorf("EmailTakenIgnoringCase = %t, %v; want true", taken, err)
+		}
+		if taken, err := q.EmailTakenIgnoringCase(ctx, "\u0130rin@example.com"); err != nil || taken {
+			t.Errorf("EmailTakenIgnoringCase(U+0130rin) = %t, %v; want false", taken, err)
+		}
+		if _, err := q.GetUserByEmailAndSource(ctx, gen.GetUserByEmailAndSourceParams{Email: "\u0130rin@example.com", AuthSource: "local"}); !errors.Is(err, pgx.ErrNoRows) {
+			t.Errorf("GetUserByEmailAndSource(U+0130rin, local) = %v, want no row", err)
 		}
 		var indexed bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE tablename = 'users' AND indexdef LIKE '%lower(email)%')`).Scan(&indexed); err != nil || !indexed {

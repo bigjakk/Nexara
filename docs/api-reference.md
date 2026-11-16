@@ -62,7 +62,8 @@ so no browser or proxy cache keeps a token or a read.
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": ["view:cluster", ...], "global_permissions": [...] }
    ```
    The address is matched ignoring case: the account spelled exactly so, else the one
-   account whose address differs only by case (two accounts that differ only by case
+   account whose address differs only by case (case is ignored only when both are plain
+   ASCII; any other address matches exactly) (two accounts that differ only by case
    each answer to their own spelling). Typing it in another case spends the same
    sign-in budget. A registration whose address differs from an existing account's only
    by case is refused `409`, like a duplicate.

@@ -112,12 +112,16 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const emailTakenIgnoringCase = `-- name: EmailTakenIgnoringCase :one
-SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower($1::text))
+SELECT EXISTS (SELECT 1 FROM users WHERE email = $1::text
+    OR (octet_length($1::text) = char_length($1::text)
+        AND octet_length(email) = char_length(email)
+        AND lower(email) = lower($1::text)))
 `
 
 // Whether an account already has this address in any case: a new account whose
 // address differs from an existing one only by case is refused as a duplicate. There
 // is no unique index to say so (existing installs may hold such pairs).
+// Ignoring case between plain-ASCII addresses only, as GetUserByEmail.
 func (q *Queries) EmailTakenIgnoringCase(ctx context.Context, email string) (bool, error) {
 	row := q.db.QueryRow(ctx, emailTakenIgnoringCase, email)
 	var exists bool
@@ -152,8 +156,11 @@ func (q *Queries) GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (s
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users
 WHERE users.email = $1::text
-   OR (lower(users.email) = lower($1::text)
-       AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower($1::text)) = 1)
+   OR (octet_length($1::text) = char_length($1::text)
+       AND octet_length(users.email) = char_length(users.email)
+       AND lower(users.email) = lower($1::text)
+       AND (SELECT count(*) FROM users y WHERE octet_length(y.email) = char_length(y.email)
+              AND lower(y.email) = lower($1::text)) = 1)
 `
 
 // The account an address names, ignoring case: the account spelled exactly so, else
@@ -161,6 +168,11 @@ WHERE users.email = $1::text
 // only by case are both kept, unmerged, and each answers to its own exact spelling; a
 // spelling that matches both only by case names neither. idx_users_email_lower serves
 // the case-insensitive half.
+//
+// Case is ignored only between plain-ASCII addresses (octet_length = char_length in
+// UTF-8), where lower() and the sign-in lockout's Unicode case folding agree: lower()
+// turns U+0130 into "i" where the fold does not, and a spelling the two fold apart
+// would be counted under a budget of its own. Any other address matches exactly.
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, getUserByEmail, email)
 	var i User

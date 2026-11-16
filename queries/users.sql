@@ -9,16 +9,28 @@ RETURNING *;
 -- only by case are both kept, unmerged, and each answers to its own exact spelling; a
 -- spelling that matches both only by case names neither. idx_users_email_lower serves
 -- the case-insensitive half.
+--
+-- Case is ignored only between plain-ASCII addresses (octet_length = char_length in
+-- UTF-8), where lower() and the sign-in lockout's Unicode case folding agree: lower()
+-- turns U+0130 into "i" where the fold does not, and a spelling the two fold apart
+-- would be counted under a budget of its own. Any other address matches exactly.
 SELECT * FROM users
 WHERE users.email = sqlc.arg(email)::text
-   OR (lower(users.email) = lower(sqlc.arg(email)::text)
-       AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower(sqlc.arg(email)::text)) = 1);
+   OR (octet_length(sqlc.arg(email)::text) = char_length(sqlc.arg(email)::text)
+       AND octet_length(users.email) = char_length(users.email)
+       AND lower(users.email) = lower(sqlc.arg(email)::text)
+       AND (SELECT count(*) FROM users y WHERE octet_length(y.email) = char_length(y.email)
+              AND lower(y.email) = lower(sqlc.arg(email)::text)) = 1);
 
 -- name: EmailTakenIgnoringCase :one
 -- Whether an account already has this address in any case: a new account whose
 -- address differs from an existing one only by case is refused as a duplicate. There
 -- is no unique index to say so (existing installs may hold such pairs).
-SELECT EXISTS (SELECT 1 FROM users WHERE lower(email) = lower(sqlc.arg(email)::text));
+-- Ignoring case between plain-ASCII addresses only, as GetUserByEmail.
+SELECT EXISTS (SELECT 1 FROM users WHERE email = sqlc.arg(email)::text
+    OR (octet_length(sqlc.arg(email)::text) = char_length(sqlc.arg(email)::text)
+        AND octet_length(email) = char_length(email)
+        AND lower(email) = lower(sqlc.arg(email)::text)));
 
 -- name: GetUserByID :one
 SELECT * FROM users WHERE id = $1;

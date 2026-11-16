@@ -875,6 +875,7 @@ type Querier interface {
 	// Whether an account already has this address in any case: a new account whose
 	// address differs from an existing one only by case is refused as a duplicate. There
 	// is no unique index to say so (existing installs may hold such pairs).
+	// Ignoring case between plain-ASCII addresses only, as GetUserByEmail.
 	EmailTakenIgnoringCase(ctx context.Context, email string) (bool, error)
 	// A job that was created and never started holds nothing on the cluster (DRS,
 	// the rebalancer and HA rules are first touched on its first running tick), but
@@ -1280,9 +1281,14 @@ type Querier interface {
 	// only by case are both kept, unmerged, and each answers to its own exact spelling; a
 	// spelling that matches both only by case names neither. idx_users_email_lower serves
 	// the case-insensitive half.
+	//
+	// Case is ignored only between plain-ASCII addresses (octet_length = char_length in
+	// UTF-8), where lower() and the sign-in lockout's Unicode case folding agree: lower()
+	// turns U+0130 into "i" where the fold does not, and a spelling the two fold apart
+	// would be counted under a budget of its own. Any other address matches exactly.
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	// GetUserByEmail's match (exact spelling first, else the one account differing only by
-	// case), of the given source.
+	// case, between plain-ASCII addresses), of the given source.
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)

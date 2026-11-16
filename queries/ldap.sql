@@ -53,11 +53,14 @@ UPDATE ldap_configs SET last_sync_at = now() WHERE id = $1;
 
 -- name: GetUserByEmailAndSource :one
 -- GetUserByEmail's match (exact spelling first, else the one account differing only by
--- case), of the given source.
+-- case, between plain-ASCII addresses), of the given source.
 SELECT * FROM users
 WHERE (users.email = sqlc.arg(email)::text
-       OR (lower(users.email) = lower(sqlc.arg(email)::text)
-           AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower(sqlc.arg(email)::text)) = 1))
+       OR (octet_length(sqlc.arg(email)::text) = char_length(sqlc.arg(email)::text)
+           AND octet_length(users.email) = char_length(users.email)
+           AND lower(users.email) = lower(sqlc.arg(email)::text)
+           AND (SELECT count(*) FROM users y WHERE octet_length(y.email) = char_length(y.email)
+                  AND lower(y.email) = lower(sqlc.arg(email)::text)) = 1))
   AND users.auth_source = sqlc.arg(auth_source);
 
 -- name: CreateLDAPUser :one
