@@ -9,6 +9,7 @@ import type {
 } from "@/types/api";
 import {
   apiClient,
+  ApiClientError,
   clearTokens,
   currentSessionEpoch,
   getStoredUser,
@@ -58,10 +59,15 @@ interface AuthState {
  * Keys of locales/en/auth.json. Sign out, or Sign out all devices, that the
  * server did not confirm (a 503, a 429, no answer, or not sent at all): the tab
  * is signed out all the same, and the login page says what may still be signed
- * in. Or a password change, which ended every session (ProfilePage).
+ * in. Or a password change, which ended every session (ProfilePage), said in
+ * every tab. Or a session the server refused to refresh: it expired, or was
+ * ended elsewhere.
  */
 export type SignOutNotice =
-  "signOutUnconfirmed" | "signOutAllUnconfirmed" | "passwordChanged";
+  | "signOutUnconfirmed"
+  | "signOutAllUnconfirmed"
+  | "passwordChanged"
+  | "sessionExpired";
 
 interface AuthActions {
   login: (req: LoginRequest) => Promise<void>;
@@ -164,11 +170,22 @@ export interface SignedOutNote {
   user: string;
   revoked: boolean;
   at: number;
+  /** Why, when the other tabs' login pages say so too: a password change. */
+  notice?: "passwordChanged";
 }
 
-function noteSignOut(held: User | null, revoked: boolean): void {
+function noteSignOut(
+  held: User | null,
+  revoked: boolean,
+  notice?: SignOutNotice,
+): void {
   if (held === null) return;
-  const note: SignedOutNote = { user: held.id, revoked, at: Date.now() };
+  const note: SignedOutNote = {
+    user: held.id,
+    revoked,
+    at: Date.now(),
+    ...(notice === "passwordChanged" ? { notice } : {}),
+  };
   try {
     localStorage.setItem(SIGNED_OUT_KEY, JSON.stringify(note));
   } catch {
@@ -356,7 +373,10 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
       // would wipe the cache and every store for nobody, so only a store that
       // is signed in has one to end.
       if (!get().isAuthenticated) return;
-      get().clearAuth();
+      // A sign-out of the user's own that got here first is not an expiry.
+      get().clearAuth(
+        get().isLoggingOut ? undefined : { notice: "sessionExpired" },
+      );
     });
 
     // Re-hydrate user + permissions on every successful background
@@ -463,7 +483,7 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
         isLoading: false,
         isInitialized: true,
       });
-    } catch {
+    } catch (err) {
       // A session that began or ended while this was out — someone signed in
       // while it waited, which is also how the patience stops (a
       // StaleSessionError) — is theirs, and nothing here applies.
@@ -484,6 +504,13 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
           isAuthenticated: false,
           isLoading: false,
           isInitialized: true,
+          // Only a refusal says the session is over; a server that could not
+          // be reached says nothing about it.
+          signOutNotice:
+            err instanceof ApiClientError &&
+            (err.status === 401 || err.status === 403)
+              ? "sessionExpired"
+              : null,
         });
       });
     }
@@ -657,7 +684,9 @@ export const useAuthStore = create<AuthState & AuthActions>()((set, get) => ({
   },
 
   clearAuth: (options) => {
-    if (options?.announce === true) noteSignOut(get().user, true);
+    if (options?.announce === true) {
+      noteSignOut(get().user, true, options.notice);
+    }
     clearTokens({ keepStoredUser: options?.keepStoredUser === true });
     endSession(() => {
       set({

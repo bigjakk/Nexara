@@ -204,6 +204,27 @@ describe("every path that ends a session", () => {
   );
 });
 
+describe("what the login page says after a refused refresh", () => {
+  // The session expired: the login page says so, unless the user was signing
+  // out themselves, whose own request found it gone.
+  it.each([
+    { signingOut: false, notice: "sessionExpired" },
+    { signingOut: true, notice: null },
+  ])("signing out: $signingOut, says $notice", async (c) => {
+    await signInAs(ADMIN);
+    useAuthStore.setState({ isLoggingOut: c.signingOut });
+    server.routes["GET /api/v1/probe"] = () =>
+      json({ error: "unauthorized", message: "expired" }, 401);
+
+    await act(() =>
+      apiClient.get(apiPath`/api/v1/probe`).catch(() => undefined),
+    );
+
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    expect(useAuthStore.getState().signOutNotice).toBe(c.notice);
+  });
+});
+
 describe("a sign-out another tab follows", () => {
   it("says nothing of a sign-out that is following another tab's", async () => {
     await signInAs(ADMIN);

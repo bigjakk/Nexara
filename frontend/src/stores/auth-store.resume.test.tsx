@@ -189,6 +189,7 @@ describe("a resume at boot that could not look", () => {
 
       expect(useAuthStore.getState().isAuthenticated).toBe(false);
       expect(useAuthStore.getState().isInitialized).toBe(true);
+      expect(useAuthStore.getState().signOutNotice).toBe("sessionExpired");
       everythingWasWiped();
       expect(currentSessionEpoch()).toBe(before + 1); // ended once
       await go(60_000);
@@ -223,6 +224,8 @@ describe("a resume at boot that could not look", () => {
     expect(state.user).toBeNull();
     expect(state.isInitialized).toBe(true);
     expect(state.isLoading).toBe(false);
+    // A server that could not be reached says nothing of an expiry.
+    expect(state.signOutNotice).toBeNull();
     everythingWasWiped();
     expect(currentSessionEpoch()).toBe(before + 1);
     await go(60_000);

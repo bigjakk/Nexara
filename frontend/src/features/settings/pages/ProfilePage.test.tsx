@@ -226,6 +226,8 @@ describe("the sign-out after a password change", () => {
 
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().signedOutByUser).toBe(true);
+    // Said there too, not just "signed out".
+    expect(useAuthStore.getState().signOutNotice).toBe("passwordChanged");
     expect(server.times("POST /api/v1/auth/refresh")).toBe(asked);
   });
 

@@ -65,7 +65,14 @@ export function useSignOutFromOtherTabs(): void {
       if (note.revoked === true) {
         // Over at the server, and the sign-out removes the stored user itself:
         // one that names this user here is on its way out, or a newer session's.
-        clearAuth({ byUser: true, keepStoredUser: true });
+        // A password change is said here too, not just "signed out".
+        clearAuth({
+          byUser: true,
+          keepStoredUser: true,
+          ...(note.notice === "passwordChanged"
+            ? { notice: "passwordChanged" as const }
+            : {}),
+        });
         return;
       }
       const stored = getStoredUser()?.id;
