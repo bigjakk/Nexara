@@ -34,6 +34,16 @@ func TestStartingAGuestNeedsExecute(t *testing.T) {
 			"execute:container", func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 				return handlers.NewContainerHandler(q, backupRunEncKey, nil).CreateContainer
 			}},
+		// extra's force, beside archive or restore, overwrites a guest: delete, as the restore route asks.
+		{"VM create with extra force", clusterScope + "/vms", "manage:vm", `{"node":"pve-01","vmid":101,"extra":{"force":1}}`, "delete:vm",
+			func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+				return handlers.NewVMHandler(q, backupRunEncKey, nil).CreateVM
+			}},
+		{"container create with extra force", containerScope, "manage:container",
+			`{"node":"pve-01","vmid":101,"hostname":"linux01","ostemplate":"store01:backup/vzdump-lxc-101.tar.zst","extra":{"restore":"1","force":"1"}}`,
+			"delete:container", func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+				return handlers.NewContainerHandler(q, backupRunEncKey, nil).CreateContainer
+			}},
 		{"import with start_after", importScope, "manage:vm_import", importBody + `,"start_after":true}`, "execute:vm",
 			func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 				return handlers.NewVMImportHandler(q, backupRunEncKey, nil).StartVMImport

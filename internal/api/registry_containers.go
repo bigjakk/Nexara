@@ -392,7 +392,8 @@ func createCTParams() apischema.Properties {
 			Typetext: "<object>",
 			Description: "Additional Proxmox LXC config keys as a flat object of string values — " +
 				"features, cpulimit, cpuunits, arch, onboot, protection, startup, cmode and anything " +
-				"else this schema does not name.",
+				"else this schema does not name. A force key (which with restore overwrites an existing " +
+				"container) also requires delete:container.",
 		},
 	}
 }

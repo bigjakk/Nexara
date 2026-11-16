@@ -1386,6 +1386,9 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 			return err
 		}
 	}
+	if err := requireExtraForcePerm(c, extra, "vm", clusterID); err != nil {
+		return err
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

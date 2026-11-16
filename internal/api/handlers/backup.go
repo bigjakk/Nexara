@@ -1893,8 +1893,9 @@ func (h *BackupHandler) requirePBSServerVisible(c fiber.Ctx, pbsID uuid.UUID) er
 // RestoreBackup handles POST /api/v1/clusters/:cluster_id/restore
 //
 // Its permission is Deferred (restoreDeferredReason): manage:backup on the
-// cluster in the path, then view:backup on the PBS server the body names, then
-// the target node. In that order, so a caller refused at one step learns nothing
+// cluster in the path (and, from the body alone, delete on the guest's kind
+// for force, execute for start_after_restore), then view:backup on the PBS
+// server the body names, then the target node. In that order, so a caller refused at one step learns nothing
 // about the next: not that a server exists, nor which nodes a cluster holds.
 func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -1909,6 +1910,18 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	if p.Bool("start_after_restore") {
 		if err := requireGuestPowerPerm(c, guestResource(p.String("backup_type") == "ct"), clusterID,
 			"Starting the guest after the restore"); err != nil {
+			return err
+		}
+	}
+	// force overwrites whatever guest holds the VMID, which is deleting it: the
+	// guest's own DELETE route asks delete on its kind. Decided from the request,
+	// not the vms row, which may not know the guest yet and would tell a caller
+	// whether one exists here. The archive's kind is the only one at stake:
+	// qemu-server and pve-container overwrite only a same-kind config on the node
+	// and refuse a VMID the other kind holds (check_vmid_unused).
+	if p.Bool("force") {
+		if err := requireGuestActionPerm(c, "delete", guestResource(p.String("backup_type") == "ct"), clusterID,
+			"Restoring over an existing guest"); err != nil {
 			return err
 		}
 	}
@@ -2145,13 +2158,31 @@ func guestResource(container bool) string {
 // The 403 says what needed it ("Starting the guest after the restore") and names
 // the permission.
 func requireGuestPowerPerm(c fiber.Ctx, resource string, clusterID uuid.UUID, what string) error {
-	allowed, err := hasClusterPerm(c, "execute", resource, clusterID)
+	return requireGuestActionPerm(c, "execute", resource, clusterID, what)
+}
+
+// requireExtraForcePerm holds a create whose extra object carries Proxmox's
+// force to the restore's rule: beside an archive (qemu) or restore (lxc) it
+// overwrites the guest holding the VMID, so it needs delete on the create's kind.
+// Any value but "" (never sent) and "0" counts, a superset of Proxmox's true.
+func requireExtraForcePerm(c fiber.Ctx, extra map[string]string, resource string, clusterID uuid.UUID) error {
+	if v := extra["force"]; v == "" || v == "0" {
+		return nil
+	}
+	return requireGuestActionPerm(c, "delete", resource, clusterID, "Restoring over an existing guest")
+}
+
+// requireGuestActionPerm refuses what a guest's own route would refuse:
+// action:<resource> on the cluster, with a 403 naming what needed it and the
+// permission. A lookup that could not answer is returned as it is, not as "no".
+func requireGuestActionPerm(c fiber.Ctx, action, resource string, clusterID uuid.UUID, what string) error {
+	allowed, err := hasClusterPerm(c, action, resource, clusterID)
 	if err != nil {
 		return err
 	}
 	if !allowed {
 		return fiber.NewError(fiber.StatusForbidden,
-			what+" requires execute:"+resource+" on this cluster")
+			what+" requires "+action+":"+resource+" on this cluster")
 	}
 	return nil
 }

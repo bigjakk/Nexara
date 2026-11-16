@@ -1207,6 +1207,14 @@ VM or container create, `start_after` and `live_import` on a VM import,
 not stopped. Without it the answer is `403` naming the permission, and nothing is
 asked of Proxmox.
 
+**Overwriting a guest needs `delete` on its kind.** A `force` restore, and a
+create whose `extra` object carries a `force` key, replace the guest at that VMID
+as deleting it would, so they need what its delete route needs: `delete:vm` for
+a VM, `delete:container` for a container, on the cluster, whether or not a guest
+holds the VMID. Proxmox itself would accept `VM.Backup` there; Nexara does not.
+Without it the answer is `403` naming the permission, and nothing is asked of
+Proxmox.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/vms` | List VMs in a cluster |
@@ -1781,7 +1789,7 @@ true` when the deleted one had a comment — never the comment's text.
 | GET | `/pbs-snapshots` | List snapshots by backup ID |
 | GET | `/clusters/:id/pbs-snapshots` | List a guest's snapshots by backup ID, only from datastores one of the cluster's PBS storages reads (two clusters writing to one datastore are both listed). When the cluster's storages cannot be read from Proxmox it filters by the last storage list it read from that cluster since it started (nothing when there is none) and sets `storage_unread: true` beside `items` and `total`; the SPA then offers no restore or delete on those rows |
 | GET | `/backup-coverage` | Get backup coverage report |
-| POST | `/clusters/:id/restore` | Restore a backup |
+| POST | `/clusters/:id/restore` | Restore a backup (`force`, over an existing guest, also needs `delete:vm` / `delete:container`) |
 | POST | `/clusters/:id/backup` | Trigger an ad-hoc backup |
 | GET | `/clusters/:id/backup-jobs` | List backup jobs |
 | POST | `/clusters/:id/backup-jobs` | Create backup job |
@@ -1810,9 +1818,14 @@ a server the caller may not view answers `404`, like one that does not exist.
 (`execute:container` for a `ct`) on the cluster, and a `force` restore over a
 guest that is not stopped needs it on that guest's own kind, since it stops the
 guest first; without it the answer is `403` naming that permission, and nothing
-is stopped or restored. Over a guest Nexara last saw stopped `manage:backup` is
-enough, as in Proxmox, and no stop is sent: Proxmox refuses the restore itself if
-the guest has been started since.
+is stopped or restored. Over a guest Nexara last saw stopped no `execute` is
+needed and no stop is sent: Proxmox refuses the restore itself if the guest has
+been started since. `force` also needs `delete:vm`
+(`delete:container` for a `ct`) on the cluster, because the restore replaces the
+guest at that VMID. It is checked from the request, right after `manage:backup`
+and before the PBS server or the node is looked at, so the `403` naming it says
+nothing about whether a guest holds the VMID. Without `force` no `delete` is
+needed: Proxmox refuses a restore onto a VMID in use.
 
 A backup job carries exactly one guest selection, set on create and update:
 

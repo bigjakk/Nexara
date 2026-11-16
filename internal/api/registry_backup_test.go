@@ -51,7 +51,8 @@ var backupRoutesOutsideTheClusterCheckShape = func() map[string]string {
 		"GET /api/v1/backup-coverage": "Advisory: two accessibleClusters reads (view:backup and view:veeam) " +
 			"become per-cluster predicates handed to backupcoverage.Compute; the report spans every cluster",
 		"POST /api/v1/clusters/:cluster_id/restore": "Deferred: manage:backup on the cluster in the path, then " +
-			"view:backup on the PBS server the body names (requirePBSPerm), both in the handler",
+			"view:backup on the PBS server the body names (requirePBSPerm), both in the handler; force adds " +
+			"delete and start_after_restore execute on the archive's guest kind, from the body",
 	}
 	for _, r := range []string{
 		"GET /api/v1/pbs-servers/:pbs_id/datastores",

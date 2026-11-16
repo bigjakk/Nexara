@@ -171,7 +171,9 @@ const backupDeferredReason = "the scope depends on a DB lookup: requirePBSPerm l
 const restoreDeferredReason = "two checks, the second on something only the body names: manage:backup on the " +
 	"cluster in the path, then view:backup on the PBS server the body's pbs_server_id picks — requirePBSPerm " +
 	"loads its row and gates on its cluster, or instance-wide when it is standalone — refused as a 404, so " +
-	"a server the caller cannot view looks like one that does not exist"
+	"a server the caller cannot view looks like one that does not exist. Between the two, from the body " +
+	"alone: force also needs delete on the archive's guest kind (delete:vm, delete:container for a ct), " +
+	"and start_after_restore execute on it"
 
 // groupRefParams is the (type, id) pair that names one backup group, the
 // snapshots of one guest: snapshotRefParams without the time.
@@ -598,7 +600,10 @@ func registerBackupEndpoints(reg *Registry, h *handlers.BackupHandler) {
 			"on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); " +
 			"a server the caller cannot view answers 404. start_after_restore also requires execute:vm " +
 			"(execute:container for a ct) on this cluster, and so does a force restore over a guest that is " +
-			"not stopped, on that guest's kind, since it stops it first. Runs as a background task.",
+			"not stopped, on that guest's kind, since it stops it first. force also requires delete:vm " +
+			"(delete:container for a ct) on this cluster, checked from the request before anything is " +
+			"looked up, because overwriting a guest replaces it as deleting it would; Proxmox itself would " +
+			"accept VM.Backup. Runs as a background task.",
 		Group:       "Backup",
 		Permissions: Permissions{Deferred: restoreDeferredReason},
 		Parameters:  clusterParams(restoreBackupParams()),
@@ -863,7 +868,8 @@ func restoreBackupParams() apischema.Properties {
 		"datastore": datastore,
 		"storage": optString(100, "<storage>",
 			"Storage to restore the disks onto. Omitted lets Proxmox use the archive's own."),
-		"force": optFlag("Overwrite an existing guest with this VMID. The guest is stopped first, as a task of its own, " +
+		"force": optFlag("Overwrite an existing guest with this VMID. Requires delete:vm (delete:container for a ct) " +
+			"on this cluster, whether or not a guest holds the VMID. The guest is stopped first, as a task of its own, " +
 			"once the storage the archive is read through has been found."),
 		"unique": optFlag("Assign fresh MAC addresses to the restored guest's network devices."),
 		"start_after_restore": optFlag(

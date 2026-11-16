@@ -55,6 +55,9 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 	)
 	both := grantsOf("manage:backup", "view:backup")
 	withExec := grantsOf("manage:backup", "view:backup", "execute:vm")
+	// force overwrites the guest, so it needs delete on the archive's kind as well.
+	withDel := grantsOf("manage:backup", "view:backup", "delete:vm")
+	withExecDel := grantsOf("manage:backup", "view:backup", "execute:vm", "delete:vm")
 	otherCluster := "5c4b3a29-1817-4615-9413-0000000000aa"
 	tests := []struct {
 		name    string
@@ -80,21 +83,27 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		{"execute:vm held on another cluster does not count", grantsOf("manage:backup", "view:backup", "execute:vm@"+otherCluster),
 			restoreStorages, false, 403, nil, "", "", true, false, "", false},
 		// Over a running guest the restore stops it first: execute on the guest's own kind, from its row.
-		{"over a running container without execute:container: nothing is stopped", withExec, restoreStorages, true, 403,
+		{"over a running container without execute:container: nothing is stopped", withExecDel, restoreStorages, true, 403,
 			nil, "", "", false, false, "lxc", false},
+		// Overwriting is deleting: delete on the archive's kind, from the request
+		// alone, before the PBS server or any row is read (so a 403, not this caller's 404).
+		// No force needs none: the first row.
+		{"force without delete:vm: refused before the PBS server, nothing asked of Proxmox", grantsOf("manage:backup"),
+			restoreStorages, true, 403, nil, "", "", false, false, "", false},
+		{"a stopped container's overwrite needs delete:container", withDel, restoreStorages, true, 403, nil, "", "", false, true, "lxc", true},
 		// A row that says stopped needs no execute, and sends no stop: Proxmox
 		// refuses the restore itself if the guest is running after all.
-		{"over a guest whose row says stopped: restored without a stop", both, restoreStorages, true, 200,
+		{"over a guest whose row says stopped: restored without a stop", withDel, restoreStorages, true, 200,
 			[]string{storageGet, restore}, "store02", "address", false, false, "", true},
 		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", both, restoreOtherServerOnly, false, 400,
 			[]string{storageGet}, "", "", false, false, "", false},
 		{"the only candidate is used, and recorded as such", both, restoreAliasOnly, false, 200,
 			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate", false, false, "", false},
-		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", withExec, restoreStorages, true, 200,
+		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", withExecDel, restoreStorages, true, 200,
 			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address", false, false, "", false},
-		{"over an existing guest with no such storage: it is not stopped", withExec, restoreOtherServerOnly, true, 400,
+		{"over an existing guest with no such storage: it is not stopped", withExecDel, restoreOtherServerOnly, true, 400,
 			[]string{storageGet}, "", "", false, false, "", false},
-		{"a storage list that never answers: refused in time, and the guest is not stopped", withExec, restoreHangs, true, 502,
+		{"a storage list that never answers: refused in time, and the guest is not stopped", withExecDel, restoreHangs, true, 502,
 			[]string{storageGet}, "", "", false, false, "", false},
 		// A server the caller may not view is a missing one, and nothing is asked of Proxmox.
 		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", "", false, false, "", false},
@@ -151,7 +160,11 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			if resp.StatusCode != tt.status {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tt.status)
 			}
-			if want := map[bool]string{true: "execute:container", false: "execute:vm"}[tt.ct || tt.guest == "lxc"]; tt.status == 403 &&
+			want := map[bool]string{true: "execute:container", false: "execute:vm"}[tt.ct || tt.guest == "lxc"]
+			if kind := map[bool]string{true: "delete:container", false: "delete:vm"}[tt.ct]; tt.force && !tt.grants[kind] {
+				want = kind
+			}
+			if tt.status == 403 &&
 				tt.grants["manage:backup"] && !strings.Contains(string(answer), want) {
 				t.Errorf("answer %q, want it to name %s", answer, want)
 			}

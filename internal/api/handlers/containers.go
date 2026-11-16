@@ -684,6 +684,9 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 			return err
 		}
 	}
+	if err := requireExtraForcePerm(c, extra, "container", clusterID); err != nil {
+		return err
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

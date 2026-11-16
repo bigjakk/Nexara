@@ -1192,7 +1192,8 @@ func createVMParams() apischema.Properties {
 			Optional: true,
 			Typetext: "<object>",
 			Description: "Additional Proxmox config keys as a flat object of string values — " +
-				"further disks (scsi1, sata0, virtio0), CD-ROM slots and anything else this schema does not name.",
+				"further disks (scsi1, sata0, virtio0), CD-ROM slots and anything else this schema does not name. " +
+				"A force key (which with archive restores over an existing VM) also requires delete:vm.",
 		},
 	}
 }
