@@ -141,9 +141,8 @@ type DisableScheduledTaskForBadScheduleParams struct {
 // next_run_at as "due now", and a cron that never comes round has no other
 // value to write — so the row would be claimed, RUN, and re-queued on every
 // tick, repeating whatever action it carries. Disabling makes it inert while
-// last_error says why, and next_run_at NULL means that fixing the expression
-// and re-enabling runs it once, promptly, instead of waiting for a slot the
-// old expression never had.
+// last_error says why. Fixing the expression and re-enabling it through
+// UpdateScheduledTask computes its next run afresh.
 //
 // last_status is a parameter rather than a literal 'failed' because it
 // describes the RUN, not the schedule: a task can execute perfectly and still
@@ -419,17 +418,19 @@ UPDATE scheduled_tasks
 SET schedule = $1,
     params = $2,
     enabled = $3,
+    next_run_at = COALESCE($4, next_run_at),
     updated_at = now()
-WHERE id = $4
-  AND cluster_id = $5
+WHERE id = $5
+  AND cluster_id = $6
 `
 
 type UpdateScheduledTaskParams struct {
-	Schedule  string          `json:"schedule"`
-	Params    json.RawMessage `json:"params"`
-	Enabled   bool            `json:"enabled"`
-	ID        uuid.UUID       `json:"id"`
-	ClusterID uuid.UUID       `json:"cluster_id"`
+	Schedule  string             `json:"schedule"`
+	Params    json.RawMessage    `json:"params"`
+	Enabled   bool               `json:"enabled"`
+	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
+	ID        uuid.UUID          `json:"id"`
+	ClusterID uuid.UUID          `json:"cluster_id"`
 }
 
 // A scheduled task is addressed by its uuid, which says nothing about which
@@ -443,11 +444,16 @@ type UpdateScheduledTaskParams struct {
 // :execrows rather than :exec so a zero-row result is visible: if the handler
 // check is ever dropped, the write still cannot happen AND the caller is told,
 // rather than the endpoint reporting success for a row it never touched.
+//
+// next_run_at is written only when the handler passes one (the cron or the enabled
+// flag changed). NULL keeps the stored value rather than a copy of it from the
+// handler's read, which the scheduler may have moved since.
 func (q *Queries) UpdateScheduledTask(ctx context.Context, arg UpdateScheduledTaskParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateScheduledTask,
 		arg.Schedule,
 		arg.Params,
 		arg.Enabled,
+		arg.NextRunAt,
 		arg.ID,
 		arg.ClusterID,
 	)

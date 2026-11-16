@@ -372,20 +372,30 @@ func (h *ScheduleHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	schedule := p.String("schedule")
-	if err := cronspec.ValidateCron(schedule); err != nil {
+	enabled := p.Bool("enabled")
+	// One call, as on create: the next run written is the one the validation computed.
+	nextRun, err := cronspec.NextValidRun(schedule, time.Now())
+	if err != nil {
 		return fiber.NewError(fiber.StatusBadRequest, err.Error())
 	}
-
-	params, err := scheduleParamsJSON(p)
-	if err != nil {
-		return err
+	// A new cron or a change of enabled counts the next run from now. Otherwise
+	// NULL leaves the stored one, which the scheduler owns.
+	var nextRunAt pgtype.Timestamptz
+	if schedule != task.Schedule || enabled != task.Enabled {
+		nextRunAt = pgtype.Timestamptz{Time: nextRun, Valid: true}
 	}
 
-	// The action and the resource come off the stored row: a PUT can change
-	// the cron, the params and the enabled flag, but not what the task acts
-	// on.
-	if err := validateSnapshotScheduleParams(task.Action, task.ResourceType, params); err != nil {
-		return err
+	// Absent params keep what is stored. The action and the resource come off
+	// the stored row: a PUT can change the cron, the params and the enabled
+	// flag, but not what the task acts on.
+	params := task.Params
+	if p.Has("params") {
+		if params, err = scheduleParamsJSON(p); err != nil {
+			return err
+		}
+		if err := validateSnapshotScheduleParams(task.Action, task.ResourceType, params); err != nil {
+			return err
+		}
 	}
 
 	// The cluster rides on the statement as well as being checked above, and
@@ -398,7 +408,8 @@ func (h *ScheduleHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		ClusterID: clusterID,
 		Schedule:  schedule,
 		Params:    params,
-		Enabled:   p.Bool("enabled"),
+		Enabled:   enabled,
+		NextRunAt: nextRunAt,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update schedule")

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -43,10 +44,13 @@ type scheduleDBTX struct {
 	rowsAffected int64
 
 	statements []string
+	// execArgs is the arguments of the last UPDATE/DELETE.
+	execArgs []any
 }
 
-func (s *scheduleDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (s *scheduleDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	s.statements = append(s.statements, sql)
+	s.execArgs = args
 	// pgconn builds a CommandTag from the wire string; "UPDATE n" / "DELETE n"
 	// is what RowsAffected parses.
 	verb := "UPDATE"
@@ -313,6 +317,48 @@ func TestScheduleWriteScopesTheStatementItself(t *testing.T) {
 			if resp.StatusCode != http.StatusNotFound {
 				t.Fatalf("status = %d, want 404 — a zero-row write must not report success (body: %s)",
 					resp.StatusCode, body)
+			}
+		})
+	}
+}
+
+// A PUT that leaves the cron and enabled alone keeps the stored next run (NULL to the
+// COALESCE) and, without params, the stored params; a new cron or a change of enabled
+// writes a next run counted from now.
+func TestScheduleUpdateKeepsWhatTheBodyLeavesOut(t *testing.T) {
+	t.Parallel()
+	cluster, taskID := uuid.New(), uuid.New()
+	stored := json.RawMessage(`{"snap_name":"keep"}`)
+	for _, tt := range []struct {
+		name, body  string
+		wantNextRun bool
+	}{
+		{"cron and enabled unchanged", `{"schedule":"0 3 * * *","enabled":true}`, false},
+		{"a new cron", `{"schedule":"0 4 * * *","enabled":true}`, true},
+		{"enabled changed", `{"schedule":"0 3 * * *","enabled":false}`, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			dbtx := &scheduleDBTX{task: db.ScheduledTask{
+				ID: taskID, ClusterID: cluster, ResourceType: "vm", ResourceID: "101", Node: "pve-01",
+				Action: "snapshot", Schedule: "0 3 * * *", Params: stored, Enabled: true,
+			}, found: true, rowsAffected: 1}
+			req := httptest.NewRequest(http.MethodPut, "/clusters/"+cluster.String()+"/schedules/"+taskID.String(), strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := newScheduleScopeApp(t, dbtx).Test(req)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("PUT answered %v, %v", resp, err)
+			}
+			// UpdateScheduledTask's arguments: schedule, params, enabled, next_run_at, id, cluster_id.
+			if len(dbtx.execArgs) != 6 {
+				t.Fatalf("UPDATE args = %v", dbtx.execArgs)
+			}
+			if got, _ := dbtx.execArgs[1].(json.RawMessage); string(got) != string(stored) {
+				t.Errorf("params written = %s, want the stored %s", got, stored)
+			}
+			next, _ := dbtx.execArgs[3].(pgtype.Timestamptz)
+			if next.Valid != tt.wantNextRun || (next.Valid && !next.Time.After(time.Now())) {
+				t.Errorf("next_run_at written = %+v, want set=%v and in the future", next, tt.wantNextRun)
 			}
 		})
 	}

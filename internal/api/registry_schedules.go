@@ -31,7 +31,8 @@ var scheduleSpecParam = apischema.Property{
 	MinLength: apischema.Ptr(1),
 	MaxLength: apischema.Ptr(256),
 	Typetext:  "<cron expression>",
-	Description: "Cron expression, in the five-field form plus the descriptors robfig/cron accepts. " +
+	Description: "Cron expression in the five-field form (minute hour day-of-month month day-of-week). " +
+		"Descriptors such as @daily are refused. " +
 		"Refused when it names a date that cannot occur, which would otherwise store a next run the " +
 		"scheduler reads as \"due now\" forever.",
 }
@@ -48,17 +49,25 @@ var scheduleSpecParam = apischema.Property{
 // (validateSnapshotScheduleParams, through proxmox.ValidateSnapshotNamePrefix).
 // The limit is printed from proxmox.SnapshotNamePrefixMaxLen so the published
 // number is the enforced one.
-var scheduleParamsParam = apischema.Property{
-	Type:     apischema.Object,
-	Optional: true,
-	Typetext: "<object>",
-	Description: "Action-specific options. Omitted, an empty object is stored. A snapshot task reads `snap_name`, " +
-		"the PREFIX of every snapshot it takes: each run is named `<snap_name>-YYYYMMDD-HHMMSS` from the run's " +
-		"date and time in UTC, or `auto-YYYYMMDD-HHMMSS` when snap_name is absent or empty. A prefix starts " +
-		"with a letter, contains only letters, digits, '-' and '_', and is at most " +
-		strconv.Itoa(proxmox.SnapshotNamePrefixMaxLen) +
-		" characters, which leaves room for the date and time within Proxmox's " +
-		strconv.Itoa(proxmox.SnapshotMaxNameLen) + "-character limit on a snapshot name.",
+var scheduleParamsParam = scheduleParamsProperty("Omitted, an empty object is stored.")
+
+// scheduleUpdateParamsParam is the same payload on the update, where an absent
+// value keeps the stored options.
+var scheduleUpdateParamsParam = scheduleParamsProperty("Omitted, the stored options are kept.")
+
+func scheduleParamsProperty(omitted string) apischema.Property {
+	return apischema.Property{
+		Type:     apischema.Object,
+		Optional: true,
+		Typetext: "<object>",
+		Description: "Action-specific options. " + omitted + " A snapshot task reads `snap_name`, " +
+			"the PREFIX of every snapshot it takes: each run is named `<snap_name>-YYYYMMDD-HHMMSS` from the run's " +
+			"date and time in UTC, or `auto-YYYYMMDD-HHMMSS` when snap_name is absent or empty. A prefix starts " +
+			"with a letter, contains only letters, digits, '-' and '_', and is at most " +
+			strconv.Itoa(proxmox.SnapshotNamePrefixMaxLen) +
+			" characters, which leaves room for the date and time within Proxmox's " +
+			strconv.Itoa(proxmox.SnapshotMaxNameLen) + "-character limit on a snapshot name.",
+	}
 }
 
 // registerScheduleEndpoints declares ScheduleHandler's four routes.
@@ -168,7 +177,8 @@ func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 		Method: fiber.MethodPut,
 		Path:   scheduleScope + "/:id",
 		Description: "Update a scheduled task's cron expression, its options and whether it is enabled. " +
-			"The resource it acts on cannot be changed.",
+			"The resource it acts on cannot be changed. A new cron expression, or a change to enabled, " +
+			"counts the next run from now; otherwise the stored next run stands.",
 		Group:       "Tasks",
 		Permissions: clusterCheck("manage", "schedule"),
 		Parameters: clusterParams(apischema.Properties{
@@ -180,7 +190,7 @@ func registerScheduleEndpoints(reg *Registry, h *handlers.ScheduleHandler) {
 				Description: "Scheduled task identifier.",
 			},
 			"schedule": scheduleSpecParam,
-			"params":   scheduleParamsParam,
+			"params":   scheduleUpdateParamsParam,
 			"enabled":  optFlag("Whether the task fires. Omitted disables it, which is what the handler has always read out of a body that left it out."),
 		}),
 		Handler: h.Update,
