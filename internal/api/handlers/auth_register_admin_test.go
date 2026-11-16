@@ -238,7 +238,7 @@ func TestRegister_TheTransactionTakesTheAdvisoryLockBeforeItCounts(t *testing.T)
 				names = append(names, st.name)
 			}
 		}
-		if want := []string{"SELECT", "CountUsers", "EmailTakenIgnoringCase", "CreateUser"}; !reflect.DeepEqual(names, want) {
+		if want := []string{"SELECT", "CountUsers", "EmailTakenIgnoringCase", "CreateUser", "AssignUserRole"}; !reflect.DeepEqual(names, want) {
 			t.Fatalf("the registration transaction ran %v, want %v: the advisory lock first, then the count, then the account", names, want)
 		}
 		if lock.sql != registerLockSQL {
@@ -342,5 +342,29 @@ func TestRegister_TheGateIsManageUserNotTheLegacyRole(t *testing.T) {
 		if resp.StatusCode != tc.want {
 			t.Errorf("a caller holding %s: status %d, want %d", tc.grant, resp.StatusCode, tc.want)
 		}
+	}
+}
+
+// TestRegister_ARoleThatCannotBeAssignedCreatesNoAccount: the role is assigned in the
+// registration's transaction, so its failure is the registration's: a 500 that says no
+// account was created, and none was, rather than a 201 for an account with no role.
+func TestRegister_ARoleThatCannotBeAssignedCreatesNoAccount(t *testing.T) {
+	t.Parallel()
+	admin := epochUser(t, epochAdminEmail, 0)
+	admin.Role = "admin"
+	store := newEpochStore(admin)
+	store.failOn["AssignUserRole"] = errRaceBug
+	a := newEpochApp(t, store, epochOptions{})
+
+	resp := registerAs(t, a, admin.ID, registerAdminBody("carol@example.com"))
+	body := decodeObject(t, resp)
+	if resp.StatusCode != http.StatusInternalServerError || body["message"] != "Failed to assign the account's role; no account was created" {
+		t.Errorf("answer = %d %v, want the 500 that says no account was created", resp.StatusCode, body)
+	}
+	if n := len(store.users); n != 1 {
+		t.Errorf("%d accounts exist, want only the administrator's", n)
+	}
+	if rows := store.auditRowsWritten(); len(rows) != 0 {
+		t.Errorf("audit rows = %v, want none", rows)
 	}
 }

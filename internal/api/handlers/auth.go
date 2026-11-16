@@ -670,21 +670,24 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create user")
 	}
 
-	if err := tx.Commit(c.Context()); err != nil {
-		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit registration")
+	// The RBAC role (admin -> Admin, user -> Viewer) is part of the registration's
+	// transaction: an account whose role could not be assigned is not created, so the
+	// caller never hears 201 for an account that has no role.
+	rbacRoleID := uuid.MustParse("a0000000-0000-0000-0000-000000000003") // Viewer
+	if role == "admin" {
+		rbacRoleID = uuid.MustParse("a0000000-0000-0000-0000-000000000001") // Admin
+	}
+	if _, err := q.AssignUserRole(c.Context(), db.AssignUserRoleParams{
+		UserID:    user.ID,
+		RoleID:    rbacRoleID,
+		ScopeType: "global",
+	}); err != nil {
+		slog.Error("register: could not assign the account's role; the account was not created", "error", err)
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to assign the account's role; no account was created")
 	}
 
-	// Assign RBAC role: admin -> Admin, user -> Viewer
-	rbacRoleID := "a0000000-0000-0000-0000-000000000003" // Viewer
-	if role == "admin" {
-		rbacRoleID = "a0000000-0000-0000-0000-000000000001" // Admin
-	}
-	if roleUUID, parseErr := uuid.Parse(rbacRoleID); parseErr == nil {
-		_, _ = h.queries.AssignUserRole(c.Context(), db.AssignUserRoleParams{
-			UserID:    user.ID,
-			RoleID:    roleUUID,
-			ScopeType: "global",
-		})
+	if err := tx.Commit(c.Context()); err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to commit registration")
 	}
 
 	// An administrator created this account for someone else. The administrator is

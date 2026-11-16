@@ -49,7 +49,9 @@ so no browser or proxy cache keeps a token or a read.
    No session is created for the new account, no access token is returned and no
    cookie is set, so the administrator's own session is untouched; the new account
    signs in for itself with the password it was given. The `register` audit entry
-   names the administrator as the actor and the new account as what was acted on. An
+   names the administrator as the actor and the new account as what was acted on.
+   The account's RBAC role (Admin for the first, Viewer after) is assigned in the same
+   transaction: if it cannot be, the answer is `500` and no account exists. An
    earlier release answered an administrator's request with a session for the new
    account instead — its access token in the body, its refresh cookie on the
    administrator's browser — so a client that read `access_token` from that response
