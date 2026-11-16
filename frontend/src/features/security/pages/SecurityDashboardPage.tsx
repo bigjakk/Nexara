@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/EmptyState";
+import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { SettingsSection } from "@/components/page/Settings";
@@ -88,8 +89,8 @@ export function SecurityDashboardPage() {
     (clusters && clusters.length > 0 ? (clusters[0]?.id ?? "") : "");
 
   // CVE scanning hooks
-  const { data: posture, isLoading: postureLoading } =
-    useSecurityPosture(activeClusterId);
+  const postureQuery = useSecurityPosture(activeClusterId);
+  const { data: posture, isLoading: postureLoading } = postureQuery;
   const { data: scans, isLoading: scansLoading } = useCVEScans(activeClusterId);
   const triggerScan = useTriggerScan();
 
@@ -195,9 +196,9 @@ export function SecurityDashboardPage() {
         {/* Vulnerability Scanning Tab: what the last scan found, the scans
             themselves, then how scanning is set up. */}
         <TabsContent value="vulnerabilities" className="mt-5 space-y-4">
-          {postureLoading ? (
-            <Skeleton className="h-32 w-full rounded-[10px]" />
-          ) : posture ? (
+          {/* Without a posture, the kit's notice says why: still loading, or
+              a read that failed, which must not look like an empty page. */}
+          {posture ? (
             <>
               <PosturePanel
                 posture={posture}
@@ -212,7 +213,14 @@ export function SecurityDashboardPage() {
                 trackCount={posture.track_count}
               />
             </>
-          ) : null}
+          ) : (
+            <QueryStateNotice
+              query={postureQuery}
+              subject={t("postureSubject")}
+              empty={null}
+              skeletonClassName="h-32 w-full rounded-[10px]"
+            />
+          )}
 
           {selectedScanId ? (
             <VulnerabilityTable

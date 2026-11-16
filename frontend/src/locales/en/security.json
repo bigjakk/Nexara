@@ -5,6 +5,7 @@
   "noClustersConfigured": "No clusters configured. Add a cluster first.",
   "scanNow": "Scan now",
   "securityPosture": "Security Posture",
+  "postureSubject": "the security posture",
   "scoreOf100": "/100",
   "nodesScanned": "{{scanned}}/{{total}} nodes scanned",
   "vulnerabilitiesFound": "{{count}} vulnerabilities found",
