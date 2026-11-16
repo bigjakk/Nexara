@@ -85,8 +85,8 @@ func TestTOTPSetup_ADirectoryPasswordCountsInTheSignInBudget(t *testing.T) {
 	if resp, _ := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("signing in with the right password after the lock = %d, want 429", resp.StatusCode)
 	}
-	if rows, _ := auditOf(a, "login_locked"); len(rows) != 1 {
-		t.Errorf("login_locked rows = %v, want the one of the lock", rows)
+	if rows, _ := auditOf(a, "login_locked"); len(rows) != 2 {
+		t.Errorf("login_locked rows = %v, want two: the name's lock and the entry's, both armed by the last one", rows)
 	}
 }
 
@@ -104,5 +104,27 @@ func TestTOTPSetup_ARightDirectoryPasswordGivesBackItsAttempt(t *testing.T) {
 	}
 	if resp, body := a.loginAs(t, "carol", true); resp.StatusCode != http.StatusOK {
 		t.Errorf("signing in after the setup = %d %v, want 200: the right password left the lock armed", resp.StatusCode, body)
+	}
+}
+
+// TestTOTPSetup_AnAttemptNotCheckedLeavesNoLockArmed: when the name's attempt is the one
+// that arms its lock and the entry's budget is already locked, no password is checked,
+// so the name's attempt is handed back and its lock is not left armed unrecorded.
+func TestTOTPSetup_AnAttemptNotCheckedLeavesNoLockArmed(t *testing.T) {
+	t.Parallel()
+	a, carol, binds := directorySetupApp(t, "carol@example.com")
+	store, ctx := a.auth.loginLockoutStore(), t.Context()
+	name, entry := a.auth.loginSubject("carol"), a.auth.loginEntrySubject("uid=carol,ou=people,dc=example,dc=com")
+	for range loginLockoutThreshold - 1 {
+		_, _ = store.reserve(ctx, name)
+	}
+	for range loginLockoutThreshold {
+		_, _ = store.reserve(ctx, entry)
+	}
+	if got := a.beginSetupAs(t, carol, racePassword); got != http.StatusTooManyRequests || binds.Load() != 0 {
+		t.Fatalf("with the entry locked = %d after %d binds, want 429 and no bind", got, binds.Load())
+	}
+	if res, _ := store.reserve(ctx, name); res.admission == lockoutRefused {
+		t.Error("the name's budget is locked although no password was checked against it")
 	}
 }

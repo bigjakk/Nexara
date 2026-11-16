@@ -1071,24 +1071,36 @@ func (h *AuthHandler) ProveDirectoryPassword(c fiber.Ctx, userID uuid.UUID, pass
 		return fiber.NewError(fiber.StatusForbidden, totpDirectoryEntryMissingMessage)
 	}
 
+	// An attempt admitted here and then not checked (the next budget is locked, or
+	// could not be counted) is handed back, so it cannot leave a lock armed that no
+	// password tripped and no audit row records.
 	attempts := make([]loginAttempt, 0, 2)
 	for _, subject := range []uuid.UUID{h.loginSubject(name), h.loginEntrySubject(entry.DN)} {
 		a, locked := h.admitLoginAttempt(c, subject)
-		if locked != nil {
-			return locked
+		if locked == nil && !a.counted {
+			locked = fiber.NewError(fiber.StatusServiceUnavailable, totpSetupUnavailableMessage)
 		}
-		if !a.counted {
-			return fiber.NewError(fiber.StatusServiceUnavailable, totpSetupUnavailableMessage)
+		if locked != nil {
+			for _, admitted := range attempts {
+				h.handBackLoginAttempt(c, admitted)
+			}
+			return locked
 		}
 		attempts = append(attempts, a)
 	}
 	if err := dir.Authenticate(entry, password); err != nil {
 		slog.Warn("two-factor setup: wrong directory password", "user_id", userID, "ip", c.IP(), "reason", ldapFailureClass(err))
+		var locked error
 		for _, a := range attempts {
 			if a.res.admission == lockoutAdmittedLast {
 				h.recordLoginLock(c, a, &user)
-				return lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
+				if locked == nil {
+					locked = lockedFor(c, a.res.retryAfter, loginLockedMessage(a.res.retryAfter))
+				}
 			}
+		}
+		if locked != nil {
+			return locked
 		}
 		return fiber.NewError(fiber.StatusForbidden, "Directory password is incorrect")
 	}
