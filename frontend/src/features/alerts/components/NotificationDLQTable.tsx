@@ -26,7 +26,7 @@ import {
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { DetailField } from "@/components/DetailField";
 import { ExpandedDetailRow } from "@/components/ExpandedDetailRow";
@@ -34,6 +34,7 @@ import { DefGrid, Panel } from "@/components/page/Panel";
 import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { cn } from "@/lib/utils";
 import type { DLQState, NotificationDLQEntry } from "@/types/api";
+import { DateTime } from "@/components/DateTime";
 
 const STATE_VARIANTS: Record<DLQState, BadgeVariant> = {
   pending: "destructive",
@@ -215,7 +216,7 @@ export function NotificationDLQTable() {
           del.mutate(entry.id);
         }}
         title={(entry) =>
-          `Delete the failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}?`
+          `Delete the failed notification to ${entry.channel_name} from ${formatDateTime(entry.created_at)}?`
         }
         description={() =>
           "The entry, its stored payload and its last error are deleted, so this notification can no longer be retried or inspected. This cannot be undone."
@@ -287,7 +288,7 @@ function DLQRow({
           {entry.last_error}
         </TableCell>
         <TableCell className="text-xs text-muted-foreground">
-          {formatRelativeTime(entry.created_at)}
+          <DateTime value={entry.created_at} />
         </TableCell>
         {canManage && (
           <TableCell
@@ -315,7 +316,7 @@ function DLQRow({
                 </>
               )}
               <Button
-                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatRelativeTime(entry.created_at)}`}
+                aria-label={`Delete failed notification to ${entry.channel_name} from ${formatDateTime(entry.created_at)}`}
                 variant="ghost"
                 size="sm"
                 className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
@@ -334,10 +335,10 @@ function DLQRow({
               {entry.failure_kind}
             </DetailField>
             <DetailField label="Created" variant="mono">
-              {entry.created_at}
+              <DateTime value={entry.created_at} exact />
             </DetailField>
             <DetailField label="Last update" variant="mono">
-              {entry.updated_at}
+              <DateTime value={entry.updated_at} exact />
             </DetailField>
             {entry.alert_id && (
               <DetailField label="Alert ID" variant="mono">

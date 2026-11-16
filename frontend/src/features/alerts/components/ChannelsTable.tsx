@@ -24,6 +24,7 @@ import { Panel } from "@/components/page/Panel";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { cn } from "@/lib/utils";
 import type { ChannelType, NotificationChannel } from "@/types/api";
+import { DateTime } from "@/components/DateTime";
 
 const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
   email: "Email",
@@ -147,7 +148,7 @@ export function ChannelsTable() {
                 )}
               </TableCell>
               <TableCell className="text-muted-foreground">
-                {new Date(ch.created_at).toLocaleDateString()}
+                <DateTime value={ch.created_at} kind="date" />
               </TableCell>
               {canManage && (
                 <TableCell className="text-right">
