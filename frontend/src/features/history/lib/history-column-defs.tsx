@@ -19,9 +19,9 @@ import { LinkedTaskBadge } from "@/components/LinkedTaskBadge";
 import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
-import { formatDateTime } from "@/lib/format";
 import type { HistoryEntry } from "../types/history";
 import type { HistoryCellCtx, HistoryColumnKey } from "./history";
+import { DateTime } from "@/components/DateTime";
 
 /** A plain render helper rather than a component, so this module exports only
  *  data and fast refresh treats it as such. */
@@ -56,7 +56,7 @@ export const HISTORY_COLUMNS: ColumnDef<
           className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${ctx.expanded ? "" : "-rotate-90"}`}
         />
         {statusIcon(ctx.display)}
-        {formatDateTime(entry.occurred_at)}
+        <DateTime value={entry.occurred_at} />
       </div>
     ),
   },

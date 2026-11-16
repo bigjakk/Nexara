@@ -13,7 +13,7 @@ import { TaskLogSection } from "@/components/TaskLogSection";
 import { displayProgress, parseDetails } from "@/components/layout/task-status";
 import { haRequester, linkedTaskRole } from "@/components/layout/linked-task";
 import { useColumnLayout, type ColumnLayout } from "@/hooks/useColumnLayout";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useTaskLog, useTaskStatus } from "@/features/tasks/api/tasks-queries";
 import {
@@ -56,6 +56,7 @@ import type {
   HistoryTarget,
   HistoryWindow,
 } from "../types/history";
+import { DateTime } from "@/components/DateTime";
 
 type HistoryLayout = ColumnLayout<
   HistoryEntry,
@@ -200,7 +201,7 @@ function HistoryRow({
                       : "row.when",
                 )}
               </span>
-              <span>{formatDateTime(entry.occurred_at)}</span>
+              <span><DateTime value={entry.occurred_at} /></span>
 
               {entry.last_seen_at && !notice && (
                 <>
@@ -215,7 +216,7 @@ function HistoryRow({
                               status: entry.from_status,
                             })}
                   </span>
-                  <span>{formatDateTime(entry.last_seen_at)}</span>
+                  <span><DateTime value={entry.last_seen_at} /></span>
                 </>
               )}
 
@@ -224,7 +225,7 @@ function HistoryRow({
                   <span className="text-muted-foreground">
                     {shared("row.finished")}
                   </span>
-                  <span>{formatDateTime(entry.finished_at)}</span>
+                  <span><DateTime value={entry.finished_at} /></span>
                 </>
               )}
 
@@ -636,7 +637,7 @@ export function HistoryTimeline({
                   : olderOn && !canShowOlder
                     ? "searchedFromStuck"
                     : "searchedFrom",
-                { when: formatDateTime(wholeFrom) },
+                { when: formatExactDateTime(wholeFrom) },
               )}
               {!narrowed &&
                 kind.rowCap !== undefined &&

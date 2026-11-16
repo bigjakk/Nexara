@@ -4,7 +4,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
-import { formatDateTime } from "@/lib/format";
+import { formatExactDateTime } from "@/lib/format";
 import { makeHistoryEntry } from "@/test/history.fixtures";
 import { historyKind } from "../lib/history";
 import type { HistoryPage, HistoryTarget } from "../types/history";
@@ -112,7 +112,7 @@ describe("HistoryTimeline", () => {
     );
     // The note, with the hint a read that is not narrowed carries.
     const note = (when: string) =>
-      `Complete back to ${formatDateTime(when)}; Show older lists the entries before it. ` +
+      `Complete back to ${formatExactDateTime(when)}; Show older lists the entries before it. ` +
       "A read narrowed by type or source searches the newest 1,000 entries of each kind of record instead of 100.";
     expect(await screen.findByText(note(s1))).toBeInTheDocument();
     const showOlder = () =>
