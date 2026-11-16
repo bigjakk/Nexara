@@ -186,7 +186,9 @@ describe("FavoritesSection", () => {
     serveFavorites([favorite({ run_state: "guest-panicked" })]);
     renderSection();
 
-    expect(await screen.findByRole("img", { name: "Panicked" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: "Panicked" }),
+    ).toBeInTheDocument();
   });
 
   it("folds away and back", async () => {

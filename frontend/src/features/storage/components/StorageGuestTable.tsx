@@ -283,7 +283,10 @@ export function StorageGuestTable({
                   </TableCell>
                   <TableCell>
                     {row.status ? (
-                      <StatusBadge status={row.status} runState={row.runState} />
+                      <StatusBadge
+                        status={row.status}
+                        runState={row.runState}
+                      />
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
