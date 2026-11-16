@@ -328,7 +328,8 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 // TestLDAPSync_AnAcknowledgedSyncKeepsTheCallerAndTheLastUserManager: a sync that
 // deactivates most of a directory never deactivates the administrator running it, or
 // the last active holder of global manage:user, who could not be replaced: both are
-// left active, counted as kept and skipped, in the answer and the audit row.
+// left active, counted as kept and skipped, in the answer and the audit row. Of two
+// managers both missing, one is kept.
 func TestLDAPSync_AnAcknowledgedSyncKeepsTheCallerAndTheLastUserManager(t *testing.T) {
 	t.Parallel()
 	users := make([]db.User, 0, 4)
@@ -348,6 +349,23 @@ func TestLDAPSync_AnAcknowledgedSyncKeepsTheCallerAndTheLastUserManager(t *testi
 		t.Errorf("status %d %v, caller active %t, manager active %t, audit %v; want 200, both kept, the others deactivated",
 			resp.StatusCode, body, store.user(caller.ID).IsActive, store.user(manager.ID).IsActive, details)
 	}
+
+	// Two user managers both missing, run by someone else (as the schedule is): the
+	// first deactivated leaves the second the last, who is kept.
+	store = newEpochStore(users...)
+	store.grants = map[uuid.UUID][]string{users[1].ID: {"manage:user"}, users[2].ID: {"manage:user"}}
+	a, _, _ = ldapSyncApp(t, store, &fakeDirectory{entries: map[string]auth.LDAPUser{}})
+	a.send(t, http.MethodGet, "/probe?ack=4", "", map[string]string{"X-Test-Acting-User": uuid.NewString()}, 30*time.Second)
+	if kept := btoi(store.user(users[1].ID).IsActive) + btoi(store.user(users[2].ID).IsActive); kept != 1 {
+		t.Errorf("with two missing user managers, %d kept active; want exactly one", kept)
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // TestLDAPSync_AStoredFilterThatDoesNotCompileStopsTheSync: a user filter saved before go-ldap
