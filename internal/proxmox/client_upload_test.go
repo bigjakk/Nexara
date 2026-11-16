@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,10 +57,13 @@ func (f *heldFile) Read(p []byte) (int, error) {
 func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 	t.Parallel()
 	file := &heldFile{holding: make(chan struct{}), free: make(chan struct{})}
+	stop := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-file.holding:
 		case <-r.Context().Done():
+			return
+		case <-stop: // a failed run: let srv.Close end instead of waiting on this handler
 			return
 		}
 		const answer = `{"message":"storage 'store01' is not online\n"}`
@@ -69,6 +73,11 @@ func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 		_, _ = io.WriteString(w, answer)
 	}))
 	t.Cleanup(srv.Close)
+	var freeOnce sync.Once
+	free := func() { freeOnce.Do(func() { close(file.free) }) }
+	// Runs before srv.Close (cleanups run last-in first-out), so a run that
+	// failed early ends as a failure: the handler and the held read are released.
+	t.Cleanup(func() { close(stop); free() })
 
 	done := make(chan error, 1)
 	go func() {
@@ -89,7 +98,7 @@ func TestUploadToStorage_ReturnsOnlyOnceNoReadIsGoing(t *testing.T) {
 		t.Fatal("UploadToStorage returned while a read of the file was still going")
 	case <-time.After(time.Second):
 	}
-	close(file.free)
+	free()
 	var apiErr *APIError
 	select {
 	case err := <-done:
