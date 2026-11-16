@@ -208,6 +208,15 @@ func EnsureHistoryIndexes(ctx context.Context, pool *pgxpool.Pool, logger *slog.
 		}
 		logger.Info("history indexes: built", "index", ix.name, "took", time.Since(start).Round(time.Millisecond))
 	}
+	// Every index above is valid now, so the two narrow ones each of two of them
+	// serves are redundant. Migration 000153 drops them only when their wide
+	// index already existed; an install that had not built it by then drops
+	// them here, once it has.
+	for _, narrow := range []string{"idx_audit_log_cluster_id", "idx_audit_log_cluster_vmid"} {
+		if _, err := conn.Exec(ctx, "DROP INDEX CONCURRENTLY IF EXISTS public."+narrow, pgx.QueryExecModeSimpleProtocol); err != nil {
+			return fmt.Errorf("drop the redundant index %s: %w", narrow, err)
+		}
+	}
 	return nil
 }
 

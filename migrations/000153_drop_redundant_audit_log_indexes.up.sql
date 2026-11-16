@@ -13,9 +13,9 @@
 -- The wide ones are built after startup by db.EnsureHistoryIndexes, not by a
 -- migration (see 000117's header), so an install upgrading straight from a
 -- release before that has not got them yet. Each narrow index is therefore
--- dropped only when its wide one exists and is valid; otherwise it stays, and
--- costs only its upkeep. Interrupted, the transaction rolls back and the next
--- start runs it again.
+-- dropped only when its wide one exists and is valid; otherwise it stays until
+-- EnsureHistoryIndexes has built the wide one, and drops it then. Interrupted,
+-- the transaction rolls back and the next start runs it again.
 
 DO $$
 BEGIN
