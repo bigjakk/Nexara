@@ -512,6 +512,7 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 
 	// PBS servers sync on a loop of their own (below), floored at 30s.
 	pbsInterval := max(cfg.MetricsCollectInterval, 30*time.Second)
+	syncer.SetPBSInterval(pbsInterval)
 
 	runWithLeaderRetry(ctx, application.Pool, "collector", logger, func(ctx context.Context) {
 		logger.Info("collector started",

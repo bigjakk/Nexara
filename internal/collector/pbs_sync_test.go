@@ -22,14 +22,10 @@ type pbsFakeClient struct {
 	PBSProxmoxClient
 	datastoresErr, syncErr, verifyErr error
 	snapshotsErrFor                   string // the datastore whose snapshots cannot be listed
-	hang                              bool   // the first read answers only when its context ends
+	hang                              bool   // a snapshot listing answers only when its context ends
 }
 
-func (c *pbsFakeClient) GetDatastoreStatus(ctx context.Context) ([]proxmox.PBSDatastoreStatus, error) {
-	if c.hang {
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}
+func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatastoreStatus, error) {
 	return nil, nil
 }
 
@@ -37,14 +33,21 @@ func (c *pbsFakeClient) GetDatastores(context.Context) ([]proxmox.PBSDatastore, 
 	return []proxmox.PBSDatastore{{Name: "datastore01"}, {Name: "datastore02"}}, c.datastoresErr
 }
 
-func (c *pbsFakeClient) GetSnapshots(_ context.Context, store string) ([]proxmox.PBSSnapshot, error) {
+func (c *pbsFakeClient) GetSnapshots(ctx context.Context, store string) ([]proxmox.PBSSnapshot, error) {
+	if c.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if store == c.snapshotsErrFor {
 		return nil, errors.New("no answer")
 	}
 	return []proxmox.PBSSnapshot{{BackupType: "vm", BackupID: "100", BackupTime: 1}}, nil
 }
 
-func (c *pbsFakeClient) GetSyncJobs(context.Context) ([]proxmox.PBSSyncJob, error) {
+func (c *pbsFakeClient) GetSyncJobs(ctx context.Context) ([]proxmox.PBSSyncJob, error) {
+	if err := ctx.Err(); err != nil { // as the real client fails a call on an ended context
+		return nil, err
+	}
 	return []proxmox.PBSSyncJob{{ID: "s-01", Store: "datastore01"}}, c.syncErr
 }
 
@@ -133,9 +136,10 @@ func TestSyncAllPBSClassifiesGlobalChanges(t *testing.T) {
 	}
 }
 
-// One PBS server that does not answer holds the pass only for its own turn:
-// the server after it is still synced. Without a deadline per server the pass
-// would wait on the first for as long as its connection stays open.
+// One PBS server whose snapshot listing does not answer holds the pass only for
+// its own turn: the server after it is still synced, and its own jobs, read
+// before the slow listings, are written. Without a deadline per server the pass
+// would wait on it for as long as its connection stays open.
 func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 	t.Parallel()
 	secret, err := crypto.Encrypt("secret-token-value", testEncryptionKey)
@@ -144,8 +148,9 @@ func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 	}
 	hung := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.20:8007", TokenSecretEncrypted: secret}
 	next := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.21:8007", TokenSecretEncrypted: secret}
+	mq := &mockQueries{pbsServers: []db.PbsServer{hung, next}}
 	s := &Syncer{
-		queries:          &mockQueries{pbsServers: []db.PbsServer{hung, next}},
+		queries:          mq,
 		encryptionKey:    testEncryptionKey,
 		pbsServerTimeout: 50 * time.Millisecond,
 		pbsClientFactory: func(url, _, _, _ string) (PBSProxmoxClient, error) {
@@ -161,8 +166,9 @@ func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 		for _, r := range results {
 			synced = append(synced, r.PBSServerID)
 		}
-		if !slices.Contains(synced, next.ID) {
-			t.Errorf("synced %v, want the server after the hung one among them", synced)
+		if !slices.Contains(synced, next.ID) || !slices.Contains(mq.pbsSyncJobsFor, hung.ID) {
+			t.Errorf("synced %v, sync jobs written for %v; want the server after the hung one synced and "+
+				"the hung one's jobs written", synced, mq.pbsSyncJobsFor)
 		}
 	case <-time.After(30 * time.Second): // 600x the turn: only a pass with no deadline gets here
 		t.Fatal("the pass never got past a server that did not answer")

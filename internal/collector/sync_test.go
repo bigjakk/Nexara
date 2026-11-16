@@ -44,6 +44,7 @@ type mockQueries struct {
 	upsertVMFailures              int // UpsertVM fails this many more calls, then succeeds
 	unreportedVMCalls             []db.UpdateUnreportedVMParams
 	pbsServers                    []db.PbsServer // ListActivePBSServers' answer
+	pbsSyncJobsFor                []uuid.UUID    // the server of each sync job written
 	upsertStorageCalls            []db.UpsertStoragePoolParams
 	replicationUpserts            []db.UpsertReplicationJobParams
 	replicationUpsertErr          error
@@ -525,7 +526,8 @@ func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, arg db.UpsertPBSSnaps
 	return db.PbsSnapshot{}, nil
 }
 
-func (m *mockQueries) UpsertPBSSyncJob(_ context.Context, _ db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error) {
+func (m *mockQueries) UpsertPBSSyncJob(_ context.Context, arg db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error) {
+	m.pbsSyncJobsFor = append(m.pbsSyncJobsFor, arg.PbsServerID)
 	return db.PbsSyncJob{}, m.pbsSyncJobUpsertErr
 }
 

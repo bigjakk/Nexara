@@ -336,7 +336,8 @@ type Syncer struct {
 	encryptionKey        string
 	clientFactory        ClientFactory
 	pbsClientFactory     PBSClientFactory
-	pbsServerTimeout     time.Duration        // one PBS server's turn in SyncAllPBS; 0 is pbsServerSyncTimeout
+	pbsServerTimeout     time.Duration        // one PBS server's turn in SyncAllPBS; 0 derives it (pbsServerSyncTimeout)
+	pbsInterval          time.Duration        // how often the PBS pass runs (SetPBSInterval)
 	cache                *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor        *HealthMonitor
 	eventPub             eventPublisher
@@ -1475,9 +1476,20 @@ func appendOSDSnapshots(dst []cephOSDMetricSnapshot, clusterID uuid.UUID, node *
 }
 
 // pbsServerSyncTimeout bounds one PBS server's turn in SyncAllPBS, as
-// clusterSyncTimeout's floor bounds a cluster's: generous for a large datastore's
+// clusterSyncTimeout bounds a cluster's: generous for a large datastore's
 // snapshot listing, but finite.
-const pbsServerSyncTimeout = 2 * time.Minute
+//
+// It is at least twice proxmox.CachedClientTimeout, the bound on one call to
+// the PBS: a snapshot listing allowed to take that long must leave room for the
+// rest of the pass, or a large server would be cut at the same point on every
+// pass and its later datastores never refresh. Four PBS intervals when that is
+// longer (SetPBSInterval), so a slow cadence is never cut shorter than the
+// passes it spaces.
+const pbsServerSyncTimeout = 2 * proxmox.CachedClientTimeout
+
+// SetPBSInterval tells the syncer how often the PBS pass runs, which scales each
+// server's deadline (pbsServerSyncTimeout).
+func (s *Syncer) SetPBSInterval(d time.Duration) { s.pbsInterval = d }
 
 // SyncAllPBS syncs all active PBS servers and returns collected metric results.
 func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
@@ -1487,7 +1499,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		return nil
 	}
 
-	timeout := cmp.Or(s.pbsServerTimeout, pbsServerSyncTimeout)
+	timeout := cmp.Or(s.pbsServerTimeout, max(pbsServerSyncTimeout, 4*s.pbsInterval))
 	var results []*PBSMetricResult
 	for _, server := range servers {
 		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
@@ -1496,6 +1508,10 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		// its connection stays open.
 		serverCtx, cancel := context.WithTimeout(ctx, timeout)
 		result, err := s.syncPBSServer(serverCtx, server)
+		if errors.Is(serverCtx.Err(), context.DeadlineExceeded) {
+			s.logger.Warn("PBS server sync ran out of its deadline; what it had not read yet waits for the next pass",
+				"pbs_id", server.ID, "deadline", timeout)
+		}
 		cancel()
 		if err != nil {
 			s.logger.Error("failed to sync PBS server",
@@ -1543,62 +1559,6 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 				Used:        ds.Used,
 				Avail:       ds.Avail,
 			})
-		}
-	}
-
-	// Sync snapshots per datastore. They are pruned below only after the
-	// datastores were listed, and only what a listing lacked: a snapshot a
-	// listing showed but failed to write is kept, and a datastore whose
-	// snapshots could not be listed keeps its rows for a day past the last
-	// listing that refreshed them (DeleteStalePBSSnapshots). Before this, a PBS
-	// unreachable for longer than the grace lost every snapshot row, and a
-	// datastore that did not answer lost its own.
-	datastores, err := client.GetDatastores(ctx)
-	datastoresListed := err == nil
-	var unlistable []string
-	kept := []pbsSnapshotKey{}
-	if err != nil {
-		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
-	} else {
-		s.logger.Debug("PBS datastores", "pbs_id", server.ID, "count", len(datastores))
-		for _, ds := range datastores {
-			snaps, err := client.GetSnapshots(ctx, ds.Name)
-			if err != nil {
-				s.logger.Warn("failed to get PBS snapshots",
-					"pbs_id", server.ID,
-					"datastore", ds.Name,
-					"error", err,
-				)
-				unlistable = append(unlistable, ds.Name)
-				continue
-			}
-			s.logger.Debug("PBS snapshots", "pbs_id", server.ID, "datastore", ds.Name, "count", len(snaps))
-			for _, snap := range snaps {
-				verified := false
-				if snap.Verification != nil && snap.Verification.State == "ok" {
-					verified = true
-				}
-				_, uErr := s.queries.UpsertPBSSnapshot(ctx, db.UpsertPBSSnapshotParams{
-					PbsServerID: server.ID,
-					Datastore:   ds.Name,
-					BackupType:  snap.BackupType,
-					BackupID:    snap.BackupID,
-					BackupTime:  snap.BackupTime,
-					Size:        snap.Size,
-					Verified:    verified,
-					Protected:   snap.Protected,
-					Comment:     snap.Comment,
-					Owner:       snap.Owner,
-				})
-				if uErr != nil {
-					s.logger.Warn("failed to upsert PBS snapshot",
-						"pbs_id", server.ID,
-						"error", uErr,
-					)
-					kept = append(kept, pbsSnapshotKey{Datastore: ds.Name, BackupType: snap.BackupType,
-						BackupID: snap.BackupID, BackupTime: snap.BackupTime})
-				}
-			}
 		}
 	}
 
@@ -1654,6 +1614,64 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 			if uErr != nil {
 				s.logger.Warn("failed to upsert PBS verify job", "pbs_id", server.ID, "error", uErr)
 				verifyKept = append(verifyKept, job.ID)
+			}
+		}
+	}
+
+	// Sync snapshots per datastore, after the jobs: a large datastore's listing
+	// is the slow read, and one that runs into the server's deadline must not
+	// cost the jobs their sync. They are pruned below only after the
+	// datastores were listed, and only what a listing lacked: a snapshot a
+	// listing showed but failed to write is kept, and a datastore whose
+	// snapshots could not be listed keeps its rows for a day past the last
+	// listing that refreshed them (DeleteStalePBSSnapshots). Before this, a PBS
+	// unreachable for longer than the grace lost every snapshot row, and a
+	// datastore that did not answer lost its own.
+	datastores, err := client.GetDatastores(ctx)
+	datastoresListed := err == nil
+	var unlistable []string
+	kept := []pbsSnapshotKey{}
+	if err != nil {
+		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
+	} else {
+		s.logger.Debug("PBS datastores", "pbs_id", server.ID, "count", len(datastores))
+		for _, ds := range datastores {
+			snaps, err := client.GetSnapshots(ctx, ds.Name)
+			if err != nil {
+				s.logger.Warn("failed to get PBS snapshots",
+					"pbs_id", server.ID,
+					"datastore", ds.Name,
+					"error", err,
+				)
+				unlistable = append(unlistable, ds.Name)
+				continue
+			}
+			s.logger.Debug("PBS snapshots", "pbs_id", server.ID, "datastore", ds.Name, "count", len(snaps))
+			for _, snap := range snaps {
+				verified := false
+				if snap.Verification != nil && snap.Verification.State == "ok" {
+					verified = true
+				}
+				_, uErr := s.queries.UpsertPBSSnapshot(ctx, db.UpsertPBSSnapshotParams{
+					PbsServerID: server.ID,
+					Datastore:   ds.Name,
+					BackupType:  snap.BackupType,
+					BackupID:    snap.BackupID,
+					BackupTime:  snap.BackupTime,
+					Size:        snap.Size,
+					Verified:    verified,
+					Protected:   snap.Protected,
+					Comment:     snap.Comment,
+					Owner:       snap.Owner,
+				})
+				if uErr != nil {
+					s.logger.Warn("failed to upsert PBS snapshot",
+						"pbs_id", server.ID,
+						"error", uErr,
+					)
+					kept = append(kept, pbsSnapshotKey{Datastore: ds.Name, BackupType: snap.BackupType,
+						BackupID: snap.BackupID, BackupTime: snap.BackupTime})
+				}
 			}
 		}
 	}
