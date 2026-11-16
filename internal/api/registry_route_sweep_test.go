@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -66,6 +68,37 @@ const sweepJWTSecret = "test-secret-at-least-16-chars"
 // sweepEncryptionKey is 32 bytes hex-encoded, the shape
 // config.generateEncryptionKey produces (internal/config/secrets.go).
 var sweepEncryptionKey = strings.Repeat("00", 32)
+
+// sweepOutbound keeps the sweep on the box. TestMain installs its resolver as
+// net.DefaultResolver; while armed, every name lookup fails at once and is counted, and
+// the sweep reports each route whose request made one. A lookup is the first step of any
+// dial to a name, so a handler that would reach the outside world fails the sweep instead
+// of waiting on it. Address literals skip the resolver: the pools use only loopback and
+// 192.0.2.0/24 for those.
+var sweepOutbound sweepOutboundGuard
+
+type sweepOutboundGuard struct {
+	armed   atomic.Bool
+	lookups atomic.Int64
+}
+
+func (g *sweepOutboundGuard) resolver() *net.Resolver {
+	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		if g.armed.Load() {
+			g.lookups.Add(1)
+			return nil, errors.New("route sweep: outbound name lookup refused")
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}}
+}
+
+// arm refuses lookups until t ends. Process-wide, so its caller must not be parallel.
+func (g *sweepOutboundGuard) arm(t *testing.T) {
+	t.Helper()
+	g.armed.Store(true)
+	t.Cleanup(func() { g.armed.Store(false) })
+}
 
 func newSweepPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -295,11 +328,9 @@ func sweepDispatch(app *fiber.App, method, target string, body []byte) sweepOutc
 	req.Header.Set(sweepAuthHeader, "yes")
 
 	// fiber.App.Test defaults to a 1s timeout with FailOnTimeout true
-	// (app.go). A couple of real routes bound their own outbound call at
-	// 10s (cluster fetch-fingerprint/verify-certificate,
-	// internal/changelog's fetchTimeout) — comfortably inside 15s even if
-	// this sandbox has no route to the outside world and every such call
-	// fails slow instead of fast.
+	// (app.go). No request waits on a remote host (sweepOutbound, and the
+	// refused addresses in sweepRouteOverrides), so 15s is headroom for a
+	// loaded box under -race, not for a slow connect.
 	resp, err := app.Test(req, fiber.TestConfig{Timeout: 15 * time.Second, FailOnTimeout: true})
 	if err != nil {
 		return sweepOutcome{dispatchErr: fmt.Errorf("app.Test(%s %s): %w", method, target, err)}
@@ -328,6 +359,8 @@ const (
 	sweepFindingAuthWiring
 	sweepFindingDispatchError
 	sweepFindingRoutingMiss
+	// sweepFindingOutbound is not an outcome: the request made a name lookup (sweepOutbound).
+	sweepFindingOutbound
 )
 
 func (k sweepClassification) String() string {
@@ -344,6 +377,8 @@ func (k sweepClassification) String() string {
 		return "app.Test itself failed (transport/timeout)"
 	case sweepFindingRoutingMiss:
 		return "synthesized request did not match any route (404 \"Not Found\")"
+	case sweepFindingOutbound:
+		return "handler tried to reach a host off the box (name lookup)"
 	default:
 		return "ok"
 	}
@@ -676,8 +711,10 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// optional parameter at once — cannot satisfy an exclusive-or no matter
 	// what values are chosen, so bootstrap gives way; token_id/token_secret
 	// stay under test on both variants.
+	// api_url is refused as sweepRefusedAddress refuses it on the routes below.
 	"POST " + pathPrefix + "clusters": {
-		forceRequired:       []string{"token_id", "token_secret"},
+		values:              sweepRefusedAddress("api_url").values,
+		forceRequired:       []string{"token_id", "token_secret", "allow_private_address"},
 		excludeFromOptional: []string{"bootstrap"},
 	},
 	// console-token: console_type's Enum[0] is "node_shell", and the handler
@@ -755,6 +792,33 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 		values:        map[string]any{"host": "127.0.0.1", "port": int64(1), "protocol": "udp"},
 		forceRequired: []string{"host", "port"},
 	},
+	// The routes that check or connect to an address the caller names, for the syslog
+	// test's reason: the pools' example.com and test01 need a resolver (sweepOutbound
+	// refuses it), and a TEST-NET literal would wait out each connect timeout. Nothing
+	// listens on sweepUnreachableAddr, so the real connect is refused at once, past the
+	// private-address confirmation the forced allow_private_address gives.
+	"POST " + pbsScope:                             sweepRefusedAddress("api_url"),
+	"POST " + veeamScope:                           sweepRefusedAddress("base_url"),
+	"POST " + clustersScope + "/fetch-fingerprint": sweepRefusedAddress("api_url"),
+	"PUT " + virtioWinGlobalScope + "/mirror":      sweepRefusedAddress("base_url"),
+	"POST " + nutServerScope:                       sweepRefusedHost(),
+	"POST " + nutServerScope + "/probe":            sweepRefusedHost(),
+}
+
+// sweepRefusedAddress points a URL parameter at sweepUnreachableAddr; see sweepRouteOverrides.
+func sweepRefusedAddress(name string) sweepEndpointOverride {
+	return sweepEndpointOverride{
+		values:        map[string]any{name: "https://" + sweepUnreachableAddr, "allow_private_address": true},
+		forceRequired: []string{name, "allow_private_address"},
+	}
+}
+
+// sweepRefusedHost is sweepRefusedAddress for a route that takes host and port.
+func sweepRefusedHost() sweepEndpointOverride {
+	return sweepEndpointOverride{
+		values:        map[string]any{"host": "127.0.0.1", "port": int64(1), "allow_private_address": true},
+		forceRequired: []string{"host", "port", "allow_private_address"},
+	}
 }
 
 // sweepExpectedFindings names routes where even a well-chosen synthesized request cannot
@@ -1203,8 +1267,17 @@ func sweepGated(e Endpoint) bool {
 // sweepExpectedFindings' short, cited allowlist as the one deliberate
 // exception, checked both ways every run.
 func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
+	sweepOutbound.arm(t)
+	// The guard must see a lookup, or its silence below proves nothing.
+	if _, err := net.DefaultResolver.LookupHost(context.Background(), "example.com"); err == nil || sweepOutbound.lookups.Load() == 0 {
+		t.Fatalf("the outbound guard is not net.DefaultResolver (lookup err=%v); see TestMain", err)
+	}
+	sweepOutbound.lookups.Store(0)
 	s := newSweepServer(t)
-	endpoints := s.registry.Endpoints()
+	// GET /changelog would fetch GitHub's release list; a nil service answers an empty one.
+	s.changelogHandler = handlers.NewChangelogHandler(nil)
+	reg := s.buildRegistry()
+	endpoints := reg.Endpoints()
 	if len(endpoints) == 0 {
 		t.Fatal("the server declared no registry endpoints, so this test would exercise nothing")
 	}
@@ -1217,7 +1290,7 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 	// before its handler ran — an outcome classifySweepOutcome rightly counts
 	// as fine, which would silently take those handlers out of this sweep.
 	// Membership is TestGuard_EveryRouteNamingANodeRefusesOneTheClusterDoesNotHold's.
-	mountRegistry(app, s.registry, sweepAuth(s.registry), everyNodeIsAMember(), everySessionIsLive())
+	mountRegistry(app, reg, sweepAuth(reg), everyNodeIsAMember(), everySessionIsLive())
 
 	type sweepSkip struct {
 		route  string
@@ -1234,6 +1307,7 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 
 	var (
 		exercised     int
+		attributed    int64
 		skips         []sweepSkip
 		findings      []sweepFinding
 		expectedHits  int
@@ -1255,8 +1329,14 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 						"exclusive with a sibling parameter this route also declares"})
 			}
 			exercised++
+			before := sweepOutbound.lookups.Load()
 			outcome := sweepDispatch(app, e.Method, req.target, req.body)
 			kind := sweepFindingClassification(outcome, gated)
+			if n := sweepOutbound.lookups.Load() - before; n > 0 {
+				attributed += n
+				findings = append(findings, sweepFinding{route: route, pass: v.name, kind: sweepFindingOutbound,
+					status: outcome.status, message: outcome.message})
+			}
 			if kind == sweepOK {
 				continue
 			}
@@ -1283,6 +1363,9 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 		}
 	}
 
+	if stray := sweepOutbound.lookups.Load() - attributed; stray > 0 {
+		t.Errorf("%d outbound name lookups happened outside any one request (server construction, or work a handler left running)", stray)
+	}
 	t.Logf("route sweep: %d declared endpoints, %d requests exercised, %d skipped, %d findings, %d expected",
 		len(endpoints), exercised, len(skips), len(findings), expectedHits)
 	for _, sk := range skips {

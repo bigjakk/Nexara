@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"os"
 	"testing"
 
@@ -14,5 +15,7 @@ import (
 // real time sets its own cost with auth.SetBcryptCostForTesting.
 func TestMain(m *testing.M) {
 	auth.SetBcryptCostForTesting(bcrypt.MinCost)
+	// Installed before any test starts, so arming it later races nothing; see sweepOutbound.
+	net.DefaultResolver = sweepOutbound.resolver()
 	os.Exit(m.Run())
 }
