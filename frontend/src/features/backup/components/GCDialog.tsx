@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,7 @@ interface GCDialogProps {
 }
 
 export function GCDialog({ pbsId, store }: GCDialogProps) {
+  const { t } = useTranslation("backup");
   const [open, setOpen] = useState(false);
   const gcMutation = useTriggerGC();
 
@@ -37,16 +39,19 @@ export function GCDialog({ pbsId, store }: GCDialogProps) {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5">
           <Trash2 className="h-3.5 w-3.5" />
-          Run GC
+          {t("runGC")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Run garbage collection</DialogTitle>
+          <DialogTitle>{t("gcDialog.title")}</DialogTitle>
           <DialogDescription>
-            This will start garbage collection on datastore{" "}
-            <strong>{store}</strong>. This removes unreferenced chunks and
-            reclaims disk space.
+            <Trans
+              t={t}
+              i18nKey="gcDialog.description"
+              values={{ store }}
+              components={{ strong: <strong /> }}
+            />
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -56,10 +61,10 @@ export function GCDialog({ pbsId, store }: GCDialogProps) {
               setOpen(false);
             }}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleConfirm} disabled={gcMutation.isPending}>
-            {gcMutation.isPending ? "Starting..." : "Run GC"}
+            {gcMutation.isPending ? t("starting") : t("runGC")}
           </Button>
         </DialogFooter>
       </DialogContent>

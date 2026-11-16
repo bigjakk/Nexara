@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ export function DeleteSnapshotDialog({
   open,
   onOpenChange,
 }: DeleteSnapshotDialogProps) {
+  const { t } = useTranslation("backup");
   const deleteMutation = useDeleteSnapshot();
 
   const handleDelete = () => {
@@ -48,13 +50,18 @@ export function DeleteSnapshotDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete snapshot</DialogTitle>
+          <DialogTitle>{t("deleteSnapshotDialog.title")}</DialogTitle>
           <DialogDescription>
-            Are you sure you want to delete{" "}
-            <strong>
-              {snapshot.backup_type}/{snapshot.backup_id}
-            </strong>{" "}
-            from {snapshot.datastore}? This action cannot be undone.
+            <Trans
+              t={t}
+              i18nKey="deleteSnapshotDialog.description"
+              values={{
+                type: snapshot.backup_type,
+                id: snapshot.backup_id,
+                datastore: snapshot.datastore,
+              }}
+              components={{ strong: <strong /> }}
+            />
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -64,14 +71,16 @@ export function DeleteSnapshotDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
             onClick={handleDelete}
             disabled={deleteMutation.isPending}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            {deleteMutation.isPending
+              ? t("common:deleting")
+              : t("common:delete")}
           </Button>
         </DialogFooter>
       </DialogContent>

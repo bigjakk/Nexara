@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,7 @@ export function EditPBSServerDialog({
   open,
   onOpenChange,
 }: EditPBSServerDialogProps) {
+  const { t } = useTranslation("backup");
   const [name, setName] = useState(server.name);
   const [apiUrl, setApiUrl] = useState(server.api_url);
   const [tokenId, setTokenId] = useState(server.token_id);
@@ -94,7 +96,7 @@ export function EditPBSServerDialog({
     setPrivateWarning(null);
 
     settle(updatePBS.mutateAsync(body), {
-      action: `Saving the PBS server "${server.name}"`,
+      action: t("pbsServerDialog.savingAction", { name: server.name }),
       onSuccess: () => {
         onOpenChange(false);
       },
@@ -121,15 +123,22 @@ export function EditPBSServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit PBS server</DialogTitle>
+          <DialogTitle>{t("pbsServerDialog.editTitle")}</DialogTitle>
           <DialogDescription>
-            Update the connection settings for <strong>{server.name}</strong>.
+            <Trans
+              t={t}
+              i18nKey="pbsServerDialog.editDescription"
+              values={{ name: server.name }}
+              components={{ name: <strong /> }}
+            />
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-name">Server name</Label>
+            <Label htmlFor="edit-pbs-name">
+              {t("serverDialog.serverName")}
+            </Label>
             <Input
               id="edit-pbs-name"
               value={name}
@@ -140,7 +149,9 @@ export function EditPBSServerDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-api-url">API URL</Label>
+            <Label htmlFor="edit-pbs-api-url">
+              {t("pbsServerDialog.apiUrl")}
+            </Label>
             <Input
               id="edit-pbs-api-url"
               value={apiUrl}
@@ -151,14 +162,14 @@ export function EditPBSServerDialog({
             />
             {addressChanged && (
               <p className="text-xs text-muted-foreground">
-                This server is moving to a new address, so it needs the API
-                token secret again — the stored one is only ever sent to the
-                address it was saved for.
+                {t("pbsServerDialog.addressMoved")}
               </p>
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-token-id">API token ID</Label>
+            <Label htmlFor="edit-pbs-token-id">
+              {t("pbsServerDialog.tokenId")}
+            </Label>
             <Input
               id="edit-pbs-token-id"
               value={tokenId}
@@ -170,11 +181,11 @@ export function EditPBSServerDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-pbs-token-secret">
-              API token secret{" "}
+              {t("pbsServerDialog.tokenSecret")}{" "}
               <span className="text-muted-foreground font-normal">
                 {addressChanged
-                  ? "(required: the address changed)"
-                  : "(leave blank to keep current)"}
+                  ? t("pbsServerDialog.tokenSecretRequired")
+                  : t("pbsServerDialog.tokenSecretKeep")}
               </span>
             </Label>
             <Input
@@ -182,8 +193,8 @@ export function EditPBSServerDialog({
               type="password"
               placeholder={
                 addressChanged
-                  ? "Re-enter the token secret for the new address"
-                  : "Leave blank to keep current secret"
+                  ? t("pbsServerDialog.tokenSecretReenter")
+                  : t("pbsServerDialog.tokenSecretKeepPlaceholder")
               }
               value={tokenSecret}
               onChange={(e) => {
@@ -193,21 +204,23 @@ export function EditPBSServerDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit-pbs-fingerprint">TLS fingerprint</Label>
+            <Label htmlFor="edit-pbs-fingerprint">
+              {t("pbsServerDialog.tlsFingerprint")}
+            </Label>
             <Input
               id="edit-pbs-fingerprint"
               value={tlsFingerprint}
               onChange={(e) => {
                 setTlsFingerprint(e.target.value);
               }}
-              placeholder="SHA-256 fingerprint"
+              placeholder={t("serverDialog.sha256Fingerprint")}
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="edit-pbs-cluster">
-              Associated Cluster
+              {t("pbsServerDialog.associatedCluster")}
               <span className="ml-1 text-xs font-normal text-muted-foreground">
-                (used to scope backup coverage by cluster)
+                {t("pbsServerDialog.associatedClusterHint")}
               </span>
             </Label>
             <select
@@ -218,7 +231,7 @@ export function EditPBSServerDialog({
                 setClusterId(e.target.value);
               }}
             >
-              <option value="">None</option>
+              <option value="">{t("pbsServerDialog.none")}</option>
               {clusters.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -243,7 +256,7 @@ export function EditPBSServerDialog({
             <p className="text-sm text-destructive">
               {updatePBS.error instanceof Error
                 ? updatePBS.error.message
-                : "Failed to update PBS server"}
+                : t("pbsServerDialog.updateFailed")}
             </p>
           )}
 
@@ -255,10 +268,12 @@ export function EditPBSServerDialog({
                 onOpenChange(false);
               }}
             >
-              Cancel
+              {t("common:cancel")}
             </Button>
             <Button type="submit" disabled={updatePBS.isPending}>
-              {updatePBS.isPending ? "Saving..." : "Save Changes"}
+              {updatePBS.isPending
+                ? t("common:saving")
+                : t("common:saveChanges")}
             </Button>
           </DialogFooter>
         </form>

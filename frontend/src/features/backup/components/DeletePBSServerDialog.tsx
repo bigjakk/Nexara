@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,13 +26,14 @@ export function DeletePBSServerDialog({
   open,
   onOpenChange,
 }: DeletePBSServerDialogProps) {
+  const { t } = useTranslation("backup");
   const [confirmName, setConfirmName] = useState("");
   const deleteMutation = useDeletePBSServer();
   const settle = useSaveOutcome(open);
 
   function handleDelete() {
     settle(deleteMutation.mutateAsync(server.id), {
-      action: `Deleting PBS server ${server.name}`,
+      action: t("deletePBSServerDialog.deletingAction", { name: server.name }),
       onSuccess: () => {
         onOpenChange(false);
       },
@@ -49,17 +51,19 @@ export function DeletePBSServerDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete PBS server</DialogTitle>
+          <DialogTitle>{t("deletePBSServerDialog.title")}</DialogTitle>
           <DialogDescription>
-            This will permanently remove <CopyableName name={server.name} /> and
-            all associated backup data (snapshots, sync jobs, verify jobs,
-            metrics). Type the server name to confirm.
+            <Trans
+              t={t}
+              i18nKey="deletePBSServerDialog.description"
+              components={{ name: <CopyableName name={server.name} /> }}
+            />
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <Input
             placeholder={server.name}
-            aria-label="Server name, to confirm"
+            aria-label={t("serverDialog.confirmLabel")}
             value={confirmName}
             onChange={(e) => {
               setConfirmName(e.target.value);
@@ -69,7 +73,7 @@ export function DeletePBSServerDialog({
             <p className="text-sm text-destructive">
               {deleteMutation.error instanceof Error
                 ? deleteMutation.error.message
-                : "Delete failed"}
+                : t("deleteFailed")}
             </p>
           )}
         </div>
@@ -80,14 +84,16 @@ export function DeletePBSServerDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
             disabled={confirmName !== server.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete server"}
+            {deleteMutation.isPending
+              ? t("common:deleting")
+              : t("serverDialog.deleteServer")}
           </Button>
         </DialogFooter>
       </DialogContent>

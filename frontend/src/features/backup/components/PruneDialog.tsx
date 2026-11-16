@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -27,14 +28,15 @@ function formatUnixTime(ts: number) {
 
 /** The five retention counts, in the order PBS applies them. */
 const KEEP_FIELDS = [
-  { id: "last", label: "Last" },
-  { id: "daily", label: "Daily" },
-  { id: "weekly", label: "Weekly" },
-  { id: "monthly", label: "Monthly" },
-  { id: "yearly", label: "Yearly" },
+  { id: "last", labelKey: "pruneDialog.keepLast" },
+  { id: "daily", labelKey: "pruneDialog.keepDaily" },
+  { id: "weekly", labelKey: "pruneDialog.keepWeekly" },
+  { id: "monthly", labelKey: "pruneDialog.keepMonthly" },
+  { id: "yearly", labelKey: "pruneDialog.keepYearly" },
 ] as const;
 
 export function PruneDialog({ pbsId, store }: PruneDialogProps) {
+  const { t } = useTranslation("backup");
   const [open, setOpen] = useState(false);
   const [keepLast, setKeepLast] = useState(3);
   const [keepDaily, setKeepDaily] = useState(7);
@@ -106,20 +108,19 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5">
           <Scissors className="h-3.5 w-3.5" />
-          Prune
+          {t("pruneDialog.prune")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Prune {store}</DialogTitle>
-          <DialogDescription>
-            Set how many snapshots to keep, then preview which ones would be
-            removed.
-          </DialogDescription>
+          <DialogTitle>{t("pruneDialog.title", { store })}</DialogTitle>
+          <DialogDescription>{t("pruneDialog.description")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <fieldset>
-            <legend className="pb-2 text-sm font-medium">Keep</legend>
+            <legend className="pb-2 text-sm font-medium">
+              {t("pruneDialog.keep")}
+            </legend>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(4.5rem,1fr))] gap-3">
               {KEEP_FIELDS.map((field) => (
                 <div key={field.id} className="space-y-1">
@@ -127,7 +128,7 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
                     htmlFor={`prune-${field.id}`}
                     className="text-xs text-muted-foreground"
                   >
-                    {field.label}
+                    {t(field.labelKey)}
                   </Label>
                   <Input
                     id={`prune-${field.id}`}
@@ -147,10 +148,15 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
           {preview && (
             <div className="space-y-2">
               <p className="text-sm">
-                <span className="font-medium">{toRemove.length} to remove</span>
-                <span className="text-muted-foreground">
-                  , {toKeep.length} kept
-                </span>
+                <Trans
+                  t={t}
+                  i18nKey="pruneDialog.previewSummary"
+                  values={{ remove: toRemove.length, kept: toKeep.length }}
+                  components={{
+                    remove: <span className="font-medium" />,
+                    kept: <span className="text-muted-foreground" />,
+                  }}
+                />
               </p>
               <ul className="max-h-56 divide-y overflow-auto rounded-[7px] bg-foreground/[0.04] px-3">
                 {preview.map((r) => (
@@ -165,12 +171,16 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
                       </span>
                     </span>
                     {r.protected ? (
-                      <span className="text-muted-foreground">protected</span>
+                      <span className="text-muted-foreground">
+                        {t("pruneDialog.protected")}
+                      </span>
                     ) : r.keep ? (
-                      <span className="text-muted-foreground">keep</span>
+                      <span className="text-muted-foreground">
+                        {t("pruneDialog.keepStatus")}
+                      </span>
                     ) : (
                       <span className="font-medium text-red-700 dark:text-red-400">
-                        remove
+                        {t("pruneDialog.removeStatus")}
                       </span>
                     )}
                   </li>
@@ -187,11 +197,13 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
               setPreview(null);
             }}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           {!preview && (
             <Button onClick={handlePreview} disabled={pruneMutation.isPending}>
-              {pruneMutation.isPending ? "Loading..." : "Preview"}
+              {pruneMutation.isPending
+                ? t("common:loading")
+                : t("pruneDialog.preview")}
             </Button>
           )}
           {preview && (
@@ -201,8 +213,8 @@ export function PruneDialog({ pbsId, store }: PruneDialogProps) {
               disabled={pruneMutation.isPending || toRemove.length === 0}
             >
               {pruneMutation.isPending
-                ? "Pruning..."
-                : `Remove ${String(toRemove.length)} snapshots`}
+                ? t("pruneDialog.pruning")
+                : t("pruneDialog.removeSnapshots", { n: toRemove.length })}
             </Button>
           )}
         </DialogFooter>

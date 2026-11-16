@@ -1,4 +1,5 @@
 import { Info } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 
 /**
  * States the two hard requirements up front rather than letting an operator
@@ -10,21 +11,19 @@ import { Info } from "lucide-react";
  * Veeam itself enforces.
  */
 export function VeeamRequirementsNote() {
+  const { t } = useTranslation("backup");
   return (
     <div className="panel flex gap-2.5 rounded-[10px] px-[18px] py-3 text-[12.5px] text-muted-foreground">
       <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="space-y-1">
         <p>
-          Requires <strong>Veeam Backup &amp; Replication 13.1 or newer</strong>{" "}
-          with an <strong>Enterprise Plus</strong> licence. Earlier builds do
-          not report Proxmox job state usably, and Community Edition cannot back
-          up Proxmox VE at all.
+          <Trans
+            t={t}
+            i18nKey="veeamRequirements.versionAndLicence"
+            components={{ strong: <strong /> }}
+          />
         </p>
-        <p>
-          Nexara authenticates as a single administrator account. It reads job,
-          session and restore-point state; it does not create or edit Veeam
-          jobs.
-        </p>
+        <p>{t("veeamRequirements.access")}</p>
       </div>
     </div>
   );

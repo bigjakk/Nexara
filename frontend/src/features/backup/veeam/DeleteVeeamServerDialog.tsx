@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,13 +33,16 @@ export function DeleteVeeamServerDialog({
   open,
   onOpenChange,
 }: DeleteVeeamServerDialogProps) {
+  const { t } = useTranslation("backup");
   const [confirmName, setConfirmName] = useState("");
   const deleteMutation = useDeleteVeeamServer();
   const settle = useSaveOutcome(open);
 
   function handleDelete() {
     settle(deleteMutation.mutateAsync(server.id), {
-      action: `Deleting Veeam server ${server.name}`,
+      action: t("deleteVeeamServerDialog.deletingAction", {
+        name: server.name,
+      }),
       onSuccess: () => {
         onOpenChange(false);
         setConfirmName("");
@@ -57,18 +61,20 @@ export function DeleteVeeamServerDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Veeam server</DialogTitle>
+          <DialogTitle>{t("deleteVeeamServerDialog.title")}</DialogTitle>
           <DialogDescription>
-            This removes <CopyableName name={server.name} /> from Nexara along
-            with its stored credential. Backups and jobs on the Veeam server
-            itself are not affected. Type the server name to confirm.
+            <Trans
+              t={t}
+              i18nKey="deleteVeeamServerDialog.description"
+              components={{ name: <CopyableName name={server.name} /> }}
+            />
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <Input
             placeholder={server.name}
-            aria-label="Server name, to confirm"
+            aria-label={t("serverDialog.confirmLabel")}
             value={confirmName}
             onChange={(e) => {
               setConfirmName(e.target.value);
@@ -78,7 +84,7 @@ export function DeleteVeeamServerDialog({
             <p className="text-sm text-destructive">
               {deleteMutation.error instanceof Error
                 ? deleteMutation.error.message
-                : "Failed to delete the Veeam server"}
+                : t("deleteVeeamServerDialog.deleteFailed")}
             </p>
           )}
         </div>
@@ -90,14 +96,16 @@ export function DeleteVeeamServerDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
             disabled={confirmName !== server.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete server"}
+            {deleteMutation.isPending
+              ? t("common:deleting")
+              : t("serverDialog.deleteServer")}
           </Button>
         </DialogFooter>
       </DialogContent>

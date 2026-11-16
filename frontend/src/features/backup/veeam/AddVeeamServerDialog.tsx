@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ interface AddVeeamServerDialogProps {
  * licence before it stores anything. A failure there means nothing was saved.
  */
 export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
+  const { t } = useTranslation("backup");
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -78,7 +80,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
         ...(allowPrivate ? { allow_private_address: true } : {}),
       }),
       {
-        action: `Adding Veeam server ${name}`,
+        action: t("veeamServerDialog.addingAction", { name }),
         onSuccess: () => {
           setOpen(false);
           resetForm();
@@ -91,7 +93,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
   const defaultTrigger = (
     <Button className="gap-1.5">
       <Plus className="h-4 w-4" aria-hidden="true" />
-      Add Veeam server
+      {t("veeamServerDialog.addTitle")}
     </Button>
   );
 
@@ -106,11 +108,11 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
       <DialogTrigger asChild>{trigger ?? defaultTrigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Veeam server</DialogTitle>
+          <DialogTitle>{t("veeamServerDialog.addTitle")}</DialogTitle>
           <DialogDescription>
             {certificate !== null
-              ? "Verify the TLS certificate fingerprint before connecting."
-              : "Connect a Veeam Backup & Replication server by its REST API address."}
+              ? t("serverDialog.verifyDescription")
+              : t("veeamServerDialog.addDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -119,10 +121,10 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
             <VeeamRequirementsNote />
 
             <div className="space-y-2">
-              <Label htmlFor="veeam-name">Server name</Label>
+              <Label htmlFor="veeam-name">{t("serverDialog.serverName")}</Label>
               <Input
                 id="veeam-name"
-                placeholder="Veeam Primary"
+                placeholder={t("veeamServerDialog.serverNamePlaceholder")}
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
@@ -131,7 +133,9 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="veeam-base-url">REST API URL</Label>
+              <Label htmlFor="veeam-base-url">
+                {t("veeamServerDialog.restApiUrl")}
+              </Label>
               <Input
                 id="veeam-base-url"
                 placeholder="https://veeam.example.com:9419"
@@ -142,11 +146,13 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
                 required
               />
               <p className="text-xs text-muted-foreground">
-                The REST API listens on port 9419, not the Veeam console port.
+                {t("veeamServerDialog.restApiPortHint")}
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="veeam-username">Username</Label>
+              <Label htmlFor="veeam-username">
+                {t("veeamServerDialog.username")}
+              </Label>
               <Input
                 id="veeam-username"
                 placeholder="DOMAIN\administrator"
@@ -157,13 +163,13 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
                 required
               />
               <p className="text-xs text-muted-foreground">
-                A domain account must be fully qualified, backslash included.
-                Veeam answers a mangled username with the same error as a wrong
-                password.
+                {t("veeamServerDialog.usernameHint")}
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="veeam-password">Password</Label>
+              <Label htmlFor="veeam-password">
+                {t("veeamServerDialog.password")}
+              </Label>
               <Input
                 id="veeam-password"
                 type="password"
@@ -197,10 +203,12 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
                   handleOpenChange(false);
                 }}
               >
-                Cancel
+                {t("common:cancel")}
               </Button>
               <Button type="submit" disabled={cert.pending}>
-                {cert.pending ? "Connecting..." : "Continue"}
+                {cert.pending
+                  ? t("common:connecting")
+                  : t("veeamServerDialog.continue")}
               </Button>
             </DialogFooter>
           </form>
@@ -218,19 +226,21 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
               <p className="text-sm text-destructive">
                 {createServer.error instanceof Error
                   ? createServer.error.message
-                  : "Failed to add the Veeam server"}
+                  : t("veeamServerDialog.addFailed")}
               </p>
             )}
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={cert.reset}>
-                Back
+                {t("common:back")}
               </Button>
               <Button
                 onClick={handleCreate}
                 disabled={!cert.accepted || createServer.isPending}
               >
-                {createServer.isPending ? "Connecting..." : "Add server"}
+                {createServer.isPending
+                  ? t("common:connecting")
+                  : t("serverDialog.addServer")}
               </Button>
             </DialogFooter>
           </div>

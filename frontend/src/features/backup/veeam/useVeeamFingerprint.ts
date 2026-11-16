@@ -5,6 +5,7 @@ import {
   privateAddressWarningFromError,
   type PrivateAddressWarning as PrivateAddressDetails,
 } from "@/lib/private-address";
+import i18n from "@/lib/i18n";
 
 export interface FingerprintResponse {
   fingerprint: string;
@@ -62,7 +63,7 @@ export function useVeeamFingerprint() {
         setError(
           err instanceof Error
             ? err.message
-            : "Failed to fetch the TLS certificate",
+            : i18n.t("backup:veeamServerDialog.fetchCertificateFailed"),
         );
       }
     } finally {

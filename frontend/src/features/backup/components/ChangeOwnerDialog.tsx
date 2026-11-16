@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -47,6 +48,7 @@ export function ChangeOwnerDialog({
   suggestions,
   onClose,
 }: ChangeOwnerDialogProps) {
+  const { t } = useTranslation("backup");
   const changeMutation = useChangeBackupOwner();
   const settle = useSaveOutcome(
     `${snapshot.datastore}/${snapshot.backup_type}/${snapshot.backup_id}`,
@@ -81,7 +83,7 @@ export function ChangeOwnerDialog({
         },
       }),
       {
-        action: `Changing the owner of ${group}`,
+        action: t("changeOwnerDialog.changingAction", { group }),
         onSuccess: onClose,
         onError: () => undefined, // shown below from the mutation's state
       },
@@ -97,24 +99,28 @@ export function ChangeOwnerDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Change owner of {group}</DialogTitle>
+          <DialogTitle>{t("changeOwnerDialog.title", { group })}</DialogTitle>
           <DialogDescription>
-            All {String(groupSize)} {groupSize === 1 ? "snapshot" : "snapshots"}{" "}
-            of {group} on {snapshot.datastore}, now owned by{" "}
-            <span className="font-medium text-foreground">
-              {snapshot.owner || "no one"}
-            </span>
-            .
+            <Trans
+              t={t}
+              i18nKey="changeOwnerDialog.description"
+              count={groupSize}
+              values={{
+                group,
+                datastore: snapshot.datastore,
+                owner: snapshot.owner || t("changeOwnerDialog.noOne"),
+              }}
+              components={{
+                owner: <span className="font-medium text-foreground" />,
+              }}
+            />
           </DialogDescription>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          PBS adds backups to a group only for its owner, or for the
-          owner&apos;s user when the owner is an API token. A storage that signs
-          in as anyone else fails with &ldquo;backup owner check failed&rdquo;.
-          Give the group to the user or token the storage uses.
+          {t("changeOwnerDialog.explanation")}
         </p>
         <div className="space-y-1.5">
-          <Label htmlFor={inputId}>New owner</Label>
+          <Label htmlFor={inputId}>{t("changeOwnerDialog.newOwner")}</Label>
           <Input
             id={inputId}
             list={listId}
@@ -138,13 +144,15 @@ export function ChangeOwnerDialog({
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={!ready || changeMutation.isPending}
           >
-            {changeMutation.isPending ? "Changing..." : "Change owner"}
+            {changeMutation.isPending
+              ? t("changeOwnerDialog.changing")
+              : t("changeOwnerDialog.changeOwner")}
           </Button>
         </DialogFooter>
       </DialogContent>

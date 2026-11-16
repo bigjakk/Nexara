@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +51,7 @@ export function EditVeeamServerDialog({
   open,
   onOpenChange,
 }: EditVeeamServerDialogProps) {
+  const { t } = useTranslation("backup");
   const [name, setName] = useState(server.name);
   const [baseUrl, setBaseUrl] = useState(server.base_url);
   const [username, setUsername] = useState(server.username);
@@ -109,7 +111,7 @@ export function EditVeeamServerDialog({
         ...(allowPrivateNow ? { allow_private_address: true } : {}),
       }),
       {
-        action: `Saving the Veeam server "${server.name}"`,
+        action: t("veeamServerDialog.savingAction", { name: server.name }),
         onSuccess: () => {
           onOpenChange(false);
         },
@@ -139,11 +141,11 @@ export function EditVeeamServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit Veeam server</DialogTitle>
+          <DialogTitle>{t("veeamServerDialog.editTitle")}</DialogTitle>
           <DialogDescription>
             {certificate !== null
-              ? "The address changed. Verify the new host's certificate before saving."
-              : "Changing the address or credentials re-tests the connection before saving."}
+              ? t("veeamServerDialog.editVerifyDescription")
+              : t("veeamServerDialog.editDescription")}
           </DialogDescription>
         </DialogHeader>
 
@@ -161,13 +163,13 @@ export function EditVeeamServerDialog({
               <p className="text-sm text-destructive">
                 {updateServer.error instanceof Error
                   ? updateServer.error.message
-                  : "Failed to update the Veeam server"}
+                  : t("veeamServerDialog.updateFailed")}
               </p>
             )}
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={cert.reset}>
-                Back
+                {t("common:back")}
               </Button>
               <Button
                 onClick={() => {
@@ -175,14 +177,18 @@ export function EditVeeamServerDialog({
                 }}
                 disabled={!cert.accepted || updateServer.isPending}
               >
-                {updateServer.isPending ? "Saving..." : "Save Changes"}
+                {updateServer.isPending
+                  ? t("common:saving")
+                  : t("common:saveChanges")}
               </Button>
             </DialogFooter>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-veeam-name">Server name</Label>
+              <Label htmlFor="edit-veeam-name">
+                {t("serverDialog.serverName")}
+              </Label>
               <Input
                 id="edit-veeam-name"
                 value={name}
@@ -193,7 +199,9 @@ export function EditVeeamServerDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-veeam-base-url">REST API URL</Label>
+              <Label htmlFor="edit-veeam-base-url">
+                {t("veeamServerDialog.restApiUrl")}
+              </Label>
               <Input
                 id="edit-veeam-base-url"
                 value={baseUrl}
@@ -204,14 +212,14 @@ export function EditVeeamServerDialog({
               />
               {addressChanged && (
                 <p className="text-xs text-muted-foreground">
-                  Saving will ask you to confirm the new host&apos;s TLS
-                  certificate, and needs the password again — the stored one is
-                  only ever sent to the address it was saved for.
+                  {t("veeamServerDialog.addressMoved")}
                 </p>
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-veeam-username">Username</Label>
+              <Label htmlFor="edit-veeam-username">
+                {t("veeamServerDialog.username")}
+              </Label>
               <Input
                 id="edit-veeam-username"
                 value={username}
@@ -222,14 +230,16 @@ export function EditVeeamServerDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-veeam-password">Password</Label>
+              <Label htmlFor="edit-veeam-password">
+                {t("veeamServerDialog.password")}
+              </Label>
               <Input
                 id="edit-veeam-password"
                 type="password"
                 placeholder={
                   addressChanged
-                    ? "Required when the address changes"
-                    : "Leave blank to keep the current password"
+                    ? t("veeamServerDialog.passwordRequired")
+                    : t("veeamServerDialog.passwordKeep")
                 }
                 value={password}
                 onChange={(e) => {
@@ -247,7 +257,7 @@ export function EditVeeamServerDialog({
                 }}
               />
               <Label htmlFor="edit-veeam-enabled" className="text-sm">
-                Enabled
+                {t("common:enabled")}
               </Label>
             </div>
 
@@ -284,7 +294,7 @@ export function EditVeeamServerDialog({
               <p className="text-sm text-destructive">
                 {updateServer.error instanceof Error
                   ? updateServer.error.message
-                  : "Failed to update the Veeam server"}
+                  : t("veeamServerDialog.updateFailed")}
               </p>
             )}
 
@@ -296,17 +306,17 @@ export function EditVeeamServerDialog({
                   onOpenChange(false);
                 }}
               >
-                Cancel
+                {t("common:cancel")}
               </Button>
               <Button
                 type="submit"
                 disabled={updateServer.isPending || cert.pending}
               >
                 {updateServer.isPending || cert.pending
-                  ? "Saving..."
+                  ? t("common:saving")
                   : addressChanged
-                    ? "Continue"
-                    : "Save Changes"}
+                    ? t("veeamServerDialog.continue")
+                    : t("common:saveChanges")}
               </Button>
             </DialogFooter>
           </form>
