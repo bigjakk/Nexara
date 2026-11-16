@@ -17,6 +17,25 @@ interface PrivateAddressWarningProps {
 }
 
 /**
+ * What the gate found `ip` to be, as the server's classes go
+ * (handlers/url_policy.go): a loopback or link-local address is said to be
+ * one, and any other it confirms is on a private network. The shared text said
+ * "private/loopback" of every one.
+ */
+function addressKind(ip: string): string {
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.\d+\.\d+$/i.exec(ip);
+  if (v4 !== null) {
+    if (v4[1] === "127") return "a loopback address";
+    if (v4[1] === "169" && v4[2] === "254") return "a link-local address";
+    return "an address on a private network";
+  }
+  const v6 = ip.toLowerCase();
+  if (v6 === "::1") return "a loopback address";
+  if (/^fe[89ab]/.test(v6)) return "a link-local address";
+  return "an address on a private network";
+}
+
+/**
  * Inline confirm gate shown when the backend rejects an API URL for resolving
  * to a private (or, for the cluster-style gates, loopback) IP. The user can
  * opt in (homelab use case) or back out. Cloud metadata, multicast, and
@@ -33,7 +52,7 @@ export function PrivateAddressWarning({
 }: PrivateAddressWarningProps) {
   const kind = privateOnly
     ? "an address on a private network"
-    : "a private/loopback IP";
+    : addressKind(ip);
   return (
     <WarningCallout title="Private network address" icon={ShieldAlert}>
       <p>
