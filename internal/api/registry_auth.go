@@ -62,8 +62,9 @@ const ownersRemedy = "the owner's remedy when someone else holds a live session 
 // by a gap in the Permissions vocabulary rather than by a parameter type. Both
 // are mounted with authOptional: the session is parsed IF one is presented and
 // the request proceeds either way. That is neither Public (which installs no
-// authentication at all, so c.Locals("role") would be empty and Register would
-// refuse every admin-created account after the first) nor authenticated (which
+// authentication at all, so c.Locals("user_id") would be empty and Register,
+// which asks whether that caller holds manage:user (callerMayCreateAccounts),
+// would refuse every admin-created account after the first) nor authenticated (which
 // would 401 the logout that a valid refresh cookie must still be able to
 // perform once the access token has expired). See
 // TestAuthOptionalRoutesAreStillLegacy, which pins that this is a decision, and

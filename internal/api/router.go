@@ -41,8 +41,9 @@ func (s *Server) setupRoutes() {
 	// Register and Logout are mounted with authOptional, which the Permissions
 	// vocabulary cannot express: it parses a session IF one is presented and
 	// lets the request through either way. Public installs no authentication
-	// middleware at all, so c.Locals("role") would be empty and Register would
-	// refuse every admin-created account after the first; declaring them
+	// middleware at all, so c.Locals("user_id") would be empty and Register,
+	// which asks whether that caller holds manage:user (callerMayCreateAccounts),
+	// would refuse every admin-created account after the first; declaring them
 	// authenticated would 401 the logout a valid refresh cookie must still be
 	// able to perform once the access token has expired. Both keep their
 	// hand-written bodies, and TestAuthOptionalRoutesAreStillLegacy pins that
