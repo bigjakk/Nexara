@@ -374,8 +374,10 @@ type Querier interface {
 	// lands meanwhile must not be followed by a reboot. Zero rows means nothing is
 	// confirmed, and the caller sends nothing.
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) (int64, error)
-	// Uses up session_id's proof for purpose, if it is the user's and still valid by the
-	// database's clock: 1 row, the proof held and is gone; 0, there was none to use.
+	// Uses up session_id's proof for purpose, if it is the user's, still valid by the
+	// database's clock, and bound to one of bindings (the records of the cookies the
+	// request carries): 1 row, the proof held and is gone; 0, there was none to use, and a
+	// proof bound to another browser is left for that browser.
 	ConsumeTOTPStepUpProof(ctx context.Context, arg ConsumeTOTPStepUpProofParams) (int64, error)
 	// CorrelateVeeamBackupObjects resolves every backup object on one server to a
 	// (cluster_id, vmid) guest, in one statement.
@@ -2993,6 +2995,7 @@ type Querier interface {
 	// revoked, not expired) and of an active user, and only when auth_time (the ID token's,
 	// in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
 	// rows: refused. A newer proof replaces an older one of the same session and purpose.
+	// binding is the record of the browser cookie the proof is bound to.
 	RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error)
 	RecordUpsReading(ctx context.Context, arg RecordUpsReadingParams) error
 	// The inventory pass's re-read of what the connection probe stored at

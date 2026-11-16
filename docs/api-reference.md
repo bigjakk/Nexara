@@ -369,12 +369,15 @@ An account that signs in through single sign-on has no password to send to
    comes back in the browser that began it, its ID token resolves to the same account, and the
    token carries an `auth_time` within the last 5 minutes (1 minute ahead allowed for clock
    skew), by the database's clock. It then records a proof for the session that asked, good for
-   5 minutes and one setup, and redirects to `/settings/security?sso_step_up=confirmed`. Anything
+   5 minutes and one setup, bound to this browser by an HttpOnly, SameSite=Strict cookie
+   (`__Host-nexara_totp_step_up` at `/` when `Secure`; `nexara_totp_step_up` at
+   `/api/v1/auth/totp/setup` otherwise), and redirects to `/settings/security?sso_step_up=confirmed`. Anything
    else is refused and audited (`totp_step_up_refused`, with the class of the refusal), and
    redirects to `/settings/security?sso_step_up_error=<message>`. A provider that sends no
    `auth_time` although `max_age` was asked cannot confirm anything.
-3. `POST /api/v1/auth/totp/setup` from the same session, with no body, uses up the proof
-   and answers the secret. Without a proof it answers `403`.
+3. `POST /api/v1/auth/totp/setup` from the same session and the same browser (its cookie),
+   with no body, uses up the proof, clears the cookie and answers the secret. Without a proof,
+   or without the cookie it is bound to, it answers `403` and leaves the proof unused.
 
 ### Ended Sessions
 

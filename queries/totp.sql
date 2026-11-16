@@ -29,8 +29,9 @@ SELECT count(*) FROM totp_recovery_codes WHERE user_id = $1;
 -- revoked, not expired) and of an active user, and only when auth_time (the ID token's,
 -- in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
 -- rows: refused. A newer proof replaces an older one of the same session and purpose.
-INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, expires_at)
-SELECT s.id, s.user_id, sqlc.arg(purpose)::text, now() + make_interval(secs => sqlc.arg(ttl_seconds)::float8)
+-- binding is the record of the browser cookie the proof is bound to.
+INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, binding, expires_at)
+SELECT s.id, s.user_id, sqlc.arg(purpose)::text, sqlc.arg(binding)::text, now() + make_interval(secs => sqlc.arg(ttl_seconds)::float8)
 FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.id = sqlc.arg(session_id)
   AND s.user_id = sqlc.arg(user_id)
@@ -40,7 +41,7 @@ WHERE s.id = sqlc.arg(session_id)
   AND to_timestamp(sqlc.arg(auth_time)::float8) >= now() - make_interval(secs => sqlc.arg(window_seconds)::float8)
   AND to_timestamp(sqlc.arg(auth_time)::float8) <= now() + make_interval(secs => sqlc.arg(skew_seconds)::float8)
 ON CONFLICT (session_id, purpose) DO UPDATE
-  SET user_id = EXCLUDED.user_id, created_at = now(), expires_at = EXCLUDED.expires_at;
+  SET user_id = EXCLUDED.user_id, binding = EXCLUDED.binding, created_at = now(), expires_at = EXCLUDED.expires_at;
 
 -- name: TOTPStepUpAuthTimeIsFresh :one
 -- RecordTOTPStepUpProof's test of auth_time alone, to tell a refusal for a sign-in
@@ -49,10 +50,13 @@ SELECT COALESCE(to_timestamp(sqlc.arg(auth_time)::float8) >= now() - make_interv
    AND to_timestamp(sqlc.arg(auth_time)::float8) <= now() + make_interval(secs => sqlc.arg(skew_seconds)::float8), false)::boolean AS fresh;
 
 -- name: ConsumeTOTPStepUpProof :execrows
--- Uses up session_id's proof for purpose, if it is the user's and still valid by the
--- database's clock: 1 row, the proof held and is gone; 0, there was none to use.
+-- Uses up session_id's proof for purpose, if it is the user's, still valid by the
+-- database's clock, and bound to one of bindings (the records of the cookies the
+-- request carries): 1 row, the proof held and is gone; 0, there was none to use, and a
+-- proof bound to another browser is left for that browser.
 DELETE FROM totp_step_up_proofs
 WHERE session_id = sqlc.arg(session_id)
   AND user_id = sqlc.arg(user_id)
   AND purpose = sqlc.arg(purpose)::text
+  AND binding = ANY(sqlc.arg(bindings)::text[])
   AND expires_at > now();

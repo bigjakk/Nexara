@@ -297,15 +297,21 @@ func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password st
 
 // useSSOStepUp uses up the proof a step-up through the identity provider recorded for
 // this session (OIDCHandler.finishStepUp): valid, by the database's clock, only for
-// this session, this account and this purpose, and only once. None is 403.
+// this session, this account and this purpose, only from the browser whose cookie it is
+// bound to, and only once. None is 403, and a request without the cookie leaves the
+// owner's proof where it is.
 func (h *TOTPHandler) useSSOStepUp(c fiber.Ctx, user db.User) error {
 	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
 	if sessionID == uuid.Nil {
 		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
 	}
+	bindings := totpStepUpCookieRecords(c)
+	if len(bindings) == 0 {
+		return fiber.NewError(fiber.StatusForbidden, totpSSOStepUpRequiredMessage)
+	}
 	ctx, cancel := context.WithTimeout(c.Context(), authDBTimeout)
 	n, err := h.queries.ConsumeTOTPStepUpProof(ctx, db.ConsumeTOTPStepUpProofParams{
-		SessionID: sessionID, UserID: user.ID, Purpose: totpStepUpPurpose,
+		SessionID: sessionID, UserID: user.ID, Purpose: totpStepUpPurpose, Bindings: bindings,
 	})
 	cancel()
 	if err != nil {
@@ -314,6 +320,7 @@ func (h *TOTPHandler) useSSOStepUp(c fiber.Ctx, user db.User) error {
 	if n == 0 {
 		return fiber.NewError(fiber.StatusForbidden, totpSSOStepUpRequiredMessage)
 	}
+	clearTOTPStepUpCookie(c)
 	return nil
 }
 

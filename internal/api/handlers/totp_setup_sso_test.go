@@ -26,10 +26,33 @@ func ssoSetupApp(t *testing.T) (a *epochApp, erin db.User, session uuid.UUID) {
 	return newEpochApp(t, store, epochOptions{totp: true}), erin, session
 }
 
-func (a *epochApp) beginSetupIn(t *testing.T, user db.User, session uuid.UUID) int {
+// beginSetupIn sends a setup from session, carrying cookie ("name=value", or none).
+func (a *epochApp) beginSetupIn(t *testing.T, user db.User, session uuid.UUID, cookie string) int {
 	t.Helper()
-	return a.send(t, http.MethodPost, "/auth/totp/setup", `{}`,
-		map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": session.String()}, 20*time.Second).StatusCode
+	headers := map[string]string{"X-Test-Acting-User": user.ID.String(), "X-Test-Session": session.String()}
+	if cookie != "" {
+		headers["Cookie"] = cookie
+	}
+	return a.send(t, http.MethodPost, "/auth/totp/setup", `{}`, headers, 20*time.Second).StatusCode
+}
+
+// stepUpCookieOf is the step-up cookie a response set, as a request's "name=value".
+func stepUpCookieOf(resp *http.Response) string {
+	for _, ck := range resp.Cookies() {
+		if strings.HasSuffix(ck.Name, totpStepUpCookieName) && ck.Value != "" {
+			return ck.Name + "=" + ck.Value
+		}
+	}
+	return ""
+}
+
+// confirmStepUp runs the callback's decision for erin's session through the probe and
+// returns its answer and the cookie it set.
+func confirmStepUp(t *testing.T, a *epochApp, record string, info *auth.OIDCUserInfo) (answer, cookie string) {
+	t.Helper()
+	a.probe = func(c fiber.Ctx) error { return c.SendString(a.oidc.finishStepUp(c, record, info, false)) }
+	resp := a.send(t, http.MethodGet, "/probe", "", nil, 20*time.Second)
+	return readBody(t, resp.Body), stepUpCookieOf(resp)
 }
 
 // TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider: the step-up's callback
@@ -56,11 +79,8 @@ func TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider(t *testing.T) {
 			t.Parallel()
 			a, erin, session := ssoSetupApp(t)
 			record := stepUpRecord(session, erin.ID)
-			a.probe = func(c fiber.Ctx) error {
-				return c.SendString(a.oidc.finishStepUp(c, record, &auth.OIDCUserInfo{Email: tc.email, AuthTime: tc.authTime, StepUp: record}))
-			}
-			resp := a.send(t, http.MethodGet, "/probe", "", nil, 20*time.Second)
-			if got := readBody(t, resp.Body); got != tc.message {
+			got, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: tc.email, AuthTime: tc.authTime, StepUp: record})
+			if got != tc.message {
 				t.Errorf("the callback's answer = %q, want %q", got, tc.message)
 			}
 			from := session
@@ -69,7 +89,7 @@ func TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider(t *testing.T) {
 				a.store.sessions = append(a.store.sessions, db.Session{ID: from, UserID: erin.ID, ExpiresAt: time.Now().Add(time.Hour)})
 			}
 			for i, want := range tc.setups {
-				if got := a.beginSetupIn(t, erin, from); got != want {
+				if got := a.beginSetupIn(t, erin, from, cookie); got != want {
 					t.Errorf("setup %d = %d, want %d", i+1, got, want)
 				}
 			}
@@ -125,5 +145,26 @@ func TestTOTPSetup_TheSSOStepUpStartsForTheCallersOwnSession(t *testing.T) {
 	a.store.users[local.ID] = &local
 	if status := start(local.ID); status != http.StatusForbidden {
 		t.Errorf("a local account's start = %d, want 403", status)
+	}
+}
+
+// TestTOTPSetup_TheSSOProofIsBoundToTheBrowser: the proof is used only by a setup that
+// carries the cookie the callback set: the right session with no cookie, or another
+// one, gets nothing and leaves the proof, which the owner's own setup then uses.
+func TestTOTPSetup_TheSSOProofIsBoundToTheBrowser(t *testing.T) {
+	t.Parallel()
+	a, erin, session := ssoSetupApp(t)
+	record := stepUpRecord(session, erin.ID)
+	_, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: erin.Email, AuthTime: time.Now(), StepUp: record})
+	if cookie == "" {
+		t.Fatal("the callback set no step-up cookie")
+	}
+	for _, thief := range []string{"", totpStepUpCookieName + "=a-secret-of-the-thiefs-own"} {
+		if got := a.beginSetupIn(t, erin, session, thief); got != http.StatusForbidden {
+			t.Errorf("a setup in the session with cookie %q = %d, want 403", thief, got)
+		}
+	}
+	if got := a.beginSetupIn(t, erin, session, cookie); got != http.StatusOK {
+		t.Errorf("the owner's setup after them = %d, want 200: the proof was burned", got)
 	}
 }

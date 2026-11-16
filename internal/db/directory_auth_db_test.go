@@ -265,7 +265,8 @@ func TestOIDCIdentity_SQL(t *testing.T) {
 
 // TestTOTPStepUpProof_SQL: the SSO step-up's proof is recorded only for a live session of
 // an active user whose auth_time is recent by the database's clock, and is used up once,
-// only by that session, that user and that purpose, and only before it expires.
+// only by that session, that user, that purpose and that browser's cookie, and only
+// before it expires.
 func TestTOTPStepUpProof_SQL(t *testing.T) {
 	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
 		var userID, other, live, revoked uuid.UUID
@@ -288,15 +289,18 @@ func TestTOTPStepUpProof_SQL(t *testing.T) {
 		}
 		now := float64(time.Now().Unix())
 		record := func(session, user uuid.UUID, authTime float64) int64 {
-			n, err := q.RecordTOTPStepUpProof(ctx, gen.RecordTOTPStepUpProofParams{Purpose: "totp_setup", TtlSeconds: 300,
+			n, err := q.RecordTOTPStepUpProof(ctx, gen.RecordTOTPStepUpProofParams{Purpose: "totp_setup", Binding: "1:browser", TtlSeconds: 300,
 				SessionID: session, UserID: user, AuthTime: authTime, WindowSeconds: 300, SkewSeconds: 60})
 			if err != nil {
 				t.Fatal(err)
 			}
 			return n
 		}
-		consume := func(session, user uuid.UUID, purpose string) int64 {
-			n, err := q.ConsumeTOTPStepUpProof(ctx, gen.ConsumeTOTPStepUpProofParams{SessionID: session, UserID: user, Purpose: purpose})
+		consume := func(session, user uuid.UUID, purpose string, bindings ...string) int64 {
+			if bindings == nil {
+				bindings = []string{"0:planted", "1:browser"}
+			}
+			n, err := q.ConsumeTOTPStepUpProof(ctx, gen.ConsumeTOTPStepUpProofParams{SessionID: session, UserID: user, Purpose: purpose, Bindings: bindings})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -322,6 +326,9 @@ func TestTOTPStepUpProof_SQL(t *testing.T) {
 		}
 		if got := record(live, userID, now-30); got != 1 {
 			t.Fatalf("a recent sign-in on a live session recorded %d rows, want 1", got)
+		}
+		if consume(live, userID, "totp_setup", "1:another-browser", "0:browser") != 0 {
+			t.Error("the proof was used without the cookie of the browser it is bound to")
 		}
 		if consume(live, userID, "other_purpose") != 0 || consume(live, other, "totp_setup") != 0 || consume(revoked, userID, "totp_setup") != 0 {
 			t.Error("the proof was used by another purpose, user or session")

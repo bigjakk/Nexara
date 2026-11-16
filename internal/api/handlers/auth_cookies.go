@@ -304,6 +304,60 @@ func (b browserBinding) matches(c fiber.Ctx, value, record string) bool {
 	return false
 }
 
+// The SSO step-up's proof is bound to the browser that made the round trip by a cookie
+// the callback sets (finishStepUp) and the setup reads (useSSOStepUp): HttpOnly,
+// SameSite=Strict (the setup is a same-site request from the SPA), __Host- at / when
+// Secure, otherwise unprefixed and sent only to the setup routes. The proof keeps only
+// its record (bindingRecord), so the session's token alone, or a cookie planted
+// unprefixed on a Secure install, cannot use it.
+const (
+	totpStepUpCookieName = "nexara_totp_step_up"
+	totpStepUpCookiePath = "/api/v1/auth/totp/setup"
+)
+
+func totpStepUpCookie(secure bool) (name, path string) {
+	if secure {
+		return hostCookiePrefix + totpStepUpCookieName, "/"
+	}
+	return totpStepUpCookieName, totpStepUpCookiePath
+}
+
+// setTOTPStepUpCookie gives the browser the secret its proof is bound to.
+func setTOTPStepUpCookie(c fiber.Ctx, secret string, secure bool, ttl time.Duration) {
+	name, path := totpStepUpCookie(secure)
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	c.Cookie(&fiber.Cookie{Name: name, Value: secret, Path: path, HTTPOnly: true, Secure: secure, SameSite: "Strict",
+		MaxAge: int(ttl / time.Second)})
+}
+
+// totpStepUpCookieRecords are the binding records of every step-up cookie the request
+// carries, each under the Secure flag its name says.
+func totpStepUpCookieRecords(c fiber.Ctx) []string {
+	var records []string
+	for held, got := range c.Request().Header.Cookies() {
+		if len(got) == 0 {
+			continue
+		}
+		switch string(held) {
+		case hostCookiePrefix + totpStepUpCookieName:
+			records = append(records, bindingRecord(true, string(got)))
+		case totpStepUpCookieName:
+			records = append(records, bindingRecord(false, string(got)))
+		}
+	}
+	return records
+}
+
+// clearTOTPStepUpCookie expires the step-up cookie, under both names, once its proof is
+// used.
+func clearTOTPStepUpCookie(c fiber.Ctx) {
+	for _, secure := range []bool{true, false} {
+		name, path := totpStepUpCookie(secure)
+		c.Cookie(&fiber.Cookie{Name: name, Value: "", Path: path, HTTPOnly: true, Secure: secure, SameSite: "Strict",
+			Expires: time.Unix(0, 0), MaxAge: -1})
+	}
+}
+
 // oidcCallbackCookiePath is the path the browser comes back to from the identity
 // provider: the redirect URI's, which a reverse proxy may have put under a prefix
 // (validateOIDCRedirectURI allows one), or the route's own when it cannot be read.

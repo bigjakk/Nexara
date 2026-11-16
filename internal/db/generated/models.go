@@ -1230,6 +1230,7 @@ type TotpStepUpProof struct {
 	SessionID uuid.UUID `json:"session_id"`
 	UserID    uuid.UUID `json:"user_id"`
 	Purpose   string    `json:"purpose"`
+	Binding   string    `json:"binding"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 }

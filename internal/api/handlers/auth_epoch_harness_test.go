@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,7 @@ type stepUpProofKey struct {
 
 type stepUpProof struct {
 	user    uuid.UUID
+	binding string
 	expires time.Time
 }
 
@@ -295,23 +297,26 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 	case "InsertAuditLog":
 		return s.insertAudit(args)
 	case "RecordTOTPStepUpProof":
-		// purpose, ttl_seconds, session_id, user_id, auth_time, window_seconds, skew_seconds;
-		// and the SQL's WHERE: the user's live session, an active user, a recent auth_time.
-		sid, uid := args[2].(uuid.UUID), args[3].(uuid.UUID)
+		// purpose, binding, ttl_seconds, session_id, user_id, auth_time, window_seconds,
+		// skew_seconds; and the SQL's WHERE: the user's live session, an active user, a
+		// recent auth_time.
+		sid, uid := args[3].(uuid.UUID), args[4].(uuid.UUID)
 		u, ok := s.users[uid]
 		live := false
 		for _, sess := range s.sessions {
 			live = live || sess.ID == sid && sess.UserID == uid && !sess.IsRevoked && sess.ExpiresAt.After(time.Now())
 		}
-		if !ok || !u.IsActive || !live || !stepUpAuthTimeFresh(args[4].(float64), args[5].(float64), args[6].(float64)) {
+		if !ok || !u.IsActive || !live || !stepUpAuthTimeFresh(args[5].(float64), args[6].(float64), args[7].(float64)) {
 			return pgconn.NewCommandTag("INSERT 0 0"), nil
 		}
-		s.stepUpProofs[stepUpProofKey{sid, args[0].(string)}] = stepUpProof{uid, time.Now().Add(time.Duration(args[1].(float64)) * time.Second)}
+		s.stepUpProofs[stepUpProofKey{sid, args[0].(string)}] = stepUpProof{uid, args[1].(string),
+			time.Now().Add(time.Duration(args[2].(float64)) * time.Second)}
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
 	case "ConsumeTOTPStepUpProof":
-		// session_id, user_id, purpose: the user's, unexpired.
+		// session_id, user_id, purpose, bindings: the user's, bound to one of bindings, unexpired.
 		key := stepUpProofKey{args[0].(uuid.UUID), args[2].(string)}
-		if p, ok := s.stepUpProofs[key]; !ok || p.user != args[1].(uuid.UUID) || !p.expires.After(time.Now()) {
+		p, ok := s.stepUpProofs[key]
+		if !ok || p.user != args[1].(uuid.UUID) || !slices.Contains(args[3].([]string), p.binding) || !p.expires.After(time.Now()) {
 			return pgconn.NewCommandTag("DELETE 0"), nil
 		}
 		delete(s.stepUpProofs, key)

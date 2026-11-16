@@ -702,7 +702,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
 	}
 	if stepUp != "" || userInfo.StepUp != "" {
-		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo))
+		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, oidcBindingSecure(cfg.RedirectUri)))
 	}
 
 	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
@@ -838,7 +838,11 @@ func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UU
 // records the proof for the session the state names, or refuses. It answers "" when the
 // proof was recorded, or the message the Security page shows. Every outcome is audited.
 // It is split out of Callback, like provisionAndStoreExchange, so a test can drive it.
-func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo) string {
+//
+// The proof is bound to this browser as well as to the session: a random secret goes
+// into the browser's step-up cookie (setTOTPStepUpCookie, Secure as secure says) and only
+// its record into the proof, so a stolen token of the same session cannot use it.
+func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo, secure bool) string {
 	sessionID, userID, ok := parseStepUpRecord(stepUp)
 	if !ok || info.StepUp != stepUp {
 		return h.refuseStepUp(c, stepUp, "malformed_state", ssoStepUpFailedMessage)
@@ -854,8 +858,13 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 		return h.refuseStepUp(c, stepUp, "no_auth_time", ssoStepUpNoAuthTimeMessage)
 	}
 	authTime := float64(info.AuthTime.Unix())
+	secret, record, err := newBinding(secure)
+	if err != nil {
+		slog.Error("OIDC step-up: could not make the browser binding", "user_id", userID, "error", err)
+		return h.refuseStepUp(c, stepUp, "not_recorded", ssoStepUpFailedMessage)
+	}
 	n, err := h.queries.RecordTOTPStepUpProof(c.Context(), db.RecordTOTPStepUpProofParams{
-		Purpose: totpStepUpPurpose, TtlSeconds: ssoStepUpProofTTL.Seconds(), SessionID: sessionID, UserID: userID,
+		Purpose: totpStepUpPurpose, Binding: record, TtlSeconds: ssoStepUpProofTTL.Seconds(), SessionID: sessionID, UserID: userID,
 		AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
 	})
 	if err != nil {
@@ -871,6 +880,7 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 		}
 		return h.refuseStepUp(c, stepUp, "session_ended", ssoStepUpSessionEndedMessage)
 	}
+	setTOTPStepUpCookie(c, secret, secure, ssoStepUpProofTTL)
 	details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc"})
 	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), ssoStepUpConfirmedAction, details)
 	return ""

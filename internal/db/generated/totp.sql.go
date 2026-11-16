@@ -26,6 +26,7 @@ DELETE FROM totp_step_up_proofs
 WHERE session_id = $1
   AND user_id = $2
   AND purpose = $3::text
+  AND binding = ANY($4::text[])
   AND expires_at > now()
 `
 
@@ -33,12 +34,20 @@ type ConsumeTOTPStepUpProofParams struct {
 	SessionID uuid.UUID `json:"session_id"`
 	UserID    uuid.UUID `json:"user_id"`
 	Purpose   string    `json:"purpose"`
+	Bindings  []string  `json:"bindings"`
 }
 
-// Uses up session_id's proof for purpose, if it is the user's and still valid by the
-// database's clock: 1 row, the proof held and is gone; 0, there was none to use.
+// Uses up session_id's proof for purpose, if it is the user's, still valid by the
+// database's clock, and bound to one of bindings (the records of the cookies the
+// request carries): 1 row, the proof held and is gone; 0, there was none to use, and a
+// proof bound to another browser is left for that browser.
 func (q *Queries) ConsumeTOTPStepUpProof(ctx context.Context, arg ConsumeTOTPStepUpProofParams) (int64, error) {
-	result, err := q.db.Exec(ctx, consumeTOTPStepUpProof, arg.SessionID, arg.UserID, arg.Purpose)
+	result, err := q.db.Exec(ctx, consumeTOTPStepUpProof,
+		arg.SessionID,
+		arg.UserID,
+		arg.Purpose,
+		arg.Bindings,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -134,22 +143,23 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]Li
 }
 
 const recordTOTPStepUpProof = `-- name: RecordTOTPStepUpProof :execrows
-INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, expires_at)
-SELECT s.id, s.user_id, $1::text, now() + make_interval(secs => $2::float8)
+INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, binding, expires_at)
+SELECT s.id, s.user_id, $1::text, $2::text, now() + make_interval(secs => $3::float8)
 FROM sessions s JOIN users u ON u.id = s.user_id
-WHERE s.id = $3
-  AND s.user_id = $4
+WHERE s.id = $4
+  AND s.user_id = $5
   AND NOT s.is_revoked
   AND s.expires_at > now()
   AND u.is_active
-  AND to_timestamp($5::float8) >= now() - make_interval(secs => $6::float8)
-  AND to_timestamp($5::float8) <= now() + make_interval(secs => $7::float8)
+  AND to_timestamp($6::float8) >= now() - make_interval(secs => $7::float8)
+  AND to_timestamp($6::float8) <= now() + make_interval(secs => $8::float8)
 ON CONFLICT (session_id, purpose) DO UPDATE
-  SET user_id = EXCLUDED.user_id, created_at = now(), expires_at = EXCLUDED.expires_at
+  SET user_id = EXCLUDED.user_id, binding = EXCLUDED.binding, created_at = now(), expires_at = EXCLUDED.expires_at
 `
 
 type RecordTOTPStepUpProofParams struct {
 	Purpose       string    `json:"purpose"`
+	Binding       string    `json:"binding"`
 	TtlSeconds    float64   `json:"ttl_seconds"`
 	SessionID     uuid.UUID `json:"session_id"`
 	UserID        uuid.UUID `json:"user_id"`
@@ -164,9 +174,11 @@ type RecordTOTPStepUpProofParams struct {
 // revoked, not expired) and of an active user, and only when auth_time (the ID token's,
 // in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
 // rows: refused. A newer proof replaces an older one of the same session and purpose.
+// binding is the record of the browser cookie the proof is bound to.
 func (q *Queries) RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordTOTPStepUpProof,
 		arg.Purpose,
+		arg.Binding,
 		arg.TtlSeconds,
 		arg.SessionID,
 		arg.UserID,
