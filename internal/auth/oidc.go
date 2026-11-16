@@ -363,6 +363,14 @@ func OIDCStateBindingDigest(ctx context.Context, rdb *redis.Client, state string
 	return digest, err
 }
 
+// DiscardOIDCState deletes state's data, so that the state can no longer be completed.
+func DiscardOIDCState(ctx context.Context, rdb *redis.Client, state string) error {
+	if err := rdb.Del(ctx, oidcStateKey(state)).Err(); err != nil {
+		return fmt.Errorf("discard the sign-in's state: %w", err)
+	}
+	return nil
+}
+
 // OIDCStatePeek is OIDCStateBindingDigest and, beside it, the step-up record stored
 // with the state ("" for a sign-in), without spending the state.
 func OIDCStatePeek(ctx context.Context, rdb *redis.Client, state string) (bindingDigest, stepUp string, err error) {

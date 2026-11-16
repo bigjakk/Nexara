@@ -663,6 +663,12 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	if !oidcStateBinding.matches(c, state, binding) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
 		if stepUp != "" {
+			// A step-up's state is spent: its callback URL, pasted somewhere, must not
+			// be replayable by whoever holds the cookie. (A sign-in's is left: it may be
+			// this browser's own sign-in, still in flight.)
+			if err := auth.DiscardOIDCState(c.Context(), h.rdb, state); err != nil {
+				slog.Warn("oidc callback: could not discard a refused step-up's state", "error", err)
+			}
 			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "another_browser", ssoStepUpNotThisBrowserMessage))
 		}
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))

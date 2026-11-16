@@ -106,7 +106,7 @@ func TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider(t *testing.T) {
 
 // TestOIDCCallback_AStepUpInAnotherBrowserIsRefusedAndNeverASignIn: a step-up's callback
 // that arrives without its browser binding goes back to the Security page refused and
-// audited, not to the sign-in page, and hands out no exchange code.
+// audited, not to the sign-in page, and its state is spent so the URL cannot be replayed.
 func TestOIDCCallback_AStepUpInAnotherBrowserIsRefusedAndNeverASignIn(t *testing.T) {
 	t.Parallel()
 	a, erin, session := ssoSetupApp(t)
@@ -120,6 +120,9 @@ func TestOIDCCallback_AStepUpInAnotherBrowserIsRefusedAndNeverASignIn(t *testing
 	}
 	if _, details := auditOf(a, ssoStepUpRefusedAction); len(details) != 1 || !strings.Contains(details[0], `"reason":"another_browser"`) {
 		t.Errorf("refusal rows %v, want one for another browser", details)
+	}
+	if a.redis.Exists("oidc:state:the-state") {
+		t.Error("the refused step-up's state survived: its callback URL can be replayed")
 	}
 }
 
