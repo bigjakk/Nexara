@@ -73,14 +73,29 @@ func newStepUpProvider(t *testing.T, email string) *stepUpProvider {
 // TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn drives the whole round
 // trip: the step-up route, the provider, and the callback in the browser that began it.
 // The callback must go back to the Security page with a proof the setup then uses, and
-// must never be completed as a sign-in: no exchange code, no session.
+// must never be completed as a sign-in: no exchange code, no session. Under the relaxed
+// rule the URL asks for no fresh sign-in, and a token without auth_time is the proof.
 func TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn(t *testing.T) {
 	t.Parallel()
+	for _, relaxed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "strict", true: "relaxed"}[relaxed], func(t *testing.T) {
+			t.Parallel()
+			stepUpRoundTrip(t, relaxed)
+		})
+	}
+}
+
+func stepUpRoundTrip(t *testing.T, relaxed bool) {
 	a, erin, session := ssoSetupApp(t)
 	idp := newStepUpProvider(t, erin.Email)
+	if relaxed {
+		idp.mu.Lock()
+		idp.authTime = time.Time{}
+		idp.mu.Unlock()
+	}
 	a.store.mutate(erin.ID, func(u *db.User) { u.OidcIssuer, u.OidcSubject = idp.srv.URL, "sub-1" })
 	a.store.oidcConfig = &db.OidcConfig{ID: uuid.New(), Enabled: true, IssuerUrl: idp.srv.URL, ClientID: "nexara",
-		RedirectUri: "http://nexara.example.com/api/v1/auth/oidc/callback", EmailClaim: "email"}
+		RedirectUri: "http://nexara.example.com/api/v1/auth/oidc/callback", EmailClaim: "email", RelaxedStepUp: relaxed}
 	a.oidc.newProvider = func(ctx context.Context, cfg auth.OIDCConfig, rdb *redis.Client) (*auth.OIDCProvider, error) {
 		return auth.NewOIDCProviderWithClient(ctx, cfg, rdb, idp.srv.Client())
 	}
@@ -93,8 +108,11 @@ func TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn(t *testing.T
 	}
 	_ = json.NewDecoder(start.Body).Decode(&started)
 	authURL, err := url.Parse(started.RedirectURL)
-	if err != nil || start.StatusCode != http.StatusOK || authURL.Query().Get("prompt") != "login" {
-		t.Fatalf("start = %d, %q: want 200 and an authorization URL with prompt=login", start.StatusCode, started.RedirectURL)
+	q := authURL.Query()
+	if err != nil || start.StatusCode != http.StatusOK || relaxed != (!q.Has("prompt") && !q.Has("max_age")) ||
+		!relaxed && q.Get("prompt") != "login" {
+		t.Fatalf("start = %d, %q: want 200 and an authorization URL with prompt=login unless relaxed, which has neither prompt nor max_age",
+			start.StatusCode, started.RedirectURL)
 	}
 	idp.mu.Lock()
 	idp.nonce = authURL.Query().Get("nonce")
