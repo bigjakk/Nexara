@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AuthShell } from "../components/AuthShell";
+import { ssoErrorKey } from "../lib/sso-error";
 import type {
   AuthResponse,
   TOTPRequiredResponse,
@@ -36,10 +37,10 @@ export function OIDCCallbackPage() {
 
   useEffect(() => {
     const oidcToken = searchParams.get("oidc_token");
-    const errorParam = searchParams.get("error");
+    const errorCode = searchParams.get("error");
 
-    if (errorParam) {
-      setError(errorParam);
+    if (errorCode) {
+      setError(t(ssoErrorKey(errorCode)));
       return;
     }
 

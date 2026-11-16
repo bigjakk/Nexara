@@ -747,6 +747,29 @@ const oidcNotThisBrowserMessage = "The single sign-on could not be finished: it 
 // its own, such as Redis not answering.
 const oidcCouldNotCompleteMessage = "The single sign-on could not be completed. Try again."
 
+// A refused sign-in comes back to the login page as /login?error=<code>, one of this
+// closed set and never text: the page shows its own sentence for each code it knows
+// (frontend/src/features/auth/lib/sso-error.ts) and one generic sentence for anything
+// else, so a crafted link cannot put words on Nexara's sign-in page.
+const (
+	oidcErrCouldNotComplete    = "could_not_complete"    // Nexara's own failure: Redis, storing the code
+	oidcErrProvider            = "provider_error"        // the provider came back without a code
+	oidcErrNotThisBrowser      = "not_this_browser"      // oidcNotThisBrowserMessage
+	oidcErrNotConfigured       = "not_configured"        // no enabled configuration
+	oidcErrConfig              = "config_error"          // the stored configuration cannot be used
+	oidcErrProviderUnreachable = "provider_unreachable"  // discovery failed
+	oidcErrEmailNotVerified    = "email_not_verified"    // email_verified false
+	oidcErrDomainNotAllowed    = "domain_not_allowed"    // outside allowed_domains
+	oidcErrAuthFailed          = "authentication_failed" // the exchange or the ID token failed
+	oidcErrIdentityMismatch    = "identity_mismatch"     // oidcIdentityMismatchMessage
+	oidcErrProvisioning        = "provisioning_failed"   // no account, and none could be made
+)
+
+// loginRefused sends the browser to the login page with the refusal's code.
+func loginRefused(c fiber.Ctx, code string) error {
+	return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(code))
+}
+
 // Callback handles GET /api/v1/auth/oidc/callback.
 // Called by the IdP after authentication; exchanges code, provisions user,
 // stores short-lived exchange code in Redis, and redirects to frontend.
@@ -770,15 +793,17 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		binding, stepUp, err = auth.OIDCStatePeek(c.Context(), h.rdb, state)
 		if err != nil {
 			slog.Error("oidc callback: could not read the sign-in's state", "error", err)
-			return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcCouldNotCompleteMessage))
+			return loginRefused(c, oidcErrCouldNotComplete)
 		}
 	}
 	if code == "" || state == "" {
 		if stepUp != "" {
 			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "provider_error"))
 		}
-		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
+		// The provider's own words go to the log, for the operator; the page shows its own.
+		slog.Warn("oidc callback: the identity provider came back without a code",
+			"error", auditSafe(c.Query("error")), "error_description", auditSafe(c.Query("error_description")))
+		return loginRefused(c, oidcErrProvider)
 	}
 	if !oidcStateBinding.matches(c, state, binding) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
@@ -791,32 +816,32 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 			}
 			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "another_browser"))
 		}
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))
+		return loginRefused(c, oidcErrNotThisBrowser)
 	}
-	// fail is where a refusal from here on goes: the login page with message, or the
+	// fail is where a refusal from here on goes: the login page with its code, or the
 	// Security page for a step-up.
-	fail := func(message string) error {
+	fail := func(code string) error {
 		if stepUp != "" {
 			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "not_completed"))
 		}
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(message))
+		return loginRefused(c, code)
 	}
 
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
-		return fail("OIDC not configured")
+		return fail(oidcErrNotConfigured)
 	}
 	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).spend(c, state, binding)
 
 	oidcCfg, err := h.buildOIDCConfig(cfg)
 	if err != nil {
-		return fail("OIDC config error")
+		return fail(oidcErrConfig)
 	}
 
 	provider, err := h.openProvider(c.Context(), oidcCfg)
 	if err != nil {
 		slog.Error("OIDC provider init failed in callback", "error", err)
-		return fail("OIDC provider error")
+		return fail(oidcErrProviderUnreachable)
 	}
 
 	userInfo, err := provider.ExchangeAndVerify(c.Context(), code, state)
@@ -825,7 +850,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		if stepUp != "" {
 			return fail("")
 		}
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
+		return loginRefused(c, h.exchangeFailure(c, err))
 	}
 	if stepUp != "" || userInfo.StepUp != "" {
 		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, cfg.RedirectUri, cfg.RelaxedStepUp))
@@ -833,7 +858,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 
 	_, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
 	if failure != "" {
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(failure))
+		return loginRefused(c, failure)
 	}
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
@@ -1048,12 +1073,7 @@ func stepUpRedirect(c fiber.Ctx, reason string) error {
 	return c.Redirect().Status(fiber.StatusFound).To(ssoStepUpPage + "?sso_step_up_error=" + url.QueryEscape(reason))
 }
 
-// oidcEmailNotVerifiedMessage answers a sign-in whose identity provider says it has
-// not verified the account's email address.
-const oidcEmailNotVerifiedMessage = "Your identity provider has not verified your email address. " +
-	"Verify it with your provider, then sign in again."
-
-// exchangeFailure is the message the login page shows for a callback whose exchange
+// exchangeFailure is the refusal code (loginRefused) of a callback whose exchange
 // with the identity provider failed. An unverified email address is audited as a
 // failed sign-in, as a password sign-in's is (recordFailedSignIn): under the SSO
 // account the address names, with the account's own address; or, when there is no
@@ -1075,11 +1095,11 @@ func (h *OIDCHandler) exchangeFailure(c fiber.Ctx, err error) string {
 				AuditLogAs(c, h.queries, h.eventPub, uuid.Nil, pgtype.UUID{}, "auth", "", "login_failed_unknown_account", details)
 			}
 		}
-		return oidcEmailNotVerifiedMessage
+		return oidcErrEmailNotVerified
 	case errors.Is(err, auth.ErrOIDCDomainNotAllowed):
-		return "Your email domain is not allowed"
+		return oidcErrDomainNotAllowed
 	default:
-		return "Authentication failed"
+		return oidcErrAuthFailed
 	}
 }
 
@@ -1087,7 +1107,7 @@ func (h *OIDCHandler) exchangeFailure(c fiber.Ctx, err error) string {
 // userInfo: it provisions or updates the account, syncs its roles from the groups,
 // and stores the one-time exchange code the browser will trade for tokens — with the
 // epoch of the account the PROVISIONING returned (storeExchange). It returns the
-// account and the code, or, when it could not, the message the login page shows in
+// account and the code, or, when it could not, the refusal code (loginRefused) in
 // place of both.
 //
 // It is split out so that the hand-off the whole SSO guarantee rests on — the user
@@ -1101,11 +1121,11 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 		user, err = h.finishOIDCSignIn(c, cfg, user, userInfo)
 	}
 	if errors.Is(err, errOIDCIdentityMismatch) {
-		return db.User{}, "", oidcIdentityMismatchMessage
+		return db.User{}, "", oidcErrIdentityMismatch
 	}
 	if err != nil {
 		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
-		return db.User{}, "", "User provisioning failed"
+		return db.User{}, "", oidcErrProvisioning
 	}
 
 	// A sign-in left unfinished carries its identity on, to be finished once the second
@@ -1132,7 +1152,7 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 	}
 	if err != nil {
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
-		return db.User{}, "", "Internal error"
+		return db.User{}, "", oidcErrCouldNotComplete
 	}
 	oidcExchangeBinding.set(c, exchangeCode, secret, secure)
 	// The callback's row is written where the sign-in is finished: here for an account with
@@ -1201,8 +1221,9 @@ func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding s
 // bound to another provider identity: another subject, or another issuer.
 var errOIDCIdentityMismatch = errors.New("oidc: the account with this address is bound to another identity")
 
-// oidcIdentityMismatchMessage answers that refusal on the login page. It names no
-// subject, no issuer and no address: the person learns what to do, an attacker nothing.
+// oidcIdentityMismatchMessage answers that refusal after the second factor (the login
+// page shows the same words for oidcErrIdentityMismatch). It names no subject, no issuer
+// and no address: the person learns what to do, an attacker nothing.
 const oidcIdentityMismatchMessage = "This sign-in does not match the single sign-on identity your account is " +
 	"linked to. Contact an administrator."
 

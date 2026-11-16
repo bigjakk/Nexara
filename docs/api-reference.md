@@ -326,8 +326,14 @@ also takes at most five attempts of either kind.
    ```
    The account is the one bound to the ID token's issuer and subject; an SSO account
    with no link yet is linked by its address, and one bound to another identity is
-   refused: the callback redirects to `/login?error=` with *This sign-in does not match
-   the single sign-on identity your account is linked to. Contact an administrator.*
+   refused: the callback redirects to `/login?error=identity_mismatch`, which the page shows as
+   *This sign-in does not match the single sign-on identity your account is linked to.
+   Contact an administrator.* A refused callback always redirects to `/login?error=<code>`,
+   one of `could_not_complete`, `provider_error`, `not_this_browser`, `not_configured`,
+   `config_error`, `provider_unreachable`, `email_not_verified`, `domain_not_allowed`,
+   `authentication_failed`, `identity_mismatch` or `provisioning_failed`, never a sentence;
+   the page shows its own words for each and one generic sentence for any other value. A
+   provider's own `error` and `error_description` go to Nexara's log, not to the page.
    As with password login, the refresh token is set as an HttpOnly cookie
    rather than returned in the body, and a user with 2FA enabled gets
    `{ "totp_required": true, "totp_pending_token": "..." }` here instead of

@@ -120,7 +120,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 
 		_, _, failure := exchange(t, a, db.OidcConfig{AutoProvision: false}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: "carol@example.com"})
 
-		if failure != "User provisioning failed" {
+		if failure != oidcErrProvisioning {
 			t.Errorf("failure = %q, want the login page's provisioning message", failure)
 		}
 		if keys := a.redis.Keys(); len(keys) != 0 {

@@ -21,6 +21,7 @@ import type {
 } from "@/types/api";
 import { AuthShell } from "../components/AuthShell";
 import { InsecureConnectionBanner } from "../components/InsecureConnectionBanner";
+import { ssoErrorKey } from "../lib/sso-error";
 
 function useLoginSchema() {
   const { t } = useTranslation("auth");
@@ -112,13 +113,13 @@ export function LoginPage() {
     };
   }, []);
 
-  // Check for SSO error in URL params
+  // A refused single sign-on comes back with a code: shown in our words only.
   useEffect(() => {
-    const errorParam = searchParams.get("error");
-    if (errorParam) {
-      setError(errorParam);
+    const errorCode = searchParams.get("error");
+    if (errorCode) {
+      setError(t(ssoErrorKey(errorCode)));
     }
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   const handleSSOLogin = async () => {
     setSSOLoading(true);

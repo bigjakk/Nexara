@@ -66,7 +66,7 @@ func TestOIDCProvision_RefusesAnAddressAnotherAccountHasInAnotherCase(t *testing
 		_, _, failure = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: "Alice@Example.com"})
 		return c.SendStatus(http.StatusNoContent)
 	})
-	if failure != "User provisioning failed" || len(store.named("CreateOIDCUser")) != 0 || len(a.redis.Keys()) != 0 {
+	if failure != oidcErrProvisioning || len(store.named("CreateOIDCUser")) != 0 || len(a.redis.Keys()) != 0 {
 		t.Errorf("failure %q, %d accounts created, codes %v; want refused, none", failure, len(store.named("CreateOIDCUser")), a.redis.Keys())
 	}
 }

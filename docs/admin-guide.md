@@ -747,6 +747,8 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 5. Nexara finds the account by who the person is at the provider, not by the address alone (see **Which account a sign-in reaches** below). With **Auto-Provision Users** on, an identity with no account gets a new one (JIT provisioning) with `auth_source=oidc`. A local or LDAP account with the same email is not taken over: the sign-in fails with *User provisioning failed*
 6. Group claims are mapped to Nexara roles, and as with LDAP this replaces the user's roles at every sign-in
 
+A refused sign-in is shown on the sign-in page in Nexara's own words, chosen from a fixed set of reasons. When the provider itself refuses or cancels it, the page says only that the provider did not complete the sign-in; the provider's `error` and `error_description` are in Nexara's log (`oidc callback: the identity provider came back without a code`).
+
 #### Which account a sign-in reaches
 
 An SSO account is bound to one identity at the provider: the ID token's issuer (`iss`) and subject (`sub`), stored on the account when it is created or first linked. At every sign-in:

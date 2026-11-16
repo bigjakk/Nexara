@@ -29,7 +29,7 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 		return u
 	}
 	const carol = "carol@example.com"
-	const mismatch = oidcIdentityMismatchMessage
+	const mismatch = oidcErrIdentityMismatch
 	for _, tc := range []struct {
 		name  string
 		users []db.User
@@ -51,7 +51,7 @@ func TestOIDCProvision_FindsTheAccountByItsProviderIdentity(t *testing.T) {
 		{name: "an account bound under another issuer is refused",
 			users: []db.User{account(carol, "oidc", "https://old-sso.example.com", epochSubject)}, failure: mismatch},
 		{name: "a local account with the address is never linked",
-			users: []db.User{account(carol, "local", "", "")}, failure: "User provisioning failed"},
+			users: []db.User{account(carol, "local", "", "")}, failure: oidcErrProvisioning},
 		{name: "a first sign-in that loses the link to another identity is refused",
 			users: []db.User{account(carol, "oidc", "", "")}, race: true, failure: mismatch},
 		{name: "a new account is bound to the identity", want: -1},

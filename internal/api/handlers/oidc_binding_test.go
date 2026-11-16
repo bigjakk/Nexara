@@ -66,7 +66,7 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 
 			resp := a.send(t, http.MethodGet, "/auth/oidc/callback?code=idp-code&state="+state, "", headers, 10*time.Second)
 
-			refused := resp.Header.Get("Location") == "/login?error="+url.QueryEscape(oidcNotThisBrowserMessage)
+			refused := resp.Header.Get("Location") == "/login?error="+oidcErrNotThisBrowser
 			if refused == tc.passes {
 				t.Errorf("redirected to %q: refused %v, want %v", resp.Header.Get("Location"), refused, !tc.passes)
 			}
@@ -95,8 +95,23 @@ func TestOIDCCallback_RedisDownIsNotAnotherBrowser(t *testing.T) {
 
 	resp := a.send(t, http.MethodGet, "/auth/oidc/callback?code=idp-code&state=some-state", "", nil, 10*time.Second)
 
-	if got := resp.Header.Get("Location"); got != "/login?error="+url.QueryEscape(oidcCouldNotCompleteMessage) {
+	if got := resp.Header.Get("Location"); got != "/login?error="+oidcErrCouldNotComplete {
 		t.Errorf("redirected to %q, want the could-not-complete refusal", got)
+	}
+}
+
+// TestOIDCCallback_AProviderRefusalIsACodeNotItsWords: a callback without a code comes
+// back as the provider_error code alone. The error and error_description of its query
+// are anybody's (a crafted link writes them), so they never reach the sign-in page.
+func TestOIDCCallback_AProviderRefusalIsACodeNotItsWords(t *testing.T) {
+	t.Parallel()
+	a := newEpochApp(t, newEpochStore(), epochOptions{})
+
+	resp := a.send(t, http.MethodGet, "/auth/oidc/callback?error=access_denied&error_description="+
+		url.QueryEscape("Your account is locked. Call the help desk."), "", nil, 10*time.Second)
+
+	if got := resp.Header.Get("Location"); got != "/login?error="+oidcErrProvider {
+		t.Errorf("redirected to %q, want the provider_error code alone", got)
 	}
 }
 
@@ -329,8 +344,8 @@ func TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn(t *testing.T) {
 			a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
 			a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
 
-			if message != oidcEmailNotVerifiedMessage {
-				t.Errorf("message %q, want the unverified-email one", message)
+			if message != oidcErrEmailNotVerified {
+				t.Errorf("refusal %q, want the unverified-email one", message)
 			}
 			rows := store.auditRowsWritten()
 			if len(rows) != tc.rows || rows[0].action != tc.action || (rows[0].actor == u.ID) != tc.account {

@@ -102,3 +102,25 @@ describe("LoginPage, after a sign-out the server did not confirm", () => {
     );
   });
 });
+
+describe("LoginPage, after a refused single sign-on", () => {
+  it("says what the refusal's code means", async () => {
+    renderLoginAt("/login?error=email_not_verified");
+
+    expect(
+      await screen.findByText(/has not verified your email address/),
+    ).toBeInTheDocument();
+  });
+
+  // The query is anybody's: a crafted link must not put its words on the page.
+  it("never shows the query's own text", async () => {
+    const crafted = "Your account is locked. Call the help desk.";
+
+    renderLoginAt(`/login?error=${encodeURIComponent(crafted)}`);
+
+    expect(
+      await screen.findByText(/single sign-on did not complete/),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(crafted);
+  });
+});
