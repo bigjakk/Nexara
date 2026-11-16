@@ -155,7 +155,7 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 const createLDAPUser = `-- name: CreateLDAPUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
 VALUES ($1, '', $2, true, 'user', 'ldap')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type CreateLDAPUserParams struct {
@@ -179,6 +179,7 @@ func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) 
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
@@ -280,7 +281,7 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users
 WHERE (users.email = $1::text
        OR (lower(users.email) = lower($1::text)
            AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower($1::text)) = 1))
@@ -310,6 +311,7 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
@@ -399,7 +401,7 @@ func (q *Queries) ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error) {
 }
 
 const listLDAPUsers = `-- name: ListLDAPUsers :many
-SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory
+SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email
@@ -415,6 +417,7 @@ type ListLDAPUsersRow struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 	AuthSource             string    `json:"auth_source"`
 	DeactivatedByDirectory bool      `json:"deactivated_by_directory"`
+	LdapLoginName          string    `json:"ldap_login_name"`
 }
 
 func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error) {
@@ -436,6 +439,7 @@ func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 			&i.UpdatedAt,
 			&i.AuthSource,
 			&i.DeactivatedByDirectory,
+			&i.LdapLoginName,
 		); err != nil {
 			return nil, err
 		}
@@ -475,6 +479,23 @@ type ReleaseLDAPSyncLeaseParams struct {
 // Releases the lease this sync claimed, and only that one.
 func (q *Queries) ReleaseLDAPSyncLease(ctx context.Context, arg ReleaseLDAPSyncLeaseParams) error {
 	_, err := q.db.Exec(ctx, releaseLDAPSyncLease, arg.ID, arg.Token)
+	return err
+}
+
+const setLDAPLoginName = `-- name: SetLDAPLoginName :exec
+UPDATE users SET ldap_login_name = $1
+WHERE id = $2 AND auth_source = 'ldap' AND ldap_login_name <> $1
+`
+
+type SetLDAPLoginNameParams struct {
+	LoginName string    `json:"login_name"`
+	ID        uuid.UUID `json:"id"`
+}
+
+// Keeps the name a directory sign-in found the account's entry with, for the sync's
+// search. Never logged or audited: it is what the person typed.
+func (q *Queries) SetLDAPLoginName(ctx context.Context, arg SetLDAPLoginNameParams) error {
+	_, err := q.db.Exec(ctx, setLDAPLoginName, arg.LoginName, arg.ID)
 	return err
 }
 
@@ -588,7 +609,7 @@ func (q *Queries) UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) er
 const updateLDAPUserProfile = `-- name: UpdateLDAPUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type UpdateLDAPUserProfileParams struct {
@@ -612,6 +633,7 @@ func (q *Queries) UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserP
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }

@@ -208,6 +208,12 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		remember(func() { *u = before })
 		u.IsActive, u.DeactivatedByDirectory = !deactivate, deactivate
 		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "SetLDAPLoginName":
+		// login_name, id: an LDAP account, as the SQL's WHERE.
+		if u, ok := s.users[args[1].(uuid.UUID)]; ok && u.AuthSource == "ldap" {
+			u.LdapLoginName = args[0].(string)
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "ReleaseLDAPSyncLease":
 		s.syncLeased = false
 		return pgconn.NewCommandTag("UPDATE 1"), nil
@@ -440,7 +446,7 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		for _, u := range s.users {
 			if u.AuthSource == "ldap" {
 				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
-					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory})
+					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory, LdapLoginName: u.LdapLoginName})
 			}
 		}
 		return &authFakeRows{items: items}, nil

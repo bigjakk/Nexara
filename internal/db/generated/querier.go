@@ -3101,6 +3101,9 @@ type Querier interface {
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
+	// Keeps the name a directory sign-in found the account's entry with, for the sync's
+	// search. Never logged or audited: it is what the person typed.
+	SetLDAPLoginName(ctx context.Context, arg SetLDAPLoginNameParams) error
 	// SetLocalLockTimeout bounds every lock wait of the rest of the transaction —
 	// LockClusterFolders' among them — so requests queued behind a long change to
 	// a cluster's tree give their connections back instead of holding the pool.

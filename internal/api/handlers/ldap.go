@@ -570,6 +570,13 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	}
 	switch {
 	case err == nil:
+	case errors.Is(err, errLDAPSyncTooManyMissing):
+		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+			"error": "ldap_sync_too_many_missing",
+			"message": fmt.Sprintf("The directory found no entry for %d of the %d accounts it answered for, so the sync changed nothing. "+
+				"Check the user filter, the search base DN and the bind account's read access.", res.missing, res.answered),
+			"details": fiber.Map{"users_missing": res.missing, "users_skipped": res.skipped},
+		})
 	case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
 		return fiber.NewError(fiber.StatusBadGateway, "The directory could not be searched, so the sync stopped and nobody was deactivated by it. "+
 			classifyLDAPError(err))
@@ -598,14 +605,25 @@ var errLDAPSyncRunning = errors.New("ldap sync: another sync of this config is r
 
 // ldapSyncResult is what a sync did. ran is false for a sync that never started.
 type ldapSyncResult struct {
-	ran                                  bool
-	synced, disabled, reEnabled, skipped int
+	ran                                           bool
+	synced, disabled, reEnabled, skipped, missing int
+	answered                                      int // searches that answered: found or missing
+}
+
+// errLDAPSyncTooManyMissing is a sync that changed nothing because most of the accounts
+// it searched for were missing (tooManyMissing).
+var errLDAPSyncTooManyMissing = errors.New("ldap sync: most accounts searched for are missing from the directory")
+
+// tooManyMissing is the mass-miss rule: more than half of the accounts whose search
+// answered are missing, and at least three. A sync that meets it deactivates nobody.
+func tooManyMissing(missing, searched int) bool {
+	return missing >= 3 && 2*missing > searched
 }
 
 // auditDetails are the ldap_sync row's details: the counts and, for a sync that
 // stopped, the class of the failure (never the directory's own error text).
 func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
-	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped}
+	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped, "missing": r.missing}
 	if err != nil {
 		d["outcome"] = "failed"
 		d["reason"] = ldapFailureClass(err)
@@ -664,13 +682,49 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 		_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
 	}
 
+	// Every search first, then the decision: a directory that answers "nobody" for
+	// most accounts is a broken filter, base DN or bind account far more often than a
+	// mass departure, and acting on it would deactivate everyone.
+	type searched struct {
+		dbUser db.ListLDAPUsersRow
+		found  *auth.LDAPUser // nil: the search succeeded and found nobody
+	}
+	results := make([]searched, 0, len(ldapUsers))
+	missing := 0
 	for _, dbUser := range ldapUsers {
 		if err := ctx.Err(); err != nil {
 			return res, fmt.Errorf("the sync was stopped: %w", err)
 		}
-		ldapUser, err := client.SearchUser(dbUser.Email)
+		// The name the person signs in with, which is what the user filter is written
+		// for; the address only for an account no sign-in has named yet.
+		name := dbUser.LdapLoginName
+		if name == "" {
+			name = dbUser.Email
+		}
+		ldapUser, err := client.SearchUser(name)
 		switch {
 		case errors.Is(err, auth.ErrLDAPUserNotFound):
+			missing++
+			results = append(results, searched{dbUser: dbUser})
+		case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
+			return res, fmt.Errorf("search the directory: %w", err)
+		case err != nil:
+			// The search did not answer whether the user is there: nothing changes.
+			res.skipped++
+			slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
+				"user_id", dbUser.ID, "reason", ldapFailureClass(err))
+		default:
+			results = append(results, searched{dbUser: dbUser, found: ldapUser})
+		}
+	}
+	res.missing, res.answered = missing, len(results)
+	if tooManyMissing(missing, len(results)) {
+		return res, errLDAPSyncTooManyMissing
+	}
+
+	for _, r := range results {
+		dbUser, ldapUser := r.dbUser, r.found
+		if ldapUser == nil {
 			// Gone from the directory. And the sessions are ended, as an admin's
 			// deactivation does: flipping is_active only suspends them, and a later
 			// re-enable would revive every one with no sign-in. After the flip, as
@@ -690,14 +744,6 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 			}
 			res.disabled++
 			slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
-			continue
-		case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
-			return res, fmt.Errorf("search the directory: %w", err)
-		case err != nil:
-			// The search did not answer whether the user is there: nothing changes.
-			res.skipped++
-			slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
-				"user_id", dbUser.ID, "reason", ldapFailureClass(err))
 			continue
 		}
 

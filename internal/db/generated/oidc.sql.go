@@ -91,7 +91,7 @@ func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigPara
 const createOIDCUser = `-- name: CreateOIDCUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
 VALUES ($1, '', $2, true, 'user', 'oidc')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type CreateOIDCUserParams struct {
@@ -115,6 +115,7 @@ func (q *Queries) CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) 
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
@@ -364,7 +365,7 @@ func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigPara
 const updateOIDCUserProfile = `-- name: UpdateOIDCUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'oidc'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type UpdateOIDCUserProfileParams struct {
@@ -388,6 +389,7 @@ func (q *Queries) UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserP
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }

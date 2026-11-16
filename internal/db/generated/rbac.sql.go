@@ -584,7 +584,7 @@ SET display_name = COALESCE($1::text, display_name),
     -- An administrator's change of is_active is theirs: an LDAP sync never undoes it.
     deactivated_by_directory = deactivated_by_directory AND $2::boolean IS NULL
 WHERE id = $4
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type UpdateUserProfileParams struct {
@@ -623,6 +623,7 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }

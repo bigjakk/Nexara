@@ -1005,6 +1005,8 @@ func (h *AuthHandler) directoryAccount(c fiber.Ctx, entry *auth.LDAPUser, typed 
 // what was typed into the sign-in form, which is sometimes a password.
 func ldapFailureClass(err error) string {
 	switch {
+	case errors.Is(err, errLDAPSyncTooManyMissing):
+		return "too_many_missing"
 	case errors.Is(err, auth.ErrLDAPConnection):
 		return "connection_failed"
 	case errors.Is(err, auth.ErrLDAPBindCredentials):
@@ -1107,6 +1109,12 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 	if !user.IsActive {
 		slog.Warn("ldap login: account disabled", "email", userEmail, "user_id", user.ID)
 		return db.User{}, false
+	}
+
+	// The name that found the entry, for the sync's search (SetLDAPLoginName). Best
+	// effort: without it the sync searches by the address.
+	if err := h.queries.SetLDAPLoginName(c.Context(), db.SetLDAPLoginNameParams{ID: user.ID, LoginName: email}); err != nil {
+		slog.Warn("ldap login: could not keep the sign-in name for the sync", "user_id", user.ID, "error", err)
 	}
 
 	// Sync RBAC roles from LDAP group mapping

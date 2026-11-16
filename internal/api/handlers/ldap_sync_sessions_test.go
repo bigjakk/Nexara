@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,9 @@ func ldapSyncApp(t *testing.T, store *epochStore, dir *fakeDirectory) (*epochApp
 	a.probe = func(c fiber.Ctx) error { return h.Sync(c, params) }
 	return a, h, func() int {
 		t.Helper()
-		resp, err := a.app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil), fiber.TestConfig{Timeout: 30 * time.Second})
+		req := httptest.NewRequest(http.MethodGet, "/probe", nil)
+		req.Header.Set("X-Test-Acting-User", uuid.NewString()) // the administrator, for the audit row
+		resp, err := a.app.Test(req, fiber.TestConfig{Timeout: 30 * time.Second})
 		if err != nil {
 			t.Fatalf("sync: %v", err)
 		}
@@ -66,14 +69,17 @@ func TestLDAPSync_ADisabledUserHasNoSessionToReviveWhenReEnabled(t *testing.T) {
 }
 
 // fakeDirectory answers every search with found, or when found is nil with err, or
-// with "not in the directory" when err is nil too.
+// with "not in the directory" when err is nil too. With names set, only a search for
+// one of them finds anything.
 type fakeDirectory struct {
 	found *auth.LDAPUser
 	err   error
+	names map[string]bool
 }
 
-func (d fakeDirectory) SearchUser(string) (*auth.LDAPUser, error) {
+func (d fakeDirectory) SearchUser(name string) (*auth.LDAPUser, error) {
 	switch {
+	case d.names != nil && !d.names[name]:
 	case d.found != nil:
 		return d.found, nil
 	case d.err != nil:
@@ -188,5 +194,69 @@ func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 	h.RunScheduledSync(context.Background())
 	if runs() != 1 {
 		t.Error("a sync ran with the interval at 0 (off)")
+	}
+}
+
+// TestLDAPSync_SearchesWithTheNameThePersonSignsInWith: with a filter on the account
+// name (sAMAccountName, uid), a person signs in as "alice" and is provisioned with the
+// entry's address; the sync must search with "alice", which the filter matches, and not
+// with the address, which it does not, or it deactivates every healthy user.
+func TestLDAPSync_SearchesWithTheNameThePersonSignsInWith(t *testing.T) {
+	t.Parallel()
+	store := newEpochStore()
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true}
+	entry := auth.LDAPUser{DN: "uid=alice,ou=people,dc=example,dc=com", Email: epochLoginEmail}
+	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: &entry, names: map[string]bool{"alice": true}})
+	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+		return fakeSignInDirectory{names: map[string]bool{"alice": true}, entry: entry, password: racePassword}, nil
+	}})
+	if resp, body := a.loginAs(t, "alice", true); resp.StatusCode != http.StatusOK {
+		t.Fatalf("signing in as alice = %d %v", resp.StatusCode, body)
+	}
+	if status := sync(); status != http.StatusOK {
+		t.Fatalf("sync: status %d", status)
+	}
+	for _, u := range store.users {
+		if !u.IsActive {
+			t.Errorf("the sync deactivated %s, who signs in as alice", u.Email)
+		}
+	}
+}
+
+// TestLDAPSync_AMassMissDeactivatesNobody: when most of the accounts searched for are
+// missing (at least three), the sync changes nothing, answers 422 and is audited as
+// failed; a minority missing is still deactivated.
+func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		present  int
+		status   int
+		disabled int
+	}{{0, http.StatusUnprocessableEntity, 0}, {3, http.StatusOK, 1}} {
+		names := map[string]bool{}
+		users := make([]db.User, 0, 4)
+		for i := range 4 {
+			u := db.User{ID: uuid.New(), Email: fmt.Sprintf("user%d@example.com", i), IsActive: true, AuthSource: "ldap"}
+			if i < tc.present {
+				names[u.Email] = true
+			}
+			users = append(users, u)
+		}
+		store := newEpochStore(users...)
+		a, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{}, names: names})
+		status := sync()
+		disabled := 0
+		for _, u := range users {
+			if !store.user(u.ID).IsActive {
+				disabled++
+			}
+		}
+		_, details := auditOf(a, "ldap_sync")
+		if status != tc.status || disabled != tc.disabled || len(details) != 1 {
+			t.Errorf("%d of 4 present: status %d, %d disabled, audit %v; want %d, %d, one row", tc.present, status, disabled, details, tc.status, tc.disabled)
+		}
+		if tc.present == 0 && (len(details) != 1 || !strings.Contains(details[0], `"reason":"too_many_missing"`)) {
+			t.Errorf("the mass miss is not audited as too_many_missing: %v", details)
+		}
 	}
 }

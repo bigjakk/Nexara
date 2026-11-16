@@ -82,8 +82,14 @@ WHERE id = $1 AND auth_source = 'ldap' AND is_active;
 UPDATE users SET is_active = true, deactivated_by_directory = false
 WHERE id = $1 AND auth_source = 'ldap' AND NOT is_active AND deactivated_by_directory;
 
+-- name: SetLDAPLoginName :exec
+-- Keeps the name a directory sign-in found the account's entry with, for the sync's
+-- search. Never logged or audited: it is what the person typed.
+UPDATE users SET ldap_login_name = sqlc.arg(login_name)
+WHERE id = sqlc.arg(id) AND auth_source = 'ldap' AND ldap_login_name <> sqlc.arg(login_name);
+
 -- name: ListLDAPUsers :many
-SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory
+SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email;

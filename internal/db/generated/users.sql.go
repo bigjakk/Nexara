@@ -62,7 +62,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, totp_secret, role)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type CreateUserParams struct {
@@ -97,6 +97,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
@@ -149,7 +150,7 @@ func (q *Queries) GetPasswordHashForSettle(ctx context.Context, id uuid.UUID) (s
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users
 WHERE users.email = $1::text
    OR (lower(users.email) = lower($1::text)
        AND (SELECT count(*) FROM users y WHERE lower(y.email) = lower($1::text)) = 1)
@@ -176,12 +177,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users WHERE id = $1
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -200,12 +202,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory FROM users ORDER BY created_at DESC
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -230,6 +233,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.AuthSource,
 			&i.AuthEpoch,
 			&i.DeactivatedByDirectory,
+			&i.LdapLoginName,
 		); err != nil {
 			return nil, err
 		}
@@ -280,7 +284,7 @@ SET email = $2,
     is_active = $5,
     totp_secret = $6
 WHERE id = $1
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type UpdateUserParams struct {
@@ -315,12 +319,13 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
 
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :one
-UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory
+UPDATE users SET display_name = $2, updated_at = now() WHERE id = $1 RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name
 `
 
 type UpdateUserDisplayNameParams struct {
@@ -344,6 +349,7 @@ func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDispl
 		&i.AuthSource,
 		&i.AuthEpoch,
 		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
 	)
 	return i, err
 }
