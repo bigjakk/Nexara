@@ -249,8 +249,9 @@ func TestCompression_WithoutAcceptEncodingIsUnchanged(t *testing.T) {
 }
 
 // TestCompression_BrowserNegotiatesBrotli covers what a browser actually
-// sends. fasthttp checks br before gzip, so every real SPA request takes the
-// brotli path and the gzip test above never exercises it.
+// sends. Fiber's compress middleware prefers br at equal weight
+// (supportedEncodings), so every real SPA request takes the brotli path and
+// the gzip test above never exercises it.
 //
 // The body is decoded through fasthttp's own brotli reader
 // (AppendUnbrotliBytes), so the brotli library fasthttp uses — an indirect
@@ -554,7 +555,10 @@ func TestCompression_ErrorEnvelopesAreNeverCompressed(t *testing.T) {
 // and that the two headers that have to survive together actually do:
 // Cache-Control: immutable (set by applyFrontendCacheHeaders) and Vary:
 // Accept-Encoding. Without the second, a shared cache may hand a stored
-// gzipped bundle to a client that cannot decode it — for a year.
+// gzipped bundle to a client that cannot decode it — for a year. A JSON answer
+// rides along, and every coding the middleware negotiates is decoded back to
+// the uncompressed bytes, repeatedly: Fiber v3.6 can hand a client zstd, and
+// go-brrr v1.3's pooled brotli writer is reused across responses.
 func TestCompression_EmbeddedFrontendIsCompressed(t *testing.T) {
 	s, _ := newCompressTestServer(t, true)
 
@@ -571,40 +575,63 @@ func TestCompression_EmbeddedFrontendIsCompressed(t *testing.T) {
 		"assets/app-abc.js": {Data: []byte(bundle.String())},
 	})
 
+	// Each coding is decoded by an independent reader where the module has one
+	// (gzip), and by fasthttp's own where it does not, so the encoder is at
+	// least held to giving back the bytes it was handed.
+	decode := map[string]func([]byte) ([]byte, error){
+		"br":   func(b []byte) ([]byte, error) { return fasthttp.AppendUnbrotliBytes(nil, b) },
+		"zstd": func(b []byte) ([]byte, error) { return fasthttp.AppendUnzstdBytes(nil, b) },
+		"gzip": func(b []byte) ([]byte, error) {
+			zr, err := gzip.NewReader(bytes.NewReader(b))
+			if err != nil {
+				return nil, err
+			}
+			return io.ReadAll(zr)
+		},
+		"": func(b []byte) ([]byte, error) { return b, nil },
+	}
 	for _, tc := range []struct {
 		name, path, wantCacheControl string
 	}{
-		{"hashed asset", "/assets/app-abc.js", "immutable"},
+		{"hashed asset", "/assets/app-abc.js", "public, max-age=31536000, immutable"},
 		{"SPA shell", "/", "no-cache"},
+		{"JSON answer", compressProbeAllowed, "no-store"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			plain := doRequest(t, s, http.MethodGet, tc.path, "", "")
-			if plain.status != http.StatusOK {
-				t.Fatalf("status = %d, want 200", plain.status)
+			if plain.status != http.StatusOK || len(plain.body) < 200 {
+				t.Fatalf("status = %d, %d bytes: want 200 and a body above fasthttp's 200-byte floor, or this "+
+					"test passes without compressing anything", plain.status, len(plain.body))
 			}
-			if len(plain.body) < 200 {
-				t.Fatalf("fixture is only %d bytes — below fasthttp's floor, so this test "+
-					"would pass without compressing anything", len(plain.body))
+			// Fiber's compress negotiates by weight (RFC 9110 §12.5.3) since v3.6, so
+			// each of these is what a client asking for it alone gets. Twenty rounds
+			// each, so the pooled writers are reused rather than built once.
+			for _, coding := range []string{"br", "zstd", "gzip", "identity"} {
+				want := coding
+				if coding == "identity" {
+					want = ""
+				}
+				for round := range 20 {
+					got := doRequest(t, s, http.MethodGet, tc.path, "", coding)
+					if got.encoding != want {
+						t.Fatalf("Accept-Encoding: %s, round %d: Content-Encoding = %q, want %q", coding, round,
+							got.encoding, want)
+					}
+					decoded, err := decode[want](got.body)
+					if err != nil || !bytes.Equal(decoded, plain.body) {
+						t.Fatalf("Accept-Encoding: %s, round %d: decodes to %d bytes (%v), not the %d sent "+
+							"uncompressed", coding, round, len(decoded), err, len(plain.body))
+					}
+					if !strings.Contains(strings.ToLower(got.vary), "accept-encoding") {
+						t.Errorf("Accept-Encoding: %s: Vary = %q, want it to name Accept-Encoding; a shared cache "+
+							"could otherwise serve these bytes to a client that cannot decode them", coding, got.vary)
+					}
+					if got.cacheControl != tc.wantCacheControl {
+						t.Fatalf("Accept-Encoding: %s: Cache-Control = %q, want %q — compression must not displace "+
+							"the caching headers", coding, got.cacheControl, tc.wantCacheControl)
+					}
+				}
 			}
-
-			gz := doRequest(t, s, http.MethodGet, tc.path, "", "gzip")
-			if gz.encoding != "gzip" {
-				t.Fatalf("Content-Encoding = %q, want %q — the embedded frontend is not being compressed",
-					gz.encoding, "gzip")
-			}
-			if !bytes.Equal(mustGunzip(t, gz.body), plain.body) {
-				t.Fatal("gunzipped asset differs from the uncompressed response")
-			}
-			if !strings.Contains(strings.ToLower(gz.vary), "accept-encoding") {
-				t.Errorf("Vary = %q, want it to name Accept-Encoding; a shared cache could otherwise "+
-					"serve these bytes to a client that cannot decode them", gz.vary)
-			}
-			if !strings.Contains(gz.cacheControl, tc.wantCacheControl) {
-				t.Errorf("Cache-Control = %q, want it to contain %q — compression must not displace "+
-					"the caching headers applyFrontendCacheHeaders sets", gz.cacheControl, tc.wantCacheControl)
-			}
-			t.Logf("GET %s: %d bytes → %d bytes gzip (Cache-Control: %s)",
-				tc.path, len(plain.body), len(gz.body), gz.cacheControl)
 		})
 	}
 }
