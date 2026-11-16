@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import {
   AlertTriangle,
   ChevronDown,
@@ -141,6 +141,7 @@ import type {
 import type { VMConfig } from "../types/vm";
 import { describeError } from "@/lib/api-error";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import i18n from "@/lib/i18n";
 
 const DISK_KEY_RE = /^(scsi|ide|sata|virtio|efidisk|tpmstate|unused)\d+$/;
 
@@ -217,10 +218,34 @@ function normalizeCPU(raw: string): string {
 }
 
 const diskBusTypes = [
-  { value: "scsi", label: "SCSI", max: 30 },
-  { value: "virtio", label: "VirtIO Block", max: 15 },
-  { value: "sata", label: "SATA", max: 5 },
-  { value: "ide", label: "IDE", max: 3 },
+  {
+    value: "scsi",
+    get label() {
+      return i18n.t("vms:hardwarePanel.scsi");
+    },
+    max: 30,
+  },
+  {
+    value: "virtio",
+    get label() {
+      return i18n.t("vms:hardwarePanel.virtIOBlock");
+    },
+    max: 15,
+  },
+  {
+    value: "sata",
+    get label() {
+      return i18n.t("vms:hardwarePanel.sata");
+    },
+    max: 5,
+  },
+  {
+    value: "ide",
+    get label() {
+      return i18n.t("vms:hardwarePanel.ide");
+    },
+    max: 3,
+  },
 ] as const;
 
 interface HardwarePanelProps {
@@ -311,26 +336,51 @@ function CurrentValueOption({
   value: string;
   known: string[];
 }) {
+  const { t } = useTranslation("vms");
   if (!value || known.includes(value)) return null;
-  return <option value={value}>{value} (current)</option>;
+  return (
+    <option value={value}>{t("hardwarePanel.valueCurrent", { value })}</option>
+  );
 }
 
 /** The hotplug option's values, as the tab names them. */
 const HOTPLUG_LABELS = {
-  network: "Network",
-  disk: "Disk",
-  usb: "USB",
-  memory: "Memory",
-  cpu: "CPU",
+  get network() {
+    return i18n.t("vms:hardwarePanel.hotplugNetwork");
+  },
+  get disk() {
+    return i18n.t("vms:hardwarePanel.hotplugDisk");
+  },
+  get usb() {
+    return i18n.t("vms:hardwarePanel.hotplugUsb");
+  },
+  get memory() {
+    return i18n.t("vms:hardwarePanel.hotplugMemory");
+  },
+  get cpu() {
+    return i18n.t("vms:hardwarePanel.hotplugCpu");
+  },
 } as const;
 
 const SMBIOS_LABELS: Record<SMBIOSTextField, string> = {
-  manufacturer: "Manufacturer",
-  product: "Product",
-  version: "Version",
-  serial: "Serial",
-  sku: "SKU",
-  family: "Family",
+  get manufacturer() {
+    return i18n.t("vms:hardwarePanel.smbiosManufacturer");
+  },
+  get product() {
+    return i18n.t("vms:hardwarePanel.smbiosProduct");
+  },
+  get version() {
+    return i18n.t("vms:hardwarePanel.smbiosVersion");
+  },
+  get serial() {
+    return i18n.t("vms:hardwarePanel.smbiosSerial");
+  },
+  get sku() {
+    return i18n.t("vms:hardwarePanel.smbiosSku");
+  },
+  get family() {
+    return i18n.t("vms:hardwarePanel.smbiosFamily");
+  },
 };
 
 /** Returns a human-readable label for a bootable device key. */
@@ -342,7 +392,9 @@ function bootDeviceLabel(
     const raw = str(config[key]);
     const bridge = raw.match(/bridge=([^,]+)/)?.[1] ?? "";
     return {
-      label: `Network (${key})${bridge ? ` — ${bridge}` : ""}`,
+      label: bridge
+        ? i18n.t("vms:hardwarePanel.bootNetworkBridge", { key, bridge })
+        : i18n.t("vms:hardwarePanel.bootNetwork", { key }),
       type: "net",
     };
   }
@@ -351,7 +403,10 @@ function bootDeviceLabel(
   if (drive.cdrom) {
     const iso = drive.file;
     return {
-      label: `CD/DVD (${key})${iso && iso !== "none" ? ` — ${iso}` : " — empty"}`,
+      label:
+        iso && iso !== "none"
+          ? i18n.t("vms:hardwarePanel.bootCdromIso", { key, iso })
+          : i18n.t("vms:hardwarePanel.bootCdromEmpty", { key }),
       type: "cdrom",
     };
   }
@@ -359,7 +414,17 @@ function bootDeviceLabel(
     const storage = val.split(":")[0] ?? "";
     const size = val.match(/size=([^,]+)/)?.[1] ?? "";
     return {
-      label: `Disk (${key})${storage ? ` — ${storage}` : ""}${size ? `, ${size}` : ""}`,
+      label: storage
+        ? size
+          ? i18n.t("vms:hardwarePanel.bootDiskStorageSize", {
+              key,
+              storage,
+              size,
+            })
+          : i18n.t("vms:hardwarePanel.bootDiskStorage", { key, storage })
+        : size
+          ? i18n.t("vms:hardwarePanel.bootDiskSize", { key, size })
+          : i18n.t("vms:hardwarePanel.bootDisk", { key }),
       type: "disk",
     };
   }
@@ -478,17 +543,20 @@ export function HardwarePanel({
     const q35pve = pveTypes.find((mt) => mt.id.includes("q35"));
     const i440pve = pveTypes.find((mt) => mt.id.includes("i440fx"));
     if (q35pve)
-      result.push({ value: q35pve.id, label: `${q35pve.id} (Recommended)` });
+      result.push({
+        value: q35pve.id,
+        label: t("hardwarePanel.idRecommended", { id: q35pve.id }),
+      });
     if (i440pve) result.push({ value: i440pve.id, label: i440pve.id });
     for (const mt of pveTypes) {
       if (mt.id !== q35pve?.id && mt.id !== i440pve?.id) {
         result.push({ value: mt.id, label: mt.id });
       }
     }
-    result.push({ value: "q35", label: "q35 (generic)" });
-    result.push({ value: "pc", label: "i440fx (generic)" });
+    result.push({ value: "q35", label: t("hardwarePanel.q35Generic") });
+    result.push({ value: "pc", label: t("hardwarePanel.i440fxGeneric") });
     return result;
-  }, [rawMachineTypes]);
+  }, [rawMachineTypes, t]);
 
   // --- Original config snapshot for diff comparison ---
   const [original, setOriginal] = useState<VMConfig | null>(null);
@@ -1338,9 +1406,10 @@ export function HardwarePanel({
             size: edit.newSize,
           }),
           {
-            action: `Resizing disk ${key}`,
+            action: t("hardwarePanel.resizingDiskKey", { key }),
             onError: (err) => {
-              const msg = describeError(err) || "the request failed";
+              const msg =
+                describeError(err) || t("hardwarePanel.theRequestFailed");
               setResizeErrors((prev) => [...prev, `${key}: ${msg}`]);
             },
           },
@@ -1351,7 +1420,7 @@ export function HardwarePanel({
     if (Object.keys(fields).length === 0) return;
 
     settle(setConfigMutation.mutateAsync({ clusterId, vmId, fields }), {
-      action: "Saving the hardware settings",
+      action: t("hardwarePanel.savingTheHardwareSettings"),
       // Clear pending state after successful save
       onSuccess: clearStagedChanges,
       onError: () => undefined, // shown in the save bar from the mutation's state
@@ -1649,7 +1718,7 @@ export function HardwarePanel({
     return (
       <Panel>
         <p className="text-sm text-muted-foreground">
-          Unable to load VM configuration.
+          {t("hardwarePanel.unableToLoadVMConfiguration")}
         </p>
       </Panel>
     );
@@ -1699,20 +1768,23 @@ export function HardwarePanel({
     virtiofsKeys.length +
     (config["rng0"] != null ? 1 : 0);
   const bootEnabled = bootOrder.filter((b) => b.enabled).length;
-  const plural = (n: number, one: string, many = `${one}s`) =>
-    `${String(n)} ${n === 1 ? one : many}`;
+  /** "1 vCPU", "2 hard disks": a count with its noun, from hardwarePanel.count. */
+  const plural = (n: number, noun: string) =>
+    t(`hardwarePanel.count.${noun}`, { count: n });
 
   const undoButton = (onClick: () => void) => (
     <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onClick}>
-      Undo
+      {t("hardwarePanel.undo")}
     </Button>
   );
   const cancelButton = (onClick: () => void) => (
     <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onClick}>
-      Cancel
+      {t("hardwarePanel.cancel")}
     </Button>
   );
-  const removedMarker = <PendingBadge>Marked for removal</PendingBadge>;
+  const removedMarker = (
+    <PendingBadge>{t("hardwarePanel.markedForRemoval")}</PendingBadge>
+  );
   /** A staged add of one kind, as rows after the devices of that kind. */
   const pendingRows = (re: RegExp, icon: LucideIcon, title: string) =>
     pendingOf(re).map(([key, val]) => (
@@ -1721,7 +1793,7 @@ export function HardwarePanel({
         name={key}
         icon={icon}
         title={title}
-        marker={<PendingBadge>Added on save</PendingBadge>}
+        marker={<PendingBadge>{t("hardwarePanel.addedOnSave")}</PendingBadge>}
         summary={<span className="break-all font-mono">{val}</span>}
         actions={cancelButton(() => {
           handleCancelPendingDevice(key);
@@ -1733,11 +1805,17 @@ export function HardwarePanel({
     <div className={cn("space-y-4", clearSaveBarClass)}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <p className="min-w-0 flex-[1_1_18rem] text-sm text-muted-foreground">
-          {plural(totalVcpus, "vCPU")}, {formatBytes(num(memory) * 1024 * 1024)}{" "}
-          of memory, {plural(hardDisks.length, "hard disk")} and{" "}
-          {plural(nicKeys.length, "network device")}.
-          {isRunning &&
-            " The VM is running, so hardware changes stay pending until it restarts."}
+          {t(
+            isRunning
+              ? "hardwarePanel.summaryRunning"
+              : "hardwarePanel.summary",
+            {
+              vcpus: plural(totalVcpus, "vcpu"),
+              memory: formatBytes(num(memory) * 1024 * 1024),
+              disks: plural(hardDisks.length, "hardDisk"),
+              nics: plural(nicKeys.length, "networkDevice"),
+            },
+          )}
         </p>
         {/* Add device: the tab's one primary action. */}
         <AddDeviceMenu
@@ -1772,16 +1850,22 @@ export function HardwarePanel({
         <div className="flex min-w-0 flex-[3_1_520px] flex-col gap-4">
           <Panel
             flush
-            title="Processor and memory"
-            aside={`${plural(totalVcpus, "vCPU")}, ${formatBytes(num(memory) * 1024 * 1024)}`}
+            title={t("hardwarePanel.processorAndMemory")}
+            aside={t("hardwarePanel.vcpusAndMemory", {
+              vcpus: plural(totalVcpus, "vcpu"),
+              memory: formatBytes(num(memory) * 1024 * 1024),
+            })}
           >
             <GroupList>
               <Group
-                title="Processor"
-                summary={`${plural(num(sockets), "socket")} of ${plural(num(cores), "core")}`}
+                title={t("hardwarePanel.processor")}
+                summary={t("hardwarePanel.socketsOfCores", {
+                  sockets: plural(num(sockets), "socket"),
+                  cores: plural(num(cores), "core"),
+                })}
               >
                 <FieldGrid>
-                  <Field label="Sockets">
+                  <Field label={t("hardwarePanel.sockets")}>
                     <Input
                       type="number"
                       min={1}
@@ -1792,7 +1876,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Cores">
+                  <Field label={t("hardwarePanel.cores")}>
                     <Input
                       type="number"
                       min={1}
@@ -1803,7 +1887,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="CPU type">
+                  <Field label={t("hardwarePanel.cpuType")}>
                     <select
                       className={fieldSelectClass}
                       value={cpuType}
@@ -1822,7 +1906,7 @@ export function HardwarePanel({
                       ))}
                     </select>
                   </Field>
-                  <Field label="CPU limit">
+                  <Field label={t("hardwarePanel.cpuLimit")}>
                     <Input
                       type="number"
                       min={0}
@@ -1832,11 +1916,11 @@ export function HardwarePanel({
                       onChange={(e) => {
                         setCpulimit(e.target.value);
                       }}
-                      placeholder="0 (none)"
+                      placeholder={t("hardwarePanel.zeroNone")}
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="CPU units">
+                  <Field label={t("hardwarePanel.cpuUnits")}>
                     <Input
                       type="number"
                       min={1}
@@ -1849,7 +1933,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Hotplug vCPUs">
+                  <Field label={t("hardwarePanel.hotplugVCPUs")}>
                     <Input
                       type="number"
                       min={1}
@@ -1858,7 +1942,9 @@ export function HardwarePanel({
                       onChange={(e) => {
                         setVcpus(e.target.value);
                       }}
-                      placeholder={`all (${String(totalVcpus)})`}
+                      placeholder={t("hardwarePanel.allTotalVcpus", {
+                        totalVcpus: String(totalVcpus),
+                      })}
                       className={fieldInputClass}
                     />
                   </Field>
@@ -1866,7 +1952,7 @@ export function HardwarePanel({
                 <Checks>
                   <Check
                     id="hw-numa"
-                    label="NUMA"
+                    label={t("hardwarePanel.numa")}
                     checked={numa}
                     onCheckedChange={(v) => {
                       setNuma(v === true);
@@ -1880,10 +1966,12 @@ export function HardwarePanel({
                       aria-hidden="true"
                       className="h-3.5 w-3.5 -rotate-90 transition-transform group-open:rotate-0"
                     />
-                    CPU flags
+                    {t("hardwarePanel.cpuFlags")}
                     {setCpuFlagCount > 0 && (
                       <span className="font-normal">
-                        ({setCpuFlagCount} set)
+                        {t("hardwarePanel.setCpuFlagCountSet", {
+                          setCpuFlagCount,
+                        })}
                       </span>
                     )}
                   </summary>
@@ -1914,17 +2002,28 @@ export function HardwarePanel({
                               {support === "elsewhere" && (
                                 <span
                                   className="text-xs text-amber-700 dark:text-amber-400"
-                                  title={`Not supported on ${nodeName}. Available on: ${(flag.supportedOn ?? []).join(", ")}`}
+                                  title={t(
+                                    "hardwarePanel.notSupportedOnNodeNameAvailable",
+                                    {
+                                      nodeName,
+                                      supportedOn: (
+                                        flag.supportedOn ?? []
+                                      ).join(", "),
+                                    },
+                                  )}
                                 >
-                                  unsupported here
+                                  {t("hardwarePanel.unsupportedHere")}
                                 </span>
                               )}
                               {support === "nowhere" && (
                                 <span
                                   className="text-xs text-red-700 dark:text-red-400"
-                                  title={`No node in this cluster reports supporting ${flag.name}.`}
+                                  title={t(
+                                    "hardwarePanel.noNodeInThisCluster",
+                                    { name: flag.name },
+                                  )}
                                 >
-                                  unsupported on any node
+                                  {t("hardwarePanel.unsupportedOnAnyNode")}
                                 </span>
                               )}
                             </div>
@@ -1933,7 +2032,9 @@ export function HardwarePanel({
                               // w-full, and only tailwind-merge lets w-24 win.
                               className={cn(fieldSelectClass, "w-24 shrink-0")}
                               value={state}
-                              aria-label={`${flag.name} CPU flag`}
+                              aria-label={t("hardwarePanel.nameCPUFlag", {
+                                name: flag.name,
+                              })}
                               onChange={(e) => {
                                 const v = e.target.value as CPUFlagState;
                                 setCpuFlagStates((prev) => {
@@ -1949,9 +2050,15 @@ export function HardwarePanel({
                                 });
                               }}
                             >
-                              <option value="default">Default</option>
-                              <option value="on">On</option>
-                              <option value="off">Off</option>
+                              <option value="default">
+                                {t("hardwarePanel.default")}
+                              </option>
+                              <option value="on">
+                                {t("hardwarePanel.on")}
+                              </option>
+                              <option value="off">
+                                {t("hardwarePanel.off")}
+                              </option>
                             </select>
                           </div>
                           {flag.description && (
@@ -1967,17 +2074,16 @@ export function HardwarePanel({
               </Group>
 
               <Group
-                title="Memory"
+                title={t("hardwarePanel.memory")}
                 summary={formatBytes(num(memory) * 1024 * 1024)}
               >
                 <FieldGrid>
                   <Field
-                    label="Memory (MiB)"
+                    label={t("hardwarePanel.memoryMiB")}
                     note={
                       memoryMissing && (
                         <p className="mt-1 text-[12.5px] text-destructive">
-                          Proxmox cannot take an empty memory, and deleting it
-                          drops the VM to 512 MiB: enter an amount to save.
+                          {t("hardwarePanel.proxmoxCannotTakeAnEmpty")}
                         </p>
                       )
                     }
@@ -1993,7 +2099,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Balloon minimum (MiB)">
+                  <Field label={t("hardwarePanel.balloonMinimumMiB")}>
                     <Input
                       type="number"
                       min={0}
@@ -2002,11 +2108,11 @@ export function HardwarePanel({
                       onChange={(e) => {
                         setBalloon(e.target.value);
                       }}
-                      placeholder="0 = disabled"
+                      placeholder={t("hardwarePanel.n0Disabled")}
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Ballooning shares">
+                  <Field label={t("hardwarePanel.ballooningShares")}>
                     <Input
                       type="number"
                       min={0}
@@ -2015,7 +2121,7 @@ export function HardwarePanel({
                       onChange={(e) => {
                         setShares(e.target.value);
                       }}
-                      placeholder="1000 (default)"
+                      placeholder={t("hardwarePanel.cpuUnitsDefault")}
                       className={fieldInputClass}
                     />
                   </Field>
@@ -2023,7 +2129,7 @@ export function HardwarePanel({
                 <Checks>
                   <Check
                     id="hw-allow-ksm"
-                    label="Allow KSM page merging"
+                    label={t("hardwarePanel.allowKSMPageMerging")}
                     checked={allowKsm}
                     onCheckedChange={(v) => {
                       setAllowKsm(v === true);
@@ -2036,8 +2142,11 @@ export function HardwarePanel({
 
           <Panel
             flush
-            title="Disks"
-            aside={`${plural(hardDisks.length, "hard disk")}, ${plural(cdromEntries.length, "CD/DVD drive")}`}
+            title={t("hardwarePanel.disks")}
+            aside={t("hardwarePanel.disksAndDrives", {
+              disks: plural(hardDisks.length, "hardDisk"),
+              drives: plural(cdromEntries.length, "cdDvdDrive"),
+            })}
             actions={
               showAddDisk ? undefined : (
                 <Button
@@ -2048,14 +2157,14 @@ export function HardwarePanel({
                     setShowAddDisk(true);
                   }}
                 >
-                  <Plus className="h-3.5 w-3.5" /> Add disk
+                  <Plus className="h-3.5 w-3.5" /> {t("hardwarePanel.addDisk")}
                 </Button>
               )
             }
           >
             {diskEntries.length === 0 && pendingNewDisks.length === 0 && (
               <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
-                No disks configured.
+                {t("hardwarePanel.noDisksConfigured")}
               </p>
             )}
             <DeviceList>
@@ -2066,13 +2175,19 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={HardDrive}
-                      title="Hard disk"
+                      title={t("hardwarePanel.hardDisk")}
                       struck
                       marker={removedMarker}
                       summary={
                         <>
                           <span>{parsed.size || "--"}</span>
-                          {parsed.storage && <span>on {parsed.storage}</span>}
+                          {parsed.storage && (
+                            <span>
+                              {t("hardwarePanel.onStorage", {
+                                storage: parsed.storage,
+                              })}
+                            </span>
+                          )}
                         </>
                       }
                       actions={undoButton(() => {
@@ -2099,18 +2214,46 @@ export function HardwarePanel({
                     key={key}
                     name={key}
                     icon={HardDrive}
-                    title="Hard disk"
-                    marker={edited ? <PendingBadge>Edited</PendingBadge> : null}
+                    title={t("hardwarePanel.hardDisk")}
+                    marker={
+                      edited ? (
+                        <PendingBadge>{t("hardwarePanel.edited")}</PendingBadge>
+                      ) : null
+                    }
                     summary={
                       <>
                         <span>{parsed.size || "--"}</span>
                         <span>{parsed.format || "raw"}</span>
-                        {parsed.storage && <span>on {parsed.storage}</span>}
-                        {edit.newSize && <span>resize to {edit.newSize}</span>}
-                        {edit.cache && <span>cache {edit.cache}</span>}
-                        {edit.discard && <span>discard</span>}
-                        {edit.ssd && <span>SSD emulation</span>}
-                        {edit.iothread && <span>IO thread</span>}
+                        {parsed.storage && (
+                          <span>
+                            {t("hardwarePanel.onStorage", {
+                              storage: parsed.storage,
+                            })}
+                          </span>
+                        )}
+                        {edit.newSize && (
+                          <span>
+                            {t("hardwarePanel.resizeToNewSize", {
+                              newSize: edit.newSize,
+                            })}
+                          </span>
+                        )}
+                        {edit.cache && (
+                          <span>
+                            {t("hardwarePanel.cacheCache", {
+                              cache: edit.cache,
+                            })}
+                          </span>
+                        )}
+                        {edit.discard && (
+                          <span>{t("hardwarePanel.discard")}</span>
+                        )}
+                        {edit.ssd && (
+                          <span>{t("hardwarePanel.ssdEmulation")}</span>
+                        )}
+                        {edit.iothread && (
+                          <span>{t("hardwarePanel.ioThread")}</span>
+                        )}
                       </>
                     }
                     open={openRows.has(key)}
@@ -2131,7 +2274,7 @@ export function HardwarePanel({
                           currentFormat={parsed.format}
                         />
                         <IconAction
-                          label={`Remove ${key}`}
+                          label={t("hardwarePanel.removeKey", { key })}
                           icon={Trash2}
                           destructive
                           onClick={() => {
@@ -2143,7 +2286,7 @@ export function HardwarePanel({
                     editor={
                       <>
                         <FieldGrid>
-                          <Field label="Resize to">
+                          <Field label={t("hardwarePanel.resizeTo")}>
                             <Input
                               type="text"
                               value={edit.newSize}
@@ -2156,7 +2299,7 @@ export function HardwarePanel({
                               className={fieldInputClass}
                             />
                           </Field>
-                          <Field label="Cache">
+                          <Field label={t("hardwarePanel.cache")}>
                             <select
                               className={fieldSelectClass}
                               value={edit.cache}
@@ -2168,7 +2311,9 @@ export function HardwarePanel({
                                 value={parsed.cache}
                                 known={cacheModes.map((c) => c.value)}
                               />
-                              <option value="">Default</option>
+                              <option value="">
+                                {t("hardwarePanel.default")}
+                              </option>
                               {cacheModes.map((c) => (
                                 <option key={c.value} value={c.value}>
                                   {c.label}
@@ -2180,7 +2325,7 @@ export function HardwarePanel({
                         <Checks>
                           <Check
                             id={`hw-disk-${key}-discard`}
-                            label="Discard"
+                            label={t("hardwarePanel.discard2")}
                             checked={edit.discard}
                             onCheckedChange={(v) => {
                               updateDiskEdit(key, { discard: v === true });
@@ -2188,7 +2333,7 @@ export function HardwarePanel({
                           />
                           <Check
                             id={`hw-disk-${key}-ssd`}
-                            label="SSD emulation"
+                            label={t("hardwarePanel.ssdEmulation")}
                             checked={edit.ssd}
                             onCheckedChange={(v) => {
                               updateDiskEdit(key, { ssd: v === true });
@@ -2196,7 +2341,7 @@ export function HardwarePanel({
                           />
                           <Check
                             id={`hw-disk-${key}-iothread`}
-                            label="IO thread"
+                            label={t("hardwarePanel.ioThread")}
                             checked={edit.iothread}
                             onCheckedChange={(v) => {
                               updateDiskEdit(key, { iothread: v === true });
@@ -2213,17 +2358,27 @@ export function HardwarePanel({
                   key={d.key}
                   name={d.key}
                   icon={HardDrive}
-                  title="Hard disk"
-                  marker={<PendingBadge>Created on save</PendingBadge>}
+                  title={t("hardwarePanel.hardDisk")}
+                  marker={
+                    <PendingBadge>
+                      {t("hardwarePanel.createdOnSave")}
+                    </PendingBadge>
+                  }
                   summary={
                     <>
                       <span>{d.size}G</span>
                       {d.format && <span>{d.format}</span>}
-                      <span>on {d.storage}</span>
-                      {d.cache && <span>cache {d.cache}</span>}
-                      {d.discard && <span>discard</span>}
-                      {d.ssd && <span>SSD emulation</span>}
-                      {d.iothread && <span>IO thread</span>}
+                      <span>
+                        {t("hardwarePanel.onStorage", { storage: d.storage })}
+                      </span>
+                      {d.cache && (
+                        <span>
+                          {t("hardwarePanel.cacheCache", { cache: d.cache })}
+                        </span>
+                      )}
+                      {d.discard && <span>{t("hardwarePanel.discard")}</span>}
+                      {d.ssd && <span>{t("hardwarePanel.ssdEmulation")}</span>}
+                      {d.iothread && <span>{t("hardwarePanel.ioThread")}</span>}
                     </>
                   }
                   actions={cancelButton(() => {
@@ -2235,9 +2390,11 @@ export function HardwarePanel({
 
             {showAddDisk && (
               <div className="border-t px-[18px] py-4">
-                <p className="mb-3 text-sm font-medium">New hard disk</p>
+                <p className="mb-3 text-sm font-medium">
+                  {t("hardwarePanel.newHardDisk")}
+                </p>
                 <FieldGrid>
-                  <Field label="Bus">
+                  <Field label={t("hardwarePanel.bus")}>
                     <select
                       className={fieldSelectClass}
                       value={addDiskBus}
@@ -2252,7 +2409,7 @@ export function HardwarePanel({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Storage">
+                  <Field label={t("hardwarePanel.storage")}>
                     <select
                       className={fieldSelectClass}
                       value={addDiskStorage}
@@ -2260,7 +2417,7 @@ export function HardwarePanel({
                         setAddDiskStorage(e.target.value);
                       }}
                     >
-                      <option value="">Select...</option>
+                      <option value="">{t("hardwarePanel.select")}</option>
                       {diskStorages.map((s) => (
                         <option key={s.id} value={s.storage}>
                           {s.storage} ({s.type})
@@ -2268,7 +2425,7 @@ export function HardwarePanel({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Size (GiB)">
+                  <Field label={t("hardwarePanel.sizeGiB")}>
                     <Input
                       type="number"
                       min={1}
@@ -2279,7 +2436,7 @@ export function HardwarePanel({
                       }}
                     />
                   </Field>
-                  <Field label="Format">
+                  <Field label={t("hardwarePanel.format")}>
                     <select
                       className={fieldSelectClass}
                       value={addDiskFormat}
@@ -2294,7 +2451,7 @@ export function HardwarePanel({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Cache">
+                  <Field label={t("hardwarePanel.cache")}>
                     <select
                       className={fieldSelectClass}
                       value={addDiskCache}
@@ -2302,7 +2459,7 @@ export function HardwarePanel({
                         setAddDiskCache(e.target.value);
                       }}
                     >
-                      <option value="">Default</option>
+                      <option value="">{t("hardwarePanel.default")}</option>
                       {cacheModes.map((c) => (
                         <option key={c.value} value={c.value}>
                           {c.label}
@@ -2314,7 +2471,7 @@ export function HardwarePanel({
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
                   <Check
                     id="hw-add-disk-discard"
-                    label="Discard"
+                    label={t("hardwarePanel.discard2")}
                     checked={addDiskDiscard}
                     onCheckedChange={(v) => {
                       setAddDiskDiscard(v === true);
@@ -2322,7 +2479,7 @@ export function HardwarePanel({
                   />
                   <Check
                     id="hw-add-disk-ssd"
-                    label="SSD emulation"
+                    label={t("hardwarePanel.ssdEmulation")}
                     checked={addDiskSsd}
                     onCheckedChange={(v) => {
                       setAddDiskSsd(v === true);
@@ -2330,7 +2487,7 @@ export function HardwarePanel({
                   />
                   <Check
                     id="hw-add-disk-iothread"
-                    label="IO thread"
+                    label={t("hardwarePanel.ioThread")}
                     checked={addDiskIothread}
                     onCheckedChange={(v) => {
                       setAddDiskIothread(v === true);
@@ -2344,7 +2501,7 @@ export function HardwarePanel({
                         setShowAddDisk(false);
                       }}
                     >
-                      Cancel
+                      {t("hardwarePanel.cancel")}
                     </Button>
                     <Button
                       variant="secondary"
@@ -2353,7 +2510,7 @@ export function HardwarePanel({
                       onClick={handleAddDisk}
                       disabled={!addDiskStorage || !addDiskSize}
                     >
-                      <Plus className="h-3.5 w-3.5" /> Add
+                      <Plus className="h-3.5 w-3.5" /> {t("hardwarePanel.add")}
                     </Button>
                   </div>
                 </div>
@@ -2363,7 +2520,7 @@ export function HardwarePanel({
             <div
               ref={cdromList}
               role="region"
-              aria-label="CD/DVD drives"
+              aria-label={t("hardwarePanel.cdDVDDrives")}
               tabIndex={-1}
               className="outline-none"
             >
@@ -2372,7 +2529,9 @@ export function HardwarePanel({
                   // A cloud-init drive holds the volume Proxmox generates, not
                   // an ISO: picking one would free it, as removing it does.
                   const cloudInit = isCloudInitVolume(isoVal);
-                  const title = cloudInit ? "Cloud-init drive" : "CD/DVD drive";
+                  const title = cloudInit
+                    ? t("hardwarePanel.cloudInitDrive")
+                    : t("hardwarePanel.cdDvdDrive");
                   const icon = cloudInit ? Monitor : Disc;
                   if (deviceRemovals.has(key)) {
                     return (
@@ -2401,9 +2560,13 @@ export function HardwarePanel({
                       title={title}
                       marker={
                         stored == null ? (
-                          <PendingBadge>Added on save</PendingBadge>
+                          <PendingBadge>
+                            {t("hardwarePanel.addedOnSave")}
+                          </PendingBadge>
                         ) : edited ? (
-                          <PendingBadge>Edited</PendingBadge>
+                          <PendingBadge>
+                            {t("hardwarePanel.edited")}
+                          </PendingBadge>
                         ) : null
                       }
                       summary={
@@ -2419,7 +2582,9 @@ export function HardwarePanel({
                                 fieldSelectClass,
                                 "w-64 max-w-full",
                               )}
-                              aria-label={`Media in ${key}`}
+                              aria-label={t("hardwarePanel.mediaInKey", {
+                                key,
+                              })}
                               value={isoVal}
                               onChange={(e) => {
                                 setCdromEdits((prev) => ({
@@ -2429,14 +2594,16 @@ export function HardwarePanel({
                               }}
                             >
                               <option value="none">
-                                No media (empty drive)
+                                {t("hardwarePanel.noMediaEmptyDrive")}
                               </option>
                               {isoVal !== "none" &&
                                 !isoFiles.some(
                                   (iso) => iso.volid === isoVal,
                                 ) && (
                                   <option value={isoVal}>
-                                    {isoVal} (current)
+                                    {t("hardwarePanel.isoValCurrent", {
+                                      isoVal,
+                                    })}
                                   </option>
                                 )}
                               {isoFiles.map((iso) => (
@@ -2447,7 +2614,7 @@ export function HardwarePanel({
                             </select>
                           )}
                           <IconAction
-                            label={`Remove ${key}`}
+                            label={t("hardwarePanel.removeKey", { key })}
                             icon={Trash2}
                             destructive
                             onClick={() => {
@@ -2466,7 +2633,7 @@ export function HardwarePanel({
               </DeviceList>
               {isoStorages.length > 1 && cdromEntries.length > 0 && (
                 <label className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-[18px] py-2.5 pl-[44px] text-[12.5px] text-muted-foreground">
-                  List ISO images from
+                  {t("hardwarePanel.listISOImagesFrom")}
                   <select
                     className={cn(fieldSelectClass, "w-48")}
                     value={cdromStorageId}
@@ -2494,7 +2661,9 @@ export function HardwarePanel({
                       name={key}
                       icon={key.startsWith("efidisk") ? Key : Shield}
                       title={
-                        key.startsWith("efidisk") ? "EFI disk" : "TPM state"
+                        key.startsWith("efidisk")
+                          ? t("hardwarePanel.efiDisk")
+                          : t("hardwarePanel.tpmState")
                       }
                       struck
                       marker={removedMarker}
@@ -2511,19 +2680,25 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={Key}
-                      title="EFI disk"
+                      title={t("hardwarePanel.efiDisk")}
                       summary={
                         <>
-                          <span>on {efi.storage}</span>
+                          <span>
+                            {t("hardwarePanel.onStorage", {
+                              storage: efi.storage,
+                            })}
+                          </span>
                           <span>{efi.efitype}</span>
                           {efi.preEnrolledKeys && (
-                            <span>Secure Boot keys enrolled</span>
+                            <span>
+                              {t("hardwarePanel.secureBootKeysEnrolled")}
+                            </span>
                           )}
                         </>
                       }
                       actions={
                         <IconAction
-                          label={`Remove ${key}`}
+                          label={t("hardwarePanel.removeKey", { key })}
                           icon={Trash2}
                           destructive
                           onClick={() => {
@@ -2540,16 +2715,20 @@ export function HardwarePanel({
                     key={key}
                     name={key}
                     icon={Shield}
-                    title="TPM state"
+                    title={t("hardwarePanel.tpmState")}
                     summary={
                       <>
-                        <span>on {tpm.storage}</span>
+                        <span>
+                          {t("hardwarePanel.onStorage", {
+                            storage: tpm.storage,
+                          })}
+                        </span>
                         <span>{tpm.version}</span>
                       </>
                     }
                     actions={
                       <IconAction
-                        label={`Remove ${key}`}
+                        label={t("hardwarePanel.removeKey", { key })}
                         icon={Trash2}
                         destructive
                         onClick={() => {
@@ -2569,17 +2748,21 @@ export function HardwarePanel({
                     key={key}
                     name={key}
                     icon={HardDrive}
-                    title="Detached disk"
-                    marker={<Badge variant="warning">Unused</Badge>}
+                    title={t("hardwarePanel.detachedDisk")}
+                    marker={
+                      <Badge variant="warning">
+                        {t("hardwarePanel.unused")}
+                      </Badge>
+                    }
                     summary={
                       <>
                         <span className="break-all font-mono">{volume}</span>
-                        <span>still takes space on its storage</span>
+                        <span>{t("hardwarePanel.stillTakesSpaceOnIts")}</span>
                       </>
                     }
                     actions={
                       <IconAction
-                        label={`Remove ${key}`}
+                        label={t("hardwarePanel.removeKey", { key })}
                         icon={Trash2}
                         destructive
                         onClick={() => {
@@ -2605,14 +2788,18 @@ export function HardwarePanel({
                   }
                   title={
                     key.startsWith("efidisk")
-                      ? "EFI disk"
+                      ? t("hardwarePanel.efiDisk")
                       : key.startsWith("tpmstate")
-                        ? "TPM state"
+                        ? t("hardwarePanel.tpmState")
                         : isCloudInitVolume(val)
-                          ? "Cloud-init drive"
-                          : "Drive"
+                          ? t("hardwarePanel.cloudInitDrive")
+                          : t("hardwarePanel.drive")
                   }
-                  marker={<PendingBadge>Added on save</PendingBadge>}
+                  marker={
+                    <PendingBadge>
+                      {t("hardwarePanel.addedOnSave")}
+                    </PendingBadge>
+                  }
                   summary={<span className="break-all font-mono">{val}</span>}
                   actions={cancelButton(() => {
                     handleCancelPendingDevice(key);
@@ -2622,10 +2809,14 @@ export function HardwarePanel({
             </DeviceList>
           </Panel>
 
-          <Panel flush title="Network" aside={plural(nicKeys.length, "device")}>
+          <Panel
+            flush
+            title={t("hardwarePanel.network")}
+            aside={plural(nicKeys.length, "device")}
+          >
             {nicKeys.length === 0 && (
               <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
-                No network devices configured.
+                {t("hardwarePanel.noNetworkDevicesConfigured")}
               </p>
             )}
             <DeviceList>
@@ -2638,7 +2829,7 @@ export function HardwarePanel({
                       key={nicKey}
                       name={nicKey}
                       icon={Network}
-                      title="Network device"
+                      title={t("hardwarePanel.networkDevice")}
                       struck
                       marker={removedMarker}
                       actions={undoButton(() => {
@@ -2654,8 +2845,12 @@ export function HardwarePanel({
                     key={nicKey}
                     name={nicKey}
                     icon={Network}
-                    title="Network device"
-                    marker={edited ? <PendingBadge>Edited</PendingBadge> : null}
+                    title={t("hardwarePanel.networkDevice")}
+                    marker={
+                      edited ? (
+                        <PendingBadge>{t("hardwarePanel.edited")}</PendingBadge>
+                      ) : null
+                    }
                     summary={
                       <>
                         <span>
@@ -2663,14 +2858,28 @@ export function HardwarePanel({
                             ?.label ?? nic.model}
                         </span>
                         <span>
-                          {nic.bridge ? `on ${nic.bridge}` : "no bridge (NAT)"}
+                          {nic.bridge
+                            ? t("hardwarePanel.onBridge", {
+                                bridge: nic.bridge,
+                              })
+                            : t("hardwarePanel.noBridgeNAT")}
                         </span>
-                        {nic.vlanTag && <span>VLAN {nic.vlanTag}</span>}
+                        {nic.vlanTag && (
+                          <span>
+                            {t("hardwarePanel.vlanVlanTag", {
+                              vlanTag: nic.vlanTag,
+                            })}
+                          </span>
+                        )}
                         {nic.mac && (
                           <span className="font-mono">{nic.mac}</span>
                         )}
-                        {nic.firewall && <span>firewall on</span>}
-                        {nic.linkDown && <span>disconnected</span>}
+                        {nic.firewall && (
+                          <span>{t("hardwarePanel.firewallOn")}</span>
+                        )}
+                        {nic.linkDown && (
+                          <span>{t("hardwarePanel.disconnected")}</span>
+                        )}
                       </>
                     }
                     open={openRows.has(nicKey)}
@@ -2679,7 +2888,7 @@ export function HardwarePanel({
                     }}
                     actions={
                       <IconAction
-                        label={`Remove ${nicKey}`}
+                        label={t("hardwarePanel.removeNicKey", { nicKey })}
                         icon={Trash2}
                         destructive
                         onClick={() => {
@@ -2690,7 +2899,7 @@ export function HardwarePanel({
                     editor={
                       <>
                         <FieldGrid>
-                          <Field label="Model">
+                          <Field label={t("hardwarePanel.model")}>
                             <select
                               className={fieldSelectClass}
                               value={nic.model}
@@ -2711,7 +2920,7 @@ export function HardwarePanel({
                               ))}
                             </select>
                           </Field>
-                          <Field label="Bridge">
+                          <Field label={t("hardwarePanel.bridge")}>
                             {bridgeNames.length > 0 ? (
                               <select
                                 className={fieldSelectClass}
@@ -2725,7 +2934,9 @@ export function HardwarePanel({
                                 {/* No bridge is qemu's user-mode network,
                                     NATed, with its own DHCP and DNS ($net_fmt's
                                     bridge, src/PVE/QemuServer/Network.pm). */}
-                                <option value="">No bridge (NAT)</option>
+                                <option value="">
+                                  {t("hardwarePanel.noBridgeNAT2")}
+                                </option>
                                 <CurrentValueOption
                                   value={storedNics[nicKey]?.bridge ?? ""}
                                   known={bridgeNames}
@@ -2759,7 +2970,7 @@ export function HardwarePanel({
                               />
                             )}
                           </Field>
-                          <Field label="VLAN tag">
+                          <Field label={t("hardwarePanel.vlanTag")}>
                             <Input
                               type="number"
                               min={1}
@@ -2770,11 +2981,11 @@ export function HardwarePanel({
                                   vlanTag: e.target.value,
                                 });
                               }}
-                              placeholder="None"
+                              placeholder={t("hardwarePanel.none")}
                               className={fieldInputClass}
                             />
                           </Field>
-                          <Field label="Rate limit (MB/s)">
+                          <Field label={t("hardwarePanel.rateLimitMBS")}>
                             <Input
                               type="number"
                               min={0}
@@ -2784,11 +2995,11 @@ export function HardwarePanel({
                                   rateLimit: e.target.value,
                                 });
                               }}
-                              placeholder="Unlimited"
+                              placeholder={t("hardwarePanel.unlimited")}
                               className={fieldInputClass}
                             />
                           </Field>
-                          <Field label="MTU">
+                          <Field label={t("hardwarePanel.mtu")}>
                             <Input
                               type="number"
                               min={0}
@@ -2796,7 +3007,7 @@ export function HardwarePanel({
                               onChange={(e) => {
                                 updateNicEdit(nicKey, { mtu: e.target.value });
                               }}
-                              placeholder="Default"
+                              placeholder={t("hardwarePanel.default")}
                               className={fieldInputClass}
                             />
                           </Field>
@@ -2804,7 +3015,7 @@ export function HardwarePanel({
                         <Checks>
                           <Check
                             id={`hw-${nicKey}-fw`}
-                            label="Firewall"
+                            label={t("hardwarePanel.firewall")}
                             checked={nic.firewall}
                             onCheckedChange={(v) => {
                               updateNicEdit(nicKey, { firewall: v === true });
@@ -2812,7 +3023,7 @@ export function HardwarePanel({
                           />
                           <Check
                             id={`hw-${nicKey}-linkdown`}
-                            label="Disconnect"
+                            label={t("hardwarePanel.disconnect")}
                             checked={nic.linkDown}
                             onCheckedChange={(v) => {
                               updateNicEdit(nicKey, { linkDown: v === true });
@@ -2824,14 +3035,18 @@ export function HardwarePanel({
                   />
                 );
               })}
-              {pendingRows(/^net\d+$/, Network, "Network device")}
+              {pendingRows(
+                /^net\d+$/,
+                Network,
+                t("hardwarePanel.networkDevice"),
+              )}
             </DeviceList>
           </Panel>
 
           {hasOtherDevices && (
             <Panel
               flush
-              title="Other devices"
+              title={t("hardwarePanel.otherDevices")}
               aside={plural(otherDeviceCount, "device")}
             >
               <DeviceList>
@@ -2843,7 +3058,7 @@ export function HardwarePanel({
                         key={key}
                         name={key}
                         icon={Usb}
-                        title="USB device"
+                        title={t("hardwarePanel.usbDevice")}
                         struck
                         marker={removedMarker}
                         actions={undoButton(() => {
@@ -2864,14 +3079,14 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={Usb}
-                      title="USB device"
+                      title={t("hardwarePanel.usbDevice")}
                       summary={
                         <>
                           {parsed.spice ? (
-                            <span>SPICE redirection</span>
+                            <span>{t("hardwarePanel.spiceRedirection")}</span>
                           ) : parsed.mapping ? (
                             <>
-                              <span>Mapped</span>
+                              <span>{t("hardwarePanel.mapped")}</span>
                               <span className="font-mono">
                                 {parsed.mapping}
                               </span>
@@ -2879,11 +3094,12 @@ export function HardwarePanel({
                           ) : (
                             <span>{usbHostLabel(parsed.host, usbDevices)}</span>
                           )}
-                          {parsed.usb3 && <span>USB 3</span>}
+                          {parsed.usb3 && (
+                            <span>{t("hardwarePanel.usb3")}</span>
+                          )}
                           {rootOnly && (
                             <span>
-                              Passed through directly; only root@pam can remove
-                              it, in Proxmox
+                              {t("hardwarePanel.passedThroughDirectlyOnlyRoot")}
                             </span>
                           )}
                         </>
@@ -2891,7 +3107,7 @@ export function HardwarePanel({
                       actions={
                         rootOnly ? undefined : (
                           <IconAction
-                            label={`Remove ${key}`}
+                            label={t("hardwarePanel.removeKey", { key })}
                             icon={Trash2}
                             destructive
                             onClick={() => {
@@ -2903,7 +3119,7 @@ export function HardwarePanel({
                     />
                   );
                 })}
-                {pendingRows(/^usb\d+$/, Usb, "USB device")}
+                {pendingRows(/^usb\d+$/, Usb, t("hardwarePanel.usbDevice"))}
 
                 {pciKeys.map((key) => {
                   const parsed = parsePCI(str(config[key]));
@@ -2913,7 +3129,7 @@ export function HardwarePanel({
                         key={key}
                         name={key}
                         icon={Cpu}
-                        title="PCI device"
+                        title={t("hardwarePanel.pciDevice")}
                         struck
                         marker={removedMarker}
                         actions={undoButton(() => {
@@ -2931,12 +3147,12 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={Cpu}
-                      title="PCI device"
+                      title={t("hardwarePanel.pciDevice")}
                       summary={
                         <>
                           {parsed.mapping ? (
                             <>
-                              <span>Mapped</span>
+                              <span>{t("hardwarePanel.mapped")}</span>
                               <span className="font-mono">
                                 {parsed.mapping}
                               </span>
@@ -2944,13 +3160,17 @@ export function HardwarePanel({
                           ) : (
                             <span>{pciHostLabel(parsed.host, pciDevices)}</span>
                           )}
-                          {parsed.pcie && <span>PCIe</span>}
+                          {parsed.pcie && (
+                            <span>{t("hardwarePanel.pCIe")}</span>
+                          )}
                           {parsed.xvga && <span>x-vga</span>}
                           {rootOnly && (
                             <span>
                               {parsed.host
-                                ? "Passed through directly; only root@pam can remove it, in Proxmox"
-                                : "Uses a ROM file; only root@pam can remove it, in Proxmox"}
+                                ? t(
+                                    "hardwarePanel.passedThroughDirectlyOnlyRoot",
+                                  )
+                                : t("hardwarePanel.usesAROMFileOnly")}
                             </span>
                           )}
                         </>
@@ -2958,7 +3178,7 @@ export function HardwarePanel({
                       actions={
                         rootOnly ? undefined : (
                           <IconAction
-                            label={`Remove ${key}`}
+                            label={t("hardwarePanel.removeKey", { key })}
                             icon={Trash2}
                             destructive
                             onClick={() => {
@@ -2970,7 +3190,7 @@ export function HardwarePanel({
                     />
                   );
                 })}
-                {pendingRows(/^hostpci\d+$/, Cpu, "PCI device")}
+                {pendingRows(/^hostpci\d+$/, Cpu, t("hardwarePanel.pciDevice"))}
 
                 {serialKeys.map((key) => {
                   const val = str(config[key]);
@@ -2984,7 +3204,7 @@ export function HardwarePanel({
                         key={key}
                         name={key}
                         icon={Terminal}
-                        title="Serial port"
+                        title={t("hardwarePanel.serialPort")}
                         struck
                         marker={removedMarker}
                         actions={undoButton(() => {
@@ -2998,14 +3218,13 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={Terminal}
-                      title="Serial port"
+                      title={t("hardwarePanel.serialPort")}
                       summary={
                         <>
                           <span className="font-mono">{val}</span>
                           {rootOnly && (
                             <span>
-                              A host serial port; only root@pam can remove it,
-                              in Proxmox
+                              {t("hardwarePanel.aHostSerialPortOnly")}
                             </span>
                           )}
                         </>
@@ -3013,7 +3232,7 @@ export function HardwarePanel({
                       actions={
                         rootOnly ? undefined : (
                           <IconAction
-                            label={`Remove ${key}`}
+                            label={t("hardwarePanel.removeKey", { key })}
                             icon={Trash2}
                             destructive
                             onClick={() => {
@@ -3025,7 +3244,11 @@ export function HardwarePanel({
                     />
                   );
                 })}
-                {pendingRows(/^serial\d+$/, Terminal, "Serial port")}
+                {pendingRows(
+                  /^serial\d+$/,
+                  Terminal,
+                  t("hardwarePanel.serialPort"),
+                )}
 
                 {config["rng0"] != null && !deviceRemovals.has("rng0") ? (
                   (() => {
@@ -3034,19 +3257,29 @@ export function HardwarePanel({
                       <DeviceRow
                         name="rng0"
                         icon={Dice1}
-                        title="VirtIO RNG"
+                        title={t("hardwarePanel.virtIORNG")}
                         summary={
                           <>
                             <span className="font-mono">{rng.source}</span>
                             {rng.maxBytes && (
-                              <span>at most {rng.maxBytes} bytes</span>
+                              <span>
+                                {t("hardwarePanel.atMostMaxBytesBytes", {
+                                  maxBytes: rng.maxBytes,
+                                })}
+                              </span>
                             )}
-                            {rng.period && <span>every {rng.period} ms</span>}
+                            {rng.period && (
+                              <span>
+                                {t("hardwarePanel.everyPeriodMs", {
+                                  period: rng.period,
+                                })}
+                              </span>
+                            )}
                           </>
                         }
                         actions={
                           <IconAction
-                            label="Remove rng0"
+                            label={t("hardwarePanel.removeRng0")}
                             icon={Trash2}
                             destructive
                             onClick={() => {
@@ -3061,7 +3294,7 @@ export function HardwarePanel({
                   <DeviceRow
                     name="rng0"
                     icon={Dice1}
-                    title="VirtIO RNG"
+                    title={t("hardwarePanel.virtIORNG")}
                     struck
                     marker={removedMarker}
                     actions={undoButton(() => {
@@ -3072,8 +3305,12 @@ export function HardwarePanel({
                   <DeviceRow
                     name="rng0"
                     icon={Dice1}
-                    title="VirtIO RNG"
-                    marker={<PendingBadge>Added on save</PendingBadge>}
+                    title={t("hardwarePanel.virtIORNG")}
+                    marker={
+                      <PendingBadge>
+                        {t("hardwarePanel.addedOnSave")}
+                      </PendingBadge>
+                    }
                     summary={
                       <span className="break-all font-mono">
                         {pendingDeviceAdds["rng0"]}
@@ -3093,7 +3330,7 @@ export function HardwarePanel({
                         key={key}
                         name={key}
                         icon={FolderOpen}
-                        title="VirtioFS share"
+                        title={t("hardwarePanel.virtioFSShare")}
                         struck
                         marker={removedMarker}
                         actions={undoButton(() => {
@@ -3107,17 +3344,23 @@ export function HardwarePanel({
                       key={key}
                       name={key}
                       icon={FolderOpen}
-                      title="VirtioFS share"
+                      title={t("hardwarePanel.virtioFSShare")}
                       summary={
                         <>
                           <span className="font-mono">{parsed.dirid}</span>
-                          <span>cache {parsed.cache}</span>
-                          {parsed.directIo && <span>direct I/O</span>}
+                          <span>
+                            {t("hardwarePanel.cacheCache", {
+                              cache: parsed.cache,
+                            })}
+                          </span>
+                          {parsed.directIo && (
+                            <span>{t("hardwarePanel.directIO")}</span>
+                          )}
                         </>
                       }
                       actions={
                         <IconAction
-                          label={`Remove ${key}`}
+                          label={t("hardwarePanel.removeKey", { key })}
                           icon={Trash2}
                           destructive
                           onClick={() => {
@@ -3128,16 +3371,23 @@ export function HardwarePanel({
                     />
                   );
                 })}
-                {pendingRows(/^virtiofs\d+$/, FolderOpen, "VirtioFS share")}
+                {pendingRows(
+                  /^virtiofs\d+$/,
+                  FolderOpen,
+                  t("hardwarePanel.virtiofsShare"),
+                )}
               </DeviceList>
             </Panel>
           )}
 
-          <Panel flush title="Options">
+          <Panel flush title={t("hardwarePanel.options")}>
             <GroupList>
-              <Group title="Guest">
+              <Group title={t("hardwarePanel.guest")}>
                 <FieldGrid>
-                  <Field label="OS type" className="col-span-2">
+                  <Field
+                    label={t("hardwarePanel.osType")}
+                    className="col-span-2"
+                  >
                     <select
                       className={fieldSelectClass}
                       value={ostype}
@@ -3160,7 +3410,7 @@ export function HardwarePanel({
                 <Checks>
                   <Check
                     id="hw-agent"
-                    label="Agent"
+                    label={t("hardwarePanel.agent")}
                     checked={agentEnabled}
                     onCheckedChange={(v) => {
                       setAgentEnabled(v === true);
@@ -3169,7 +3419,7 @@ export function HardwarePanel({
                   {agentEnabled && (
                     <Check
                       id="hw-agent-fstrim"
-                      label="FSTRIM"
+                      label={t("hardwarePanel.fstrim")}
                       checked={agentFstrim}
                       onCheckedChange={(v) => {
                         setAgentFstrim(v === true);
@@ -3178,7 +3428,7 @@ export function HardwarePanel({
                   )}
                   <Check
                     id="hw-tablet"
-                    label="Tablet"
+                    label={t("hardwarePanel.tablet")}
                     checked={tablet}
                     onCheckedChange={(v) => {
                       setTablet(v === true);
@@ -3186,7 +3436,7 @@ export function HardwarePanel({
                   />
                   <Check
                     id="hw-localtime"
-                    label="Local time"
+                    label={t("hardwarePanel.localTime")}
                     checked={localtime}
                     onCheckedChange={(v) => {
                       setLocaltime(v === true);
@@ -3195,11 +3445,11 @@ export function HardwarePanel({
                 </Checks>
               </Group>
 
-              <Group title="Virtualization">
+              <Group title={t("hardwarePanel.virtualization")}>
                 <Checks>
                   <Check
                     id="hw-kvm"
-                    label="KVM"
+                    label={t("hardwarePanel.kvm")}
                     checked={kvmEnabled}
                     onCheckedChange={(v) => {
                       setKvmEnabled(v === true);
@@ -3207,7 +3457,7 @@ export function HardwarePanel({
                   />
                   <Check
                     id="hw-acpi"
-                    label="ACPI"
+                    label={t("hardwarePanel.acpi")}
                     checked={acpi}
                     onCheckedChange={(v) => {
                       setAcpi(v === true);
@@ -3215,7 +3465,9 @@ export function HardwarePanel({
                   />
                 </Checks>
                 <div className="space-y-1.5">
-                  <p className="text-[12.5px] text-muted-foreground">Hotplug</p>
+                  <p className="text-[12.5px] text-muted-foreground">
+                    {t("hardwarePanel.hotplug")}
+                  </p>
                   <Checks>
                     {(["network", "disk", "usb", "memory", "cpu"] as const).map(
                       (opt) => {
@@ -3245,13 +3497,17 @@ export function HardwarePanel({
               </Group>
 
               <Group
-                title="Startup"
-                summary={onboot ? "Starts with the node" : "Started by hand"}
+                title={t("hardwarePanel.startup")}
+                summary={
+                  onboot
+                    ? t("hardwarePanel.startsWithTheNode")
+                    : t("hardwarePanel.startedByHand")
+                }
               >
                 <Checks>
                   <Check
                     id="hw-onboot"
-                    label="Start at boot"
+                    label={t("hardwarePanel.startAtBoot")}
                     checked={onboot}
                     onCheckedChange={(v) => {
                       setOnboot(v === true);
@@ -3259,7 +3515,7 @@ export function HardwarePanel({
                   />
                   <Check
                     id="hw-protection"
-                    label="Protection"
+                    label={t("hardwarePanel.protection")}
                     checked={protection}
                     onCheckedChange={(v) => {
                       setProtection(v === true);
@@ -3267,7 +3523,7 @@ export function HardwarePanel({
                   />
                 </Checks>
                 <FieldGrid>
-                  <Field label="Startup order">
+                  <Field label={t("hardwarePanel.startupOrder")}>
                     <Input
                       type="number"
                       min={0}
@@ -3279,7 +3535,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Up delay (s)">
+                  <Field label={t("hardwarePanel.upDelayS")}>
                     <Input
                       type="number"
                       min={0}
@@ -3291,7 +3547,7 @@ export function HardwarePanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Down delay (s)">
+                  <Field label={t("hardwarePanel.downDelayS")}>
                     <Input
                       type="number"
                       min={0}
@@ -3313,13 +3569,13 @@ export function HardwarePanel({
                 setAdvancedOpen((open) => !open);
               }}
             >
-              Advanced options
+              {t("hardwarePanel.advancedOptions")}
             </DisclosureRow>
             {advancedOpen && (
               <GroupList>
-                <Group title="Clock and keyboard">
+                <Group title={t("hardwarePanel.clockAndKeyboard")}>
                   <FieldGrid>
-                    <Field label="RTC start date">
+                    <Field label={t("hardwarePanel.rtcStartDate")}>
                       <Input
                         value={startdate}
                         onChange={(e) => {
@@ -3329,7 +3585,7 @@ export function HardwarePanel({
                         className={fieldInputClass}
                       />
                     </Field>
-                    <Field label="Keyboard layout">
+                    <Field label={t("hardwarePanel.keyboardLayout")}>
                       <select
                         className={fieldSelectClass}
                         value={keyboard}
@@ -3337,7 +3593,9 @@ export function HardwarePanel({
                           setKeyboard(e.target.value);
                         }}
                       >
-                        <option value="">Default (guest-handled)</option>
+                        <option value="">
+                          {t("hardwarePanel.defaultGuestHandled")}
+                        </option>
                         <CurrentValueOption
                           value={storedSelects.keyboard}
                           known={keyboardLayouts}
@@ -3353,7 +3611,7 @@ export function HardwarePanel({
                   <Checks>
                     <Check
                       id="hw-tdf"
-                      label="Time drift fix"
+                      label={t("hardwarePanel.timeDriftFix")}
                       checked={tdf}
                       onCheckedChange={(v) => {
                         setTdf(v === true);
@@ -3362,9 +3620,12 @@ export function HardwarePanel({
                   </Checks>
                 </Group>
 
-                <Group title="Migration and saved state">
+                <Group title={t("hardwarePanel.migrationAndSavedState")}>
                   <FieldGrid>
-                    <Field label="VM state storage" className="col-span-2">
+                    <Field
+                      label={t("hardwarePanel.vmStateStorage")}
+                      className="col-span-2"
+                    >
                       <select
                         className={fieldSelectClass}
                         value={vmstatestorage}
@@ -3372,7 +3633,7 @@ export function HardwarePanel({
                           setVmstatestorage(e.target.value);
                         }}
                       >
-                        <option value="">Automatic</option>
+                        <option value="">{t("hardwarePanel.automatic")}</option>
                         <CurrentValueOption
                           value={storedSelects.vmstatestorage}
                           known={diskStorages.map((st) => st.storage)}
@@ -3384,7 +3645,7 @@ export function HardwarePanel({
                         ))}
                       </select>
                     </Field>
-                    <Field label="Migrate downtime (s)">
+                    <Field label={t("hardwarePanel.migrateDowntimeS")}>
                       <Input
                         type="number"
                         min={0}
@@ -3393,11 +3654,11 @@ export function HardwarePanel({
                         onChange={(e) => {
                           setMigrateDowntime(e.target.value);
                         }}
-                        placeholder="0.1 (default)"
+                        placeholder={t("hardwarePanel.migrateDowntimeDefault")}
                         className={fieldInputClass}
                       />
                     </Field>
-                    <Field label="Migrate speed (MB/s)">
+                    <Field label={t("hardwarePanel.migrateSpeedMBS")}>
                       <Input
                         type="number"
                         min={0}
@@ -3405,18 +3666,18 @@ export function HardwarePanel({
                         onChange={(e) => {
                           setMigrateSpeed(e.target.value);
                         }}
-                        placeholder="0 (unlimited)"
+                        placeholder={t("hardwarePanel.zeroUnlimited")}
                         className={fieldInputClass}
                       />
                     </Field>
                   </FieldGrid>
                 </Group>
 
-                <Group title="Power and watchdog">
+                <Group title={t("hardwarePanel.powerAndWatchdog")}>
                   <Checks>
                     <Check
                       id="hw-reboot"
-                      label="Allow reboot"
+                      label={t("hardwarePanel.allowReboot")}
                       checked={reboot}
                       onCheckedChange={(v) => {
                         setReboot(v === true);
@@ -3424,7 +3685,7 @@ export function HardwarePanel({
                     />
                     <Check
                       id="hw-freeze"
-                      label="Freeze CPU at startup"
+                      label={t("hardwarePanel.freezeCPUAtStartup")}
                       checked={freeze}
                       onCheckedChange={(v) => {
                         setFreeze(v === true);
@@ -3432,16 +3693,16 @@ export function HardwarePanel({
                     />
                   </Checks>
                   <FieldGrid>
-                    <Field label="Watchdog device">
+                    <Field label={t("hardwarePanel.watchdogDevice")}>
                       <select
                         className={fieldSelectClass}
                         value={watchdogModel}
-                        aria-label="Watchdog device"
+                        aria-label={t("hardwarePanel.watchdogDevice")}
                         onChange={(e) => {
                           setWatchdogModel(e.target.value);
                         }}
                       >
-                        <option value="">None</option>
+                        <option value="">{t("hardwarePanel.none")}</option>
                         <CurrentValueOption
                           value={storedSelects.watchdogModel}
                           known={watchdogModels.map((m) => m.value)}
@@ -3453,11 +3714,11 @@ export function HardwarePanel({
                         ))}
                       </select>
                     </Field>
-                    <Field label="Watchdog action">
+                    <Field label={t("hardwarePanel.watchdogAction")}>
                       <select
                         className={fieldSelectClass}
                         value={watchdogAction}
-                        aria-label="Watchdog action"
+                        aria-label={t("hardwarePanel.watchdogAction")}
                         disabled={!watchdogModel}
                         onChange={(e) => {
                           setWatchdogAction(e.target.value);
@@ -3478,22 +3739,19 @@ export function HardwarePanel({
                 </Group>
 
                 <Group
-                  title="SMBIOS"
-                  summary="Type 1: what the guest reads as its system"
+                  title={t("hardwarePanel.smbios")}
+                  summary={t("hardwarePanel.type1WhatTheGuest")}
                 >
                   <Field
-                    label="UUID"
+                    label={t("hardwarePanel.uuid")}
                     note={
                       smbiosUuidChanged && (
                         <p className="mt-1.5 flex items-start gap-1.5 text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">
                           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                           <span>
                             {smbiosUuid
-                              ? "Changing the SMBIOS UUID"
-                              : "Clearing this removes the SMBIOS UUID, and Proxmox will generate a new one"}
-                            {
-                              " — the guest sees different hardware on next boot. This can deactivate Windows, and it breaks Veeam backup correlation, which matches Proxmox guests on exactly this value."
-                            }
+                              ? t("hardwarePanel.changingTheSMBIOSUUID")
+                              : t("hardwarePanel.clearingThisRemovesTheSMBIOS")}
                           </span>
                         </p>
                       )
@@ -3507,7 +3765,7 @@ export function HardwarePanel({
                       placeholder={
                         originalSmbiosUuid
                           ? originalSmbiosUuid
-                          : "auto-generated on first boot"
+                          : t("hardwarePanel.autoGeneratedOnFirstBoot")
                       }
                       className={cn(fieldInputClass, "font-mono")}
                     />
@@ -3535,11 +3793,11 @@ export function HardwarePanel({
         </div>
 
         <div className="flex min-w-0 flex-[2_1_340px] flex-col gap-4">
-          <Panel flush title="Display and boot">
+          <Panel flush title={t("hardwarePanel.displayAndBoot")}>
             <GroupList>
-              <Group title="Display">
+              <Group title={t("hardwarePanel.display")}>
                 <FieldGrid>
-                  <Field label="Graphics card">
+                  <Field label={t("hardwarePanel.graphicsCard")}>
                     <select
                       className={fieldSelectClass}
                       value={vgaType}
@@ -3556,7 +3814,7 @@ export function HardwarePanel({
                           otherwise. Not always std, so it is not shown as std:
                           Proxmox's own GUI calls it "Default" too (kvm_vga_drivers,
                           pve-manager www/manager6/Utils.js). */}
-                      <option value="">Default</option>
+                      <option value="">{t("hardwarePanel.default")}</option>
                       <CurrentValueOption
                         value={storedVgaType}
                         known={vgaTypes.map((v) => v.value)}
@@ -3569,7 +3827,7 @@ export function HardwarePanel({
                     </select>
                   </Field>
                   {vgaType === "qxl" && (
-                    <Field label="QXL memory (MiB)">
+                    <Field label={t("hardwarePanel.qxlMemoryMiB")}>
                       <Input
                         type="number"
                         min={0}
@@ -3577,12 +3835,12 @@ export function HardwarePanel({
                         onChange={(e) => {
                           setVgaMemory(e.target.value);
                         }}
-                        placeholder="Default"
+                        placeholder={t("hardwarePanel.default")}
                         className={fieldInputClass}
                       />
                     </Field>
                   )}
-                  <Field label="Audio">
+                  <Field label={t("hardwarePanel.audio")}>
                     <select
                       className={fieldSelectClass}
                       value={audioDevice}
@@ -3604,9 +3862,9 @@ export function HardwarePanel({
                 </FieldGrid>
               </Group>
 
-              <Group title="Firmware and chipset">
+              <Group title={t("hardwarePanel.firmwareAndChipset")}>
                 <FieldGrid>
-                  <Field label="BIOS">
+                  <Field label={t("hardwarePanel.bios")}>
                     <select
                       className={fieldSelectClass}
                       value={bios}
@@ -3626,7 +3884,7 @@ export function HardwarePanel({
                     </select>
                   </Field>
                   <Field
-                    label="Machine"
+                    label={t("hardwarePanel.machine")}
                     note={
                       /* Saved, buildMachine takes it off: Proxmox refuses an
                          Intel vIOMMU beside a type without q35 in it. */
@@ -3635,8 +3893,7 @@ export function HardwarePanel({
                         str(original?.["machine"] ?? ""),
                       ) && (
                         <p className="mt-1.5 text-[12.5px] leading-snug text-amber-700 dark:text-amber-400">
-                          This VM&apos;s Intel vIOMMU needs a q35 machine type,
-                          so saving this one removes it.
+                          {t("hardwarePanel.thisVMSIntelVIOMMU")}
                         </p>
                       )
                     }
@@ -3659,7 +3916,10 @@ export function HardwarePanel({
                       ))}
                     </select>
                   </Field>
-                  <Field label="SCSI controller" className="col-span-full">
+                  <Field
+                    label={t("hardwarePanel.scsiController")}
+                    className="col-span-full"
+                  >
                     <select
                       className={fieldSelectClass}
                       value={scsihw}
@@ -3682,16 +3942,19 @@ export function HardwarePanel({
               </Group>
 
               <Group
-                title="Boot order"
+                title={t("hardwarePanel.bootOrder")}
                 summary={
                   bootOrder.length === 0
                     ? undefined
-                    : `${String(bootEnabled)} of ${plural(bootOrder.length, "device")} tried, in this order`
+                    : t("hardwarePanel.bootTried", {
+                        enabled: String(bootEnabled),
+                        devices: plural(bootOrder.length, "device"),
+                      })
                 }
               >
                 {bootOrder.length === 0 && (
                   <p className="text-sm text-muted-foreground">
-                    No bootable devices
+                    {t("hardwarePanel.noBootableDevices")}
                   </p>
                 )}
                 {legacyBoot !== null && bootOrder.length > 0 && (
@@ -3737,7 +4000,9 @@ export function HardwarePanel({
                           {String(idx + 1)}
                         </span>
                         <IconAction
-                          label={`Move ${info.label} earlier in the boot order`}
+                          label={t("hardwarePanel.moveLabelEarlierInThe", {
+                            label: info.label,
+                          })}
                           icon={ArrowUp}
                           className="h-6 w-6"
                           disabled={idx === 0}
@@ -3755,7 +4020,9 @@ export function HardwarePanel({
                           }}
                         />
                         <IconAction
-                          label={`Move ${info.label} later in the boot order`}
+                          label={t("hardwarePanel.moveLabelLaterInThe", {
+                            label: info.label,
+                          })}
                           icon={ArrowDown}
                           className="h-6 w-6"
                           disabled={idx === bootOrder.length - 1}
@@ -3780,9 +4047,9 @@ export function HardwarePanel({
             </GroupList>
           </Panel>
 
-          <Panel title="Description and tags">
+          <Panel title={t("hardwarePanel.descriptionAndTags")}>
             <div className="space-y-3">
-              <Field label="Description">
+              <Field label={t("hardwarePanel.description")}>
                 <textarea
                   value={description}
                   onChange={(e) => {
@@ -3792,13 +4059,13 @@ export function HardwarePanel({
                   className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </Field>
-              <Field label="Tags">
+              <Field label={t("hardwarePanel.tags")}>
                 <Input
                   value={tags}
                   onChange={(e) => {
                     setTags(e.target.value);
                   }}
-                  placeholder="Semicolon-separated"
+                  placeholder={t("hardwarePanel.semicolonSeparated")}
                   className={fieldInputClass}
                 />
               </Field>
@@ -3820,23 +4087,26 @@ export function HardwarePanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete unused disk {unusedToDelete?.key}?
+              {t("hardwarePanel.deleteUnusedDiskKey", {
+                key: unusedToDelete?.key,
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete{" "}
-              <span className="font-mono font-semibold">
-                {unusedToDelete?.volume}
-              </span>{" "}
-              from storage, along with all data on it. This action cannot be
-              undone.
+              <Trans
+                t={t}
+                i18nKey="hardwarePanel.thisWillPermanentlyDeleteSpan"
+                values={{ volume: unusedToDelete?.volume }}
+                components={{
+                  span: <span className="font-mono font-semibold" />,
+                }}
+              />
             </AlertDialogDescription>
           </AlertDialogHeader>
           {/* Always shown, not gated on hasChanges: the sentence costs
               nothing when there is nothing to lose, and a warning that is
               always there is simpler than one that depends on a check. */}
           <p className="text-sm text-amber-700 dark:text-amber-400">
-            Deleting reloads this VM&apos;s configuration; unsaved changes in
-            this panel will be discarded. Save first to keep them.
+            {t("hardwarePanel.deletingReloadsThisVMS")}
           </p>
           {detachDisk.isError && (
             <p className="text-sm text-destructive">
@@ -3845,7 +4115,7 @@ export function HardwarePanel({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={detachDisk.isPending}>
-              Cancel
+              {t("hardwarePanel.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -3862,7 +4132,9 @@ export function HardwarePanel({
                     disk: unusedToDelete.key,
                   }),
                   {
-                    action: `Deleting unused disk ${unusedToDelete.key}`,
+                    action: t("hardwarePanel.deletingUnusedDiskKey", {
+                      key: unusedToDelete.key,
+                    }),
                     onSuccess: () => {
                       // The delete changed the config, so the refetch
                       // re-populates every field and the unsaved edits are
@@ -3877,7 +4149,9 @@ export function HardwarePanel({
                 );
               }}
             >
-              {detachDisk.isPending ? "Deleting..." : "Delete disk"}
+              {detachDisk.isPending
+                ? t("hardwarePanel.deleting")
+                : t("hardwarePanel.deleteDisk")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3892,27 +4166,30 @@ export function HardwarePanel({
         <AlertDialogContent fallbackFocus={() => cdromList.current}>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remove cloud-init drive {cloudInitToRemove?.key}?
+              {t("hardwarePanel.removeCloudInitDriveKey", {
+                key: cloudInitToRemove?.key,
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              When the removal applies, on Save or at the next restart of a
-              running VM, Proxmox deletes the drive&apos;s volume{" "}
-              <span className="font-mono font-semibold">
-                {cloudInitToRemove?.volume}
-              </span>{" "}
-              from storage. The VM&apos;s cloud-init settings stay, and a
-              cloud-init drive added again is generated from them.
+              <Trans
+                t={t}
+                i18nKey="hardwarePanel.whenTheRemovalAppliesOn"
+                values={{ volume: cloudInitToRemove?.volume }}
+                components={{
+                  span: <span className="font-mono font-semibold" />,
+                }}
+              />
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("hardwarePanel.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
                 if (cloudInitToRemove) handleRemoveCDROM(cloudInitToRemove.key);
               }}
             >
-              Remove drive
+              {t("hardwarePanel.removeDrive")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3937,23 +4214,25 @@ export function HardwarePanel({
         )}
         {setConfigMutation.isSuccess && (
           <span className="text-muted-foreground">
-            Saved.{isRunning ? " Some changes need a restart." : ""}
+            {isRunning
+              ? t("hardwarePanel.savedSomeChangesNeedARestart")
+              : t("hardwarePanel.saved")}
           </span>
         )}
         {resizeErrors.map((msg, i) => (
           <span key={i} className="text-destructive">
-            Resize failed: {msg}
+            {t("hardwarePanel.resizeFailedMsg", { msg })}
           </span>
         ))}
         {resizeMutation.isSuccess && (
           <span className="text-muted-foreground">
-            Disk resized successfully.
+            {t("hardwarePanel.diskResizedSuccessfully")}
           </span>
         )}
         {/* Said here too: the Memory field may be a screen away from Save. */}
         {memoryMissing && (
           <span className="text-destructive">
-            Memory is empty, so Save is held: enter an amount.
+            {t("hardwarePanel.memoryIsEmptySoSave")}
           </span>
         )}
       </SaveBar>

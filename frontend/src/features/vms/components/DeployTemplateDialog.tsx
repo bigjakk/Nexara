@@ -16,6 +16,7 @@ import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface DeployTemplateDialogProps {
   clusterId: string;
@@ -34,6 +35,7 @@ export function DeployTemplateDialog({
   open,
   onOpenChange,
 }: DeployTemplateDialogProps) {
+  const { t } = useTranslation("vms");
   const cloneMutation = useCloneVM();
   const settle = useSaveOutcome(open ? vmId : null);
   const { data: existingIds } = useClusterVMIDs(clusterId);
@@ -112,7 +114,9 @@ export function DeployTemplateDialog({
         },
       }),
       {
-        action: `Deploying ${templateName}`,
+        action: t("deployTemplateDialogActions.action", {
+          templateName,
+        }),
         onSuccess: (data) => {
           setUpid(data.upid);
         },

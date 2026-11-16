@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/page/Field";
 import { useCreateVMFolder } from "../api/folder-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface CreateFolderDialogProps {
   open: boolean;
@@ -30,6 +31,7 @@ export function CreateFolderDialog({
   parentId,
   parentLabel,
 }: CreateFolderDialogProps) {
+  const { t } = useTranslation("vms");
   const create = useCreateVMFolder();
   // The dialog shows a failure itself (the hook opts out of the app's toast),
   // and one that lands after it was closed is toasted instead.
@@ -54,7 +56,9 @@ export function CreateFolderDialog({
     settle(
       create.mutateAsync({ clusterId, name: trimmed, parent_id: parentId }),
       {
-        action: `Creating folder ${trimmed}`,
+        action: t("createFolderDialogActions.action", {
+          trimmed,
+        }),
         onSuccess: () => {
           onOpenChange(false);
         },

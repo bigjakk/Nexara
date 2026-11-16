@@ -14,6 +14,7 @@ import { useConvertToTemplate } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface ConvertToTemplateDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ export function ConvertToTemplateDialog({
   kind,
   resourceName,
 }: ConvertToTemplateDialogProps) {
+  const { t } = useTranslation("vms");
   const convertMutation = useConvertToTemplate();
   const settle = useSaveOutcome(open ? resourceId : null);
   const [upid, setUpid] = useState<string | null>(null);
@@ -43,7 +45,10 @@ export function ConvertToTemplateDialog({
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     settle(convertMutation.mutateAsync({ clusterId, resourceId, kind }), {
-      action: `Converting ${resourceName} to a template`,
+      action: t(
+        "convertToTemplateDialogActions.action",
+        { resourceName },
+      ),
       onSuccess: (data) => {
         setUpid(data.upid);
       },

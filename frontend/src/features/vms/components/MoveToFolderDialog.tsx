@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useVMFolders, useAssignVMToFolder } from "../api/folder-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { buildFolderTree, flattenFolderTree } from "../lib/folder-tree";
+import { useTranslation } from "react-i18next";
 
 interface MoveToFolderDialogProps {
   open: boolean;
@@ -31,6 +32,7 @@ export function MoveToFolderDialog({
   vmId,
   vmName,
 }: MoveToFolderDialogProps) {
+  const { t } = useTranslation("vms");
   const foldersQuery = useVMFolders(open ? clusterId : "");
   const assign = useAssignVMToFolder(true);
   // The dialog shows a failure itself (the hook opts out of the app's toast),
@@ -58,7 +60,7 @@ export function MoveToFolderDialog({
   function handleSubmit() {
     setError(null);
     settle(assign.mutateAsync({ clusterId, vmId, folder_id: selected }), {
-      action: `Moving ${vmName}`,
+      action: t("moveToFolderDialogActions.action", { vmName }),
       onSuccess: () => {
         onOpenChange(false);
       },

@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRegisterEsxiSource } from "../api/import-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface EsxiSourceFormProps {
   clusterId: string;
@@ -20,6 +21,7 @@ export function EsxiSourceForm({
   onRegistered,
   onCancel,
 }: EsxiSourceFormProps) {
+  const { t } = useTranslation("vms");
   const [storage, setStorage] = useState("");
   const [server, setServer] = useState("");
   const [username, setUsername] = useState("");
@@ -49,7 +51,9 @@ export function EsxiSourceForm({
         },
       }),
       {
-        action: `Registering ESXi source ${storage.trim()}`,
+        action: t("esxiSourceFormActions.action", {
+          storage: storage.trim(),
+        }),
         onSuccess: () => {
           onRegistered(storage.trim());
         },

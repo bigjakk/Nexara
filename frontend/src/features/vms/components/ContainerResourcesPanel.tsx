@@ -73,6 +73,8 @@ import {
   fieldSelectClass,
 } from "./hardware/field-classes";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation, Trans } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 interface ContainerResourcesPanelProps {
   clusterId: string;
@@ -212,6 +214,7 @@ function MoveVolumeDialog({
   currentStorage: string;
   storageOptions: string[];
 }) {
+  const { t } = useTranslation("vms");
   const [open, setOpen] = useState(false);
   const [targetStorage, setTargetStorage] = useState("");
   // Off by default, matching Proxmox: the source volume is kept as an unused
@@ -232,7 +235,10 @@ function MoveVolumeDialog({
         setFocusedTask({
           clusterId,
           upid: data.upid,
-          description: `Move ${volumeKey} → ${targetStorage}`,
+          description: t("containerResourcesPanel.moveVolumeKeyTargetStorage", {
+            volumeKey,
+            targetStorage,
+          }),
         });
       }
     };
@@ -251,7 +257,10 @@ function MoveVolumeDialog({
         bwlimitKib,
       }),
       {
-        action: `Moving ${volumeKey} to ${targetStorage}`,
+        action: t("containerResourcesPanel.movingVolumeKeyToTargetStorage", {
+          volumeKey,
+          targetStorage,
+        }),
         onSuccess: (data) => {
           focus(data);
           setOpen(false);
@@ -273,26 +282,38 @@ function MoveVolumeDialog({
       <Button
         size="sm"
         variant="outline"
-        aria-label={`Move ${volumeKey} to another storage`}
+        aria-label={t("containerResourcesPanel.moveVolumeKeyToAnotherStorage", {
+          volumeKey,
+        })}
         onClick={() => {
           setOpen(true);
         }}
       >
-        Move
+        {t("containerResourcesPanel.move")}
       </Button>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Move volume {volumeKey}</DialogTitle>
+          <DialogTitle>
+            {t("containerResourcesPanel.moveVolumeVolumeKey", { volumeKey })}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           {currentStorage && (
             <p className="text-sm text-muted-foreground">
-              Current storage:{" "}
-              <span className="font-mono font-medium">{currentStorage}</span>
+              <Trans
+                t={t}
+                i18nKey="containerResourcesPanel.currentStorageSpanCurrentStorageSpan"
+                values={{ currentStorage }}
+                components={{
+                  span: <span className="font-mono font-medium" />,
+                }}
+              />
             </p>
           )}
           <div className="space-y-2">
-            <Label htmlFor="ct-target-storage">Target storage</Label>
+            <Label htmlFor="ct-target-storage">
+              {t("containerResourcesPanel.targetStorage")}
+            </Label>
             <select
               id="ct-target-storage"
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
@@ -301,7 +322,9 @@ function MoveVolumeDialog({
                 setTargetStorage(e.target.value);
               }}
             >
-              <option value="">Select storage...</option>
+              <option value="">
+                {t("containerResourcesPanel.selectStorage")}
+              </option>
               {filteredOptions.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -318,7 +341,7 @@ function MoveVolumeDialog({
             onBwlimitChange={setBwlimit}
             deleteSource={deleteOriginal}
             onDeleteSourceChange={setDeleteOriginal}
-            keptHint="The source volume is kept as an unused volume on this container. Remove it later to reclaim the space."
+            keptHint={t("containerResourcesPanel.theSourceVolumeIsKept")}
           />
           <Button
             onClick={handleMove}
@@ -327,7 +350,9 @@ function MoveVolumeDialog({
             }
             className="w-full"
           >
-            {moveMutation.isPending ? "Moving..." : "Move volume"}
+            {moveMutation.isPending
+              ? t("containerResourcesPanel.moving")
+              : t("containerResourcesPanel.moveVolume")}
           </Button>
           {moveMutation.isError && (
             <p className="text-sm text-destructive">
@@ -350,6 +375,7 @@ function MoveVolumeDialog({
  * not staged for Save: Resize sends it at once.
  */
 function useVolumeResize(clusterId: string, ctId: string, disk: string) {
+  const { t } = useTranslation("vms");
   const [resizeSize, setResizeSize] = useState("");
   const resizeMutation = useResizeContainerDisk();
   const settle = useSaveOutcome();
@@ -368,7 +394,7 @@ function useVolumeResize(clusterId: string, ctId: string, disk: string) {
           size: resizeSize.trim(),
         }),
         {
-          action: `Resizing ${disk}`,
+          action: t("containerResourcesPanel.resizingDisk", { disk }),
           onSuccess: () => {
             setResizeSize("");
           },
@@ -383,13 +409,18 @@ type VolumeResize = ReturnType<typeof useVolumeResize>;
 
 /** How the last resize went, on the row itself: it shows with the fields shut. */
 function ResizeResult({ resize }: { resize: VolumeResize }) {
+  const { t } = useTranslation("vms");
   if (resize.error !== null) {
     return (
       <span className="text-[12.5px] text-destructive">{resize.error}</span>
     );
   }
   if (resize.isSuccess) {
-    return <span className="text-[12.5px] text-muted-foreground">Resized</span>;
+    return (
+      <span className="text-[12.5px] text-muted-foreground">
+        {t("containerResourcesPanel.resized")}
+      </span>
+    );
   }
   return null;
 }
@@ -402,9 +433,10 @@ function ResizeEditor({
   resize: VolumeResize;
   placeholder: string;
 }) {
+  const { t } = useTranslation("vms");
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <Field label="Resize to" className="w-36">
+      <Field label={t("containerResourcesPanel.resizeTo")} className="w-36">
         <Input
           placeholder={placeholder}
           value={resize.size}
@@ -422,10 +454,10 @@ function ResizeEditor({
         onClick={resize.send}
       >
         {resize.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-        Resize
+        {t("containerResourcesPanel.resize")}
       </Button>
       <p className="basis-full text-[12.5px] text-muted-foreground">
-        Applies at once, not on Save. A volume can grow but not shrink.
+        {t("containerResourcesPanel.appliesAtOnceNotOn")}
       </p>
     </div>
   );
@@ -442,6 +474,7 @@ function RootFSRow({
   ctId: string;
   storageOptions: string[];
 }) {
+  const { t } = useTranslation("vms");
   const raw = str(config["rootfs"]);
   const kv = parseKVString(raw);
   const volume = raw.split(",")[0] ?? "";
@@ -454,12 +487,18 @@ function RootFSRow({
     <DeviceRow
       name="rootfs"
       icon={HardDrive}
-      title="Root disk"
+      title={t("containerResourcesPanel.rootDisk")}
       marker={<ResizeResult resize={resize} />}
       summary={
         <>
           <span>{currentSize || "--"}</span>
-          {currentStorage && <span>on {currentStorage}</span>}
+          {currentStorage && (
+            <span>
+              {t("containerResourcesPanel.onCurrentStorage", {
+                currentStorage,
+              })}
+            </span>
+          )}
           <span className="break-all font-mono">{volume || "--"}</span>
         </>
       }
@@ -467,7 +506,7 @@ function RootFSRow({
       onToggle={() => {
         setOpen((was) => !was);
       }}
-      editLabel="Resize rootfs"
+      editLabel={t("containerResourcesPanel.resizeRootfs")}
       actions={
         <MoveVolumeDialog
           clusterId={clusterId}
@@ -495,6 +534,7 @@ function MountPointRow({
   ctId: string;
   storageOptions: string[];
 }) {
+  const { t } = useTranslation("vms");
   const currentStorage = mp.volume.split(":")[0] ?? "";
   const [open, setOpen] = useState(false);
   // Only a volume with a size can be resized: a bind or device mount has none.
@@ -505,16 +545,16 @@ function MountPointRow({
     <DeviceRow
       name={deviceKey}
       icon={FolderOpen}
-      title="Mount point"
+      title={t("containerResourcesPanel.mountPoint")}
       marker={<ResizeResult resize={resize} />}
       summary={
         <>
           <span className="break-all font-mono">{mp.path}</span>
           <span>{mp.size || "--"}</span>
           <span className="break-all font-mono">{mp.volume}</span>
-          {mp.backup && <span>in backups</span>}
-          {mp.ro && <span>read-only</span>}
-          {mp.quota && <span>quota</span>}
+          {mp.backup && <span>{t("containerResourcesPanel.inBackups")}</span>}
+          {mp.ro && <span>{t("containerResourcesPanel.readOnly")}</span>}
+          {mp.quota && <span>{t("containerResourcesPanel.quota")}</span>}
         </>
       }
       open={open}
@@ -525,7 +565,7 @@ function MountPointRow({
             }
           : undefined
       }
-      editLabel={`Resize ${deviceKey}`}
+      editLabel={t("containerResourcesPanel.resizeDeviceKey", { deviceKey })}
       actions={
         <MoveVolumeDialog
           clusterId={clusterId}
@@ -550,15 +590,28 @@ function MountPointRow({
 
 /** A NIC in a few words, as its row reads while the fields are closed. */
 function NICSummary({ nic }: { nic: CTNetEdit }) {
+  const { t } = useTranslation("vms");
   return (
     <>
-      <span>{nic.name || "no name"}</span>
-      <span>{nic.bridge ? `on ${nic.bridge}` : "no bridge"}</span>
-      {nic.ip && <span>{nic.ip === "dhcp" ? "DHCP" : nic.ip}</span>}
-      {nic.ip6 && <span>IPv6 {nic.ip6}</span>}
-      {nic.tag && <span>VLAN {nic.tag}</span>}
+      <span>{nic.name || t("containerResourcesPanel.noName")}</span>
+      <span>
+        {nic.bridge
+          ? t("containerResourcesPanel.onBridge", { bridge: nic.bridge })
+          : t("containerResourcesPanel.noBridge")}
+      </span>
+      {nic.ip && (
+        <span>
+          {nic.ip === "dhcp" ? t("containerResourcesPanel.dhcp") : nic.ip}
+        </span>
+      )}
+      {nic.ip6 && (
+        <span>{t("containerResourcesPanel.iPv6Ip6", { ip6: nic.ip6 })}</span>
+      )}
+      {nic.tag && (
+        <span>{t("containerResourcesPanel.vlanTag", { tag: nic.tag })}</span>
+      )}
       {nic.hwaddr && <span className="font-mono">{nic.hwaddr}</span>}
-      {nic.firewall && <span>firewall on</span>}
+      {nic.firewall && <span>{t("containerResourcesPanel.firewallOn")}</span>}
     </>
   );
 }
@@ -581,10 +634,11 @@ function NICFields({
    */
   macPending?: boolean;
 }) {
+  const { t } = useTranslation("vms");
   return (
     <fieldset disabled={macPending} className="min-w-0 space-y-3">
       <FieldGrid>
-        <Field label="Name">
+        <Field label={t("containerResourcesPanel.name")}>
           <Input
             value={nic.name}
             onChange={(e) => {
@@ -594,7 +648,7 @@ function NICFields({
             className={fieldInputClass}
           />
         </Field>
-        <Field label="Bridge">
+        <Field label={t("containerResourcesPanel.bridge")}>
           <select
             className={fieldSelectClass}
             value={nic.bridge}
@@ -613,17 +667,17 @@ function NICFields({
             )}
           </select>
         </Field>
-        <Field label="IPv4 (CIDR or DHCP)">
+        <Field label={t("containerResourcesPanel.iPv4CIDROrDHCP")}>
           <Input
             value={nic.ip}
             onChange={(e) => {
               onChange({ ...nic, ip: e.target.value });
             }}
-            placeholder="dhcp or 192.0.2.10/24"
+            placeholder={t("containerResourcesPanel.dhcpOr19202")}
             className={fieldInputClass}
           />
         </Field>
-        <Field label="IPv4 gateway">
+        <Field label={t("containerResourcesPanel.iPv4Gateway")}>
           <Input
             value={nic.gw}
             onChange={(e) => {
@@ -633,17 +687,17 @@ function NICFields({
             className={fieldInputClass}
           />
         </Field>
-        <Field label="IPv6 (CIDR or DHCP)">
+        <Field label={t("containerResourcesPanel.iPv6CIDROrDHCP")}>
           <Input
             value={nic.ip6}
             onChange={(e) => {
               onChange({ ...nic, ip6: e.target.value });
             }}
-            placeholder="auto, dhcp, or 2001:db8::2/64"
+            placeholder={t("containerResourcesPanel.autoDhcpOr2001Db8")}
             className={fieldInputClass}
           />
         </Field>
-        <Field label="IPv6 gateway">
+        <Field label={t("containerResourcesPanel.iPv6Gateway")}>
           <Input
             value={nic.gw6}
             onChange={(e) => {
@@ -652,7 +706,7 @@ function NICFields({
             className={fieldInputClass}
           />
         </Field>
-        <Field label="VLAN tag">
+        <Field label={t("containerResourcesPanel.vlanTag2")}>
           <Input
             type="number"
             min={1}
@@ -664,7 +718,7 @@ function NICFields({
             className={fieldInputClass}
           />
         </Field>
-        <Field label="Rate limit (MB/s)">
+        <Field label={t("containerResourcesPanel.rateLimitMBS")}>
           <Input
             type="number"
             min={0}
@@ -676,7 +730,7 @@ function NICFields({
             className={fieldInputClass}
           />
         </Field>
-        <Field label="MTU">
+        <Field label={t("containerResourcesPanel.mtu")}>
           <Input
             type="number"
             min={68}
@@ -691,7 +745,7 @@ function NICFields({
       </FieldGrid>
       <Checks>
         <Check
-          label="Firewall"
+          label={t("containerResourcesPanel.firewall")}
           checked={nic.firewall}
           onCheckedChange={(v) => {
             onChange({ ...nic, firewall: v === true });
@@ -737,9 +791,24 @@ const DELETED_WHEN_CLEARED = new Set([
 ]);
 
 const consoleModes = [
-  { value: "tty", label: "TTY" },
-  { value: "console", label: "Console" },
-  { value: "shell", label: "Shell" },
+  {
+    value: "tty",
+    get label() {
+      return i18n.t("vms:containerResourcesPanel.tty");
+    },
+  },
+  {
+    value: "console",
+    get label() {
+      return i18n.t("vms:containerResourcesPanel.console");
+    },
+  },
+  {
+    value: "shell",
+    get label() {
+      return i18n.t("vms:containerResourcesPanel.shell");
+    },
+  },
 ] as const;
 
 // A successful Save's result, laid over the fetched copy it was built on; the
@@ -796,6 +865,7 @@ export function ContainerResourcesPanel({
   ctStatus,
   nodeName,
 }: ContainerResourcesPanelProps) {
+  const { t } = useTranslation("vms");
   const {
     data: fetchedConfig,
     dataUpdatedAt,
@@ -1238,9 +1308,7 @@ export function ContainerResourcesPanel({
         setStops((count) => count + 1);
       } else {
         setConfirmation((current) => ({ ...current, open: false }));
-        setSaveNotice(
-          "The volumes marked for deletion are no longer on this container, so nothing was saved, and the panel reloaded, discarding any other unsaved changes.",
-        );
+        setSaveNotice(t("containerResourcesPanel.theVolumesMarkedForDeletion"));
       }
       return;
     }
@@ -1317,7 +1385,7 @@ export function ContainerResourcesPanel({
     // Hidden under <Activity> counts as gone to useSaveOutcome, so a success
     // then is applied all the same.
     settle(save, {
-      action: "Saving the container's resources",
+      action: t("containerResourcesPanel.savingTheContainerSResources"),
       onSuccess: saved,
       onLateSuccess: saved,
       onError: () => undefined, // the dialog and the Save bar read the mutation's error
@@ -1337,7 +1405,9 @@ export function ContainerResourcesPanel({
     return (
       <Panel>
         <p className="text-sm text-destructive">
-          Failed to load container config: {error.message}
+          {t("containerResourcesPanel.failedToLoadContainerConfig", {
+            message: error.message,
+          })}
         </p>
       </Panel>
     );
@@ -1362,19 +1432,28 @@ export function ContainerResourcesPanel({
   const changeCount = Object.keys(changedFields).length;
   const memoryBytes = num(memory) * 1024 * 1024;
   const nicCount = nics.size + pendingNics.size;
-  const plural = (n: number, one: string, many = `${one}s`) =>
-    `${String(n)} ${n === 1 ? one : many}`;
+  /** "1 core", "2 volumes": a count with its noun, from containerResourcesPanel.count. */
+  const plural = (n: number, noun: string) =>
+    t(`containerResourcesPanel.count.${noun}`, { count: n });
   const coresText =
-    cores === "" ? "All of the host's cores" : plural(num(cores), "core");
+    cores === ""
+      ? t("containerResourcesPanel.allOfTheHostsCores")
+      : plural(num(cores), "core");
 
   return (
     <div className={`space-y-4 ${clearSaveBarClass}`}>
       <p className="text-sm text-muted-foreground">
-        {coresText}, {formatBytes(memoryBytes)} of memory,{" "}
-        {plural(mountPoints.length + 1, "volume")} and{" "}
-        {plural(nicCount, "network interface")}.
-        {isRunning &&
-          " The container is running: CPU and memory changes take effect at once, others may need a restart."}
+        {t(
+          isRunning
+            ? "containerResourcesPanel.summaryRunning"
+            : "containerResourcesPanel.summary",
+          {
+            cores: coresText,
+            memory: formatBytes(memoryBytes),
+            volumes: plural(mountPoints.length + 1, "volume"),
+            nics: plural(nicCount, "networkInterface"),
+          },
+        )}
       </p>
 
       {/* Held open while the Save is in flight: Cancel cannot un-send it, and
@@ -1398,8 +1477,9 @@ export function ContainerResourcesPanel({
         <AlertDialogContent fallbackFocus={() => saveBarRef.current}>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {confirmation.volumes.length} unused volume
-              {confirmation.volumes.length !== 1 ? "s" : ""}?
+              {t("containerResourcesPanel.deleteUnusedVolumes", {
+                count: confirmation.volumes.length,
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2">
@@ -1412,8 +1492,12 @@ export function ContainerResourcesPanel({
                     className="rounded-sm font-medium text-destructive focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     {confirmation.blocked
-                      ? "Nothing was saved: this container's configuration changed while this was open, including what this Save changes. Cancel reloads it; then make your changes again."
-                      : "These volumes changed after the list was shown, so nothing was deleted. Check the list again."}
+                      ? t(
+                          "containerResourcesPanel.nothingWasSavedThisContainer",
+                        )
+                      : t(
+                          "containerResourcesPanel.theseVolumesChangedAfterThe",
+                        )}
                   </p>
                 )}
                 {configChangedUnder && !confirmation.blocked && (
@@ -1421,14 +1505,13 @@ export function ContainerResourcesPanel({
                     role="status"
                     className="text-amber-700 dark:text-amber-400"
                   >
-                    This container&apos;s configuration changed while this was
-                    open. Cancel reloads it, discarding the changes you have not
-                    saved.
+                    {t(
+                      "containerResourcesPanel.thisContainerSConfigurationChanged",
+                    )}
                   </p>
                 )}
                 <p>
-                  Saving will permanently delete each volume below from storage,
-                  along with all data on it. This action cannot be undone.
+                  {t("containerResourcesPanel.savingWillPermanentlyDeleteEach")}
                 </p>
                 <ul className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-2">
                   {confirmation.volumes.map(({ key, volume }) => (
@@ -1450,7 +1533,7 @@ export function ContainerResourcesPanel({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={setConfigMutation.isPending}>
-              Cancel
+              {t("containerResourcesPanel.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -1465,7 +1548,9 @@ export function ContainerResourcesPanel({
                 saveChanges({ confirmed: confirmation.volumes });
               }}
             >
-              {setConfigMutation.isPending ? "Saving..." : "Delete and Save"}
+              {setConfigMutation.isPending
+                ? t("containerResourcesPanel.saving")
+                : t("containerResourcesPanel.deleteAndSave")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1477,16 +1562,26 @@ export function ContainerResourcesPanel({
         <div className="flex min-w-0 flex-[3_1_520px] flex-col gap-4">
           <Panel
             flush
-            title="Processor and memory"
-            aside={`${cores === "" ? "All cores" : plural(num(cores), "core")}, ${formatBytes(memoryBytes)}`}
+            title={t("containerResourcesPanel.processorAndMemory")}
+            aside={t("containerResourcesPanel.coresAndMemory", {
+              cores:
+                cores === ""
+                  ? t("containerResourcesPanel.allCores")
+                  : plural(num(cores), "core"),
+              memory: formatBytes(memoryBytes),
+            })}
           >
             <GroupList>
               <Group
-                title="Processor"
-                summary={cores === "" ? "Every core of the host" : undefined}
+                title={t("containerResourcesPanel.processor")}
+                summary={
+                  cores === ""
+                    ? t("containerResourcesPanel.everyCoreOfTheHost")
+                    : undefined
+                }
               >
                 <FieldGrid>
-                  <Field label="Cores">
+                  <Field label={t("containerResourcesPanel.cores")}>
                     <Input
                       type="number"
                       min={1}
@@ -1499,7 +1594,7 @@ export function ContainerResourcesPanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="CPU limit">
+                  <Field label={t("containerResourcesPanel.cpuLimit")}>
                     <Input
                       type="number"
                       min={0}
@@ -1509,11 +1604,11 @@ export function ContainerResourcesPanel({
                       onChange={(e) => {
                         setCpulimit(e.target.value);
                       }}
-                      placeholder="0 = unlimited"
+                      placeholder={t("containerResourcesPanel.n0Unlimited")}
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="CPU units">
+                  <Field label={t("containerResourcesPanel.cpuUnits")}>
                     <Input
                       type="number"
                       min={2}
@@ -1522,22 +1617,26 @@ export function ContainerResourcesPanel({
                       onChange={(e) => {
                         setCpuunits(e.target.value);
                       }}
-                      placeholder="Default"
+                      placeholder={t("containerResourcesPanel.default")}
                       className={fieldInputClass}
                     />
                   </Field>
                 </FieldGrid>
               </Group>
 
-              <Group title="Memory" summary={formatBytes(memoryBytes)}>
+              <Group
+                title={t("containerResourcesPanel.memory")}
+                summary={formatBytes(memoryBytes)}
+              >
                 <FieldGrid>
                   <Field
-                    label="Memory (MiB)"
+                    label={t("containerResourcesPanel.memoryMiB")}
                     note={
                       memoryMissing && (
                         <p className="mt-1 text-[12.5px] text-destructive">
-                          Proxmox cannot unset a container&apos;s memory: enter
-                          an amount to save.
+                          {t(
+                            "containerResourcesPanel.proxmoxCannotUnsetAContainer",
+                          )}
                         </p>
                       )
                     }
@@ -1553,7 +1652,7 @@ export function ContainerResourcesPanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Swap (MiB)">
+                  <Field label={t("containerResourcesPanel.swapMiB")}>
                     <Input
                       type="number"
                       min={0}
@@ -1573,8 +1672,17 @@ export function ContainerResourcesPanel({
 
           <Panel
             flush
-            title="Volumes"
-            aside={`${plural(mountPoints.length + 1, "volume")} mounted${unusedVolumes.length > 0 ? `, ${String(unusedVolumes.length)} unused` : ""}`}
+            title={t("containerResourcesPanel.volumes")}
+            aside={
+              unusedVolumes.length > 0
+                ? t("containerResourcesPanel.volumesMountedUnused", {
+                    volumes: plural(mountPoints.length + 1, "volume"),
+                    unused: String(unusedVolumes.length),
+                  })
+                : t("containerResourcesPanel.volumesMounted", {
+                    volumes: plural(mountPoints.length + 1, "volume"),
+                  })
+            }
           >
             <DeviceList>
               <RootFSRow
@@ -1599,9 +1707,13 @@ export function ContainerResourcesPanel({
                     key={key}
                     name={key}
                     icon={HardDrive}
-                    title="Detached volume"
+                    title={t("containerResourcesPanel.detachedVolume")}
                     struck
-                    marker={<PendingBadge>Marked for removal</PendingBadge>}
+                    marker={
+                      <PendingBadge>
+                        {t("containerResourcesPanel.markedForRemoval")}
+                      </PendingBadge>
+                    }
                     summary={
                       <span className="break-all font-mono">{volume}</span>
                     }
@@ -1618,7 +1730,7 @@ export function ContainerResourcesPanel({
                           });
                         }}
                       >
-                        Undo
+                        {t("containerResourcesPanel.undo")}
                       </Button>
                     }
                   />
@@ -1627,8 +1739,12 @@ export function ContainerResourcesPanel({
                     key={key}
                     name={key}
                     icon={HardDrive}
-                    title="Detached volume"
-                    marker={<Badge variant="warning">Unused</Badge>}
+                    title={t("containerResourcesPanel.detachedVolume")}
+                    marker={
+                      <Badge variant="warning">
+                        {t("containerResourcesPanel.unused")}
+                      </Badge>
+                    }
                     summary={
                       <span className="break-all font-mono">{volume}</span>
                     }
@@ -1640,10 +1756,12 @@ export function ContainerResourcesPanel({
                         onClick={() => {
                           setDeleteVolumes((prev) => new Set(prev).add(key));
                         }}
-                        title="Remove volume"
+                        title={t("containerResourcesPanel.removeVolume")}
                       >
                         <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">Remove</span>
+                        <span className="sr-only">
+                          {t("containerResourcesPanel.remove")}
+                        </span>
                       </Button>
                     }
                   />
@@ -1652,15 +1770,14 @@ export function ContainerResourcesPanel({
             </DeviceList>
             {unusedVolumes.length > 0 && (
               <p className="border-t px-[18px] pt-2.5 text-[12.5px] text-muted-foreground">
-                An unused volume still takes space on its storage. Removing one
-                deletes its data. Changes apply on Save.
+                {t("containerResourcesPanel.anUnusedVolumeStillTakes")}
               </p>
             )}
           </Panel>
 
           <Panel
             flush
-            title="Network"
+            title={t("containerResourcesPanel.network")}
             aside={plural(nicCount, "interface")}
             actions={
               <Button
@@ -1684,13 +1801,14 @@ export function ContainerResourcesPanel({
                   });
                 }}
               >
-                <Plus className="h-3.5 w-3.5" /> Add network interface
+                <Plus className="h-3.5 w-3.5" />{" "}
+                {t("containerResourcesPanel.addNetworkInterface")}
               </Button>
             }
           >
             {nicCount === 0 && (
               <p className="border-t px-[18px] py-3 text-sm text-muted-foreground">
-                No network interfaces configured.
+                {t("containerResourcesPanel.noNetworkInterfacesConfigured")}
               </p>
             )}
             <DeviceList>
@@ -1703,9 +1821,13 @@ export function ContainerResourcesPanel({
                         key={key}
                         name={key}
                         icon={Network}
-                        title="Network interface"
+                        title={t("containerResourcesPanel.networkInterface")}
                         struck
-                        marker={<PendingBadge>Marked for removal</PendingBadge>}
+                        marker={
+                          <PendingBadge>
+                            {t("containerResourcesPanel.markedForRemoval")}
+                          </PendingBadge>
+                        }
                         actions={
                           <Button
                             variant="ghost"
@@ -1719,7 +1841,7 @@ export function ContainerResourcesPanel({
                               });
                             }}
                           >
-                            Undo
+                            {t("containerResourcesPanel.undo")}
                           </Button>
                         }
                       />
@@ -1740,17 +1862,22 @@ export function ContainerResourcesPanel({
                       key={key}
                       name={key}
                       icon={Network}
-                      title="Network interface"
+                      title={t("containerResourcesPanel.networkInterface")}
                       marker={
-                        edited ? <PendingBadge>Edited</PendingBadge> : null
+                        edited ? (
+                          <PendingBadge>
+                            {t("containerResourcesPanel.edited")}
+                          </PendingBadge>
+                        ) : null
                       }
                       summary={
                         <>
                           <NICSummary nic={nic} />
                           {macPending && (
                             <span>
-                              Waiting for the MAC address Proxmox gives it; it
-                              can be edited once the configuration reloads.
+                              {t(
+                                "containerResourcesPanel.waitingForTheMACAddress",
+                              )}
                             </span>
                           )}
                         </>
@@ -1767,7 +1894,7 @@ export function ContainerResourcesPanel({
                           onClick={() => {
                             setDeleteNics((prev) => new Set(prev).add(key));
                           }}
-                          title="Remove NIC"
+                          title={t("containerResourcesPanel.removeNIC")}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -1798,8 +1925,12 @@ export function ContainerResourcesPanel({
                     key={key}
                     name={key}
                     icon={Network}
-                    title="Network interface"
-                    marker={<PendingBadge>Added on save</PendingBadge>}
+                    title={t("containerResourcesPanel.networkInterface")}
+                    marker={
+                      <PendingBadge>
+                        {t("containerResourcesPanel.addedOnSave")}
+                      </PendingBadge>
+                    }
                     summary={<NICSummary nic={nic} />}
                     actions={
                       <Button
@@ -1814,7 +1945,7 @@ export function ContainerResourcesPanel({
                           });
                         }}
                       >
-                        Cancel
+                        {t("containerResourcesPanel.cancel")}
                       </Button>
                     }
                     editor={
@@ -1837,11 +1968,14 @@ export function ContainerResourcesPanel({
         </div>
 
         <div className="flex min-w-0 flex-[2_1_340px] flex-col gap-4">
-          <Panel flush title="Options">
+          <Panel flush title={t("containerResourcesPanel.options")}>
             <GroupList>
-              <Group title="Identity">
+              <Group title={t("containerResourcesPanel.identity")}>
                 <FieldGrid>
-                  <Field label="Hostname" className="col-span-2">
+                  <Field
+                    label={t("containerResourcesPanel.hostname")}
+                    className="col-span-2"
+                  >
                     <Input
                       value={hostname}
                       onChange={(e) => {
@@ -1850,7 +1984,7 @@ export function ContainerResourcesPanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Console mode">
+                  <Field label={t("containerResourcesPanel.consoleMode")}>
                     <select
                       className={fieldSelectClass}
                       value={cmode}
@@ -1869,19 +2003,23 @@ export function ContainerResourcesPanel({
               </Group>
 
               <Group
-                title="Startup"
-                summary={onboot ? "Starts with the node" : "Started by hand"}
+                title={t("containerResourcesPanel.startup")}
+                summary={
+                  onboot
+                    ? t("containerResourcesPanel.startsWithTheNode")
+                    : t("containerResourcesPanel.startedByHand")
+                }
               >
                 <Checks>
                   <Check
-                    label="Start at boot"
+                    label={t("containerResourcesPanel.startAtBoot")}
                     checked={onboot}
                     onCheckedChange={(v) => {
                       setOnboot(v === true);
                     }}
                   />
                   <Check
-                    label="Protection"
+                    label={t("containerResourcesPanel.protection")}
                     checked={protection}
                     onCheckedChange={(v) => {
                       setProtection(v === true);
@@ -1889,7 +2027,7 @@ export function ContainerResourcesPanel({
                   />
                 </Checks>
                 <FieldGrid>
-                  <Field label="Startup order">
+                  <Field label={t("containerResourcesPanel.startupOrder")}>
                     <Input
                       type="number"
                       min={0}
@@ -1901,7 +2039,7 @@ export function ContainerResourcesPanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Up delay (s)">
+                  <Field label={t("containerResourcesPanel.upDelayS")}>
                     <Input
                       type="number"
                       min={0}
@@ -1912,7 +2050,7 @@ export function ContainerResourcesPanel({
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Down delay (s)">
+                  <Field label={t("containerResourcesPanel.downDelayS")}>
                     <Input
                       type="number"
                       min={0}
@@ -1926,25 +2064,25 @@ export function ContainerResourcesPanel({
                 </FieldGrid>
               </Group>
 
-              <Group title="DNS">
+              <Group title={t("containerResourcesPanel.dns")}>
                 <FieldGrid>
-                  <Field label="Nameserver">
+                  <Field label={t("containerResourcesPanel.nameserver")}>
                     <Input
                       value={nameserver}
                       onChange={(e) => {
                         setNameserver(e.target.value);
                       }}
-                      placeholder="Host default"
+                      placeholder={t("containerResourcesPanel.hostDefault")}
                       className={fieldInputClass}
                     />
                   </Field>
-                  <Field label="Search domain">
+                  <Field label={t("containerResourcesPanel.searchDomain")}>
                     <Input
                       value={searchdomain}
                       onChange={(e) => {
                         setSearchdomain(e.target.value);
                       }}
-                      placeholder="Host default"
+                      placeholder={t("containerResourcesPanel.hostDefault")}
                       className={fieldInputClass}
                     />
                   </Field>
@@ -1960,14 +2098,18 @@ export function ContainerResourcesPanel({
               those show what is set and say why they are locked: a change to
               one would fail the whole Save. */}
           <Panel
-            title="Features"
-            aside={unprivileged ? "Unprivileged" : "Privileged"}
+            title={t("containerResourcesPanel.features")}
+            aside={
+              unprivileged
+                ? t("containerResourcesPanel.unprivileged")
+                : t("containerResourcesPanel.privileged")
+            }
           >
             <div className="space-y-3">
               <Checks>
                 <Check
                   id="ct-feature-nesting"
-                  label="Nesting"
+                  label={t("containerResourcesPanel.nesting")}
                   checked={features.nesting}
                   disabled={!unprivileged}
                   onCheckedChange={(v) => {
@@ -1976,19 +2118,19 @@ export function ContainerResourcesPanel({
                 />
                 <Check
                   id="ct-feature-fuse"
-                  label="FUSE"
+                  label={t("containerResourcesPanel.fuse")}
                   checked={features.fuse}
                   disabled
                 />
                 <Check
                   id="ct-feature-keyctl"
-                  label="Keyctl"
+                  label={t("containerResourcesPanel.keyctl")}
                   checked={features.keyctl}
                   disabled
                 />
                 <Check
                   id="ct-feature-mknod"
-                  label="Mknod"
+                  label={t("containerResourcesPanel.mknod")}
                   checked={features.mknod}
                   disabled
                 />
@@ -1998,7 +2140,7 @@ export function ContainerResourcesPanel({
                   htmlFor="ct-feature-mount"
                   className="block text-[12.5px] font-normal text-muted-foreground"
                 >
-                  Allowed mount types
+                  {t("containerResourcesPanel.allowedMountTypes")}
                 </Label>
                 <Input
                   id="ct-feature-mount"
@@ -2009,15 +2151,15 @@ export function ContainerResourcesPanel({
               </div>
               <p className="text-[12.5px] text-muted-foreground">
                 {unprivileged
-                  ? "Proxmox lets only root@pam change FUSE, Keyctl, Mknod and the mount types, and Nexara connects with an API token. Set them in Proxmox, as root@pam."
-                  : "On a privileged container Proxmox lets only root@pam change features, Nesting included, and Nexara connects with an API token. Set them in Proxmox, as root@pam."}
+                  ? t("containerResourcesPanel.proxmoxLetsOnlyRootPam")
+                  : t("containerResourcesPanel.onAPrivilegedContainerProxmox")}
               </p>
             </div>
           </Panel>
 
-          <Panel title="Description and tags">
+          <Panel title={t("containerResourcesPanel.descriptionAndTags")}>
             <div className="space-y-3">
-              <Field label="Description">
+              <Field label={t("containerResourcesPanel.description")}>
                 <textarea
                   value={description}
                   onChange={(e) => {
@@ -2027,7 +2169,7 @@ export function ContainerResourcesPanel({
                   className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                 />
               </Field>
-              <Field label="Tags">
+              <Field label={t("containerResourcesPanel.tags")}>
                 <Input
                   value={tags}
                   onChange={(e) => {
@@ -2045,7 +2187,9 @@ export function ContainerResourcesPanel({
       <SaveBar
         ref={saveBarRef}
         dirty={hasChanges}
-        dirtyLabel={`${plural(changeCount, "change")} to save`}
+        dirtyLabel={t("containerResourcesPanel.changesToSave", {
+          changes: plural(changeCount, "change"),
+        })}
         saving={setConfigMutation.isPending}
         disabled={!hasChanges || memoryMissing || setConfigMutation.isPending}
         onSave={() => {
@@ -2058,7 +2202,9 @@ export function ContainerResourcesPanel({
         }
       >
         {setConfigMutation.isSuccess && (
-          <span className="text-muted-foreground">Saved</span>
+          <span className="text-muted-foreground">
+            {t("containerResourcesPanel.saved")}
+          </span>
         )}
         {setConfigMutation.isError && (
           <span className="text-destructive">
@@ -2073,7 +2219,7 @@ export function ContainerResourcesPanel({
         {/* Said here too: the Memory field may be a screen away from Save. */}
         {memoryMissing && (
           <span className="text-destructive">
-            Memory is empty, so Save is held: enter an amount.
+            {t("containerResourcesPanel.memoryIsEmptySoSave")}
           </span>
         )}
       </SaveBar>

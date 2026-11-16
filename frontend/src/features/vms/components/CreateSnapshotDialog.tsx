@@ -19,6 +19,7 @@ import { TaskProgressBanner } from "./TaskProgressBanner";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { snapshotNameError, SNAPSHOT_NAME_RULES } from "../lib/snapshot-name";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface CreateSnapshotDialogProps {
   open: boolean;
@@ -48,6 +49,7 @@ export function CreateSnapshotDialog({
   kind,
   resourceName,
 }: CreateSnapshotDialogProps) {
+  const { t } = useTranslation("vms");
   const queryClient = useQueryClient();
   const createMutation = useCreateSnapshot();
   const settle = useSaveOutcome(open ? resourceId : null);
@@ -146,7 +148,9 @@ export function CreateSnapshotDialog({
         },
       }),
       {
-        action: `Taking a snapshot of ${resourceName}`,
+        action: t("createSnapshotDialogActions.action", {
+          resourceName,
+        }),
         onSuccess: watch,
         // Dismissed before the dispatch answered: watched in the background, as a
         // dismissal mid-task is (handleClose).

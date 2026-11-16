@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 /**
  * The layout pieces of a guest's Hardware and Resources tabs: groups of
@@ -222,6 +223,7 @@ export function DeviceRow({
   /** The pencil's name when the editor does one thing: "Resize rootfs". */
   editLabel?: string;
 }) {
+  const { t } = useTranslation("vms");
   const editorId = useId();
   const hasEditor = editor !== undefined && onToggle !== undefined;
   const showEditor = editor !== undefined && (onToggle === undefined || open);
@@ -253,7 +255,7 @@ export function DeviceRow({
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
             {hasEditor && (
               <IconAction
-                label={editLabel ?? `Edit ${name}`}
+                label={editLabel ?? t("hardwareRows.editName", { name })}
                 icon={Pencil}
                 aria-expanded={open}
                 aria-controls={open ? editorId : undefined}
@@ -319,7 +321,7 @@ export function SaveBar({
   saving,
   disabled,
   onSave,
-  dirtyLabel = "Unsaved changes",
+  dirtyLabel,
   hideIdle = false,
   children,
 }: {
@@ -333,11 +335,12 @@ export function SaveBar({
   hideIdle?: boolean;
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("vms");
   return (
     <div
       ref={ref}
       role="group"
-      aria-label="Changes"
+      aria-label={t("hardwareRows.changes")}
       tabIndex={-1}
       // The negative offset is the main pane's own padding: without it the
       // bar would stick that far above the pane's edge, with the page showing
@@ -351,11 +354,13 @@ export function SaveBar({
               aria-hidden="true"
               className="h-[7px] w-[7px] rounded-full bg-amber-500"
             />
-            {dirtyLabel}
+            {dirtyLabel ?? t("hardwareRows.unsavedChanges")}
           </span>
         ) : (
           !hideIdle && (
-            <span className="text-muted-foreground">No unsaved changes</span>
+            <span className="text-muted-foreground">
+              {t("hardwareRows.noUnsavedChanges")}
+            </span>
           )
         )}
         {children}
@@ -372,7 +377,7 @@ export function SaveBar({
         ) : (
           <Save className="h-3.5 w-3.5" />
         )}
-        Save changes
+        {t("hardwareRows.saveChanges")}
       </Button>
     </div>
   );

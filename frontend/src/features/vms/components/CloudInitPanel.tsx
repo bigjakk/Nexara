@@ -11,6 +11,7 @@ import {
 } from "@/components/page/Settings";
 import { useVMConfig, useSetVMConfig } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface CloudInitPanelProps {
   clusterId: string;
@@ -18,6 +19,7 @@ interface CloudInitPanelProps {
 }
 
 export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
+  const { t } = useTranslation("vms");
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const settle = useSaveOutcome();
@@ -77,7 +79,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
     if (Object.keys(fields).length === 0) return;
 
     settle(setConfigMutation.mutateAsync({ clusterId, vmId, fields }), {
-      action: "Saving the cloud-init settings",
+      action: t("cloudInitPanel.savingTheCloudInitSettings"),
       onError: () => undefined, // shown below from the mutation's state
     });
   }
@@ -90,21 +92,21 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
     return (
       <EmptyState
         icon={Disc}
-        title="No cloud-init drive"
-        description="No cloud-init drive detected. Add a cloud-init drive (IDE, SCSI, etc.) to this VM on the Hardware tab to configure cloud-init settings."
+        title={t("cloudInitPanel.noCloudInitDrive")}
+        description={t("cloudInitPanel.noCloudInitDriveDetected")}
       />
     );
   }
 
   return (
     <SettingsSection
-      title="Cloud-init"
-      description="What the guest is given on its cloud-init drive: an account, its network and the keys that may sign in. Proxmox regenerates the drive when the VM next starts."
+      title={t("cloudInitPanel.cloudInit")}
+      description={t("cloudInitPanel.whatTheGuestIsGiven")}
       className="max-w-3xl"
     >
       <SettingRow
-        label="User"
-        description="The account cloud-init sets up. Empty keeps the image's default user."
+        label={t("cloudInitPanel.user")}
+        description={t("cloudInitPanel.theAccountCloudInitSets")}
         htmlFor="ci-user"
       >
         <Input
@@ -117,8 +119,8 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
         />
       </SettingRow>
       <SettingRow
-        label="Password"
-        description="Proxmox stores only a hash, so the current one is never shown."
+        label={t("cloudInitPanel.password")}
+        description={t("cloudInitPanel.proxmoxStoresOnlyAHash")}
         htmlFor="ci-password"
       >
         <Input
@@ -128,12 +130,12 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
           onChange={(e) => {
             setCipassword(e.target.value);
           }}
-          placeholder="Leave blank to keep current"
+          placeholder={t("cloudInitPanel.leaveBlankToKeepCurrent")}
         />
       </SettingRow>
       <SettingRow
-        label="IP config (ipconfig0)"
-        description="The first interface's address: DHCP, or a static address and gateway."
+        label={t("cloudInitPanel.ipConfigIpconfig0")}
+        description={t("cloudInitPanel.theFirstInterfaceSAddress")}
         htmlFor="ci-ipconfig"
       >
         <Input
@@ -142,13 +144,13 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
           onChange={(e) => {
             setIpconfig0(e.target.value);
           }}
-          placeholder="ip=dhcp or ip=192.0.2.10/24,gw=192.0.2.1"
+          placeholder={t("cloudInitPanel.ipDhcpOrIp192")}
           className="font-mono"
         />
       </SettingRow>
       <SettingRow
-        label="DNS server"
-        description="Empty uses the host's own."
+        label={t("cloudInitPanel.dnsServer")}
+        description={t("cloudInitPanel.emptyUsesTheHostS")}
         htmlFor="ci-nameserver"
       >
         <Input
@@ -161,8 +163,8 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
         />
       </SettingRow>
       <SettingRow
-        label="Search domain"
-        description="Empty uses the host's own."
+        label={t("cloudInitPanel.searchDomain")}
+        description={t("cloudInitPanel.emptyUsesTheHostS")}
         htmlFor="ci-searchdomain"
       >
         <Input
@@ -175,8 +177,8 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
         />
       </SettingRow>
       <SettingRow
-        label="SSH public keys"
-        description="One key per line. They are added to the user's authorized keys."
+        label={t("cloudInitPanel.sshPublicKeys")}
+        description={t("cloudInitPanel.oneKeyPerLineThey")}
         htmlFor="ci-sshkeys"
         className="sm:grid-cols-1"
       >
@@ -200,7 +202,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
         )}
         {setConfigMutation.isSuccess && (
           <p className="mr-auto text-sm text-muted-foreground">
-            Cloud-init configuration saved.
+            {t("cloudInitPanel.cloudInitConfigurationSaved")}
           </p>
         )}
         <Button
@@ -209,7 +211,9 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
           disabled={setConfigMutation.isPending}
         >
           <Save className="h-4 w-4" />
-          {setConfigMutation.isPending ? "Saving..." : "Save"}
+          {setConfigMutation.isPending
+            ? t("cloudInitPanel.saving")
+            : t("cloudInitPanel.save")}
         </Button>
       </SettingsFooter>
     </SettingsSection>

@@ -18,6 +18,7 @@ import { useCloneToTemplate, useClusterVMIDs } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface CloneToTemplateDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ export function CloneToTemplateDialog({
   kind,
   sourceName,
 }: CloneToTemplateDialogProps) {
+  const { t } = useTranslation("vms");
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
@@ -97,7 +99,9 @@ export function CloneToTemplateDialog({
         },
       }),
       {
-        action: `Cloning ${sourceName} to a template`,
+        action: t("cloneToTemplateDialogActions.action", {
+          sourceName,
+        }),
         onSuccess: (data) => {
           setUpid(data.upid);
         },

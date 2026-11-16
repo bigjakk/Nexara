@@ -1,19 +1,86 @@
 /** Shared VM configuration option arrays used by CreateVMDialog and HardwarePanel. */
 
+import i18n from "@/lib/i18n";
+
 export const osTypes = [
-  { value: "l26", label: "Linux 2.6+" },
-  { value: "l24", label: "Linux 2.4" },
-  { value: "win11", label: "Windows 11/2022" },
-  { value: "win10", label: "Windows 10/2016/2019" },
-  { value: "win8", label: "Windows 8/2012" },
-  { value: "win7", label: "Windows 7/2008r2" },
-  { value: "wvista", label: "Windows Vista/2008" },
-  { value: "w2k3", label: "Windows 2003" },
-  { value: "w2k8", label: "Windows 2008" },
-  { value: "wxp", label: "Windows XP/2003" },
-  { value: "w2k", label: "Windows 2000" },
-  { value: "solaris", label: "Solaris" },
-  { value: "other", label: "Other" },
+  {
+    value: "l26",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.linux26");
+    },
+  },
+  {
+    value: "l24",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.linux24");
+    },
+  },
+  {
+    value: "win11",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows112022");
+    },
+  },
+  {
+    value: "win10",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows1020162019");
+    },
+  },
+  {
+    value: "win8",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows82012");
+    },
+  },
+  {
+    value: "win7",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows72008r2");
+    },
+  },
+  {
+    value: "wvista",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windowsVista2008");
+    },
+  },
+  {
+    value: "w2k3",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows2003");
+    },
+  },
+  {
+    value: "w2k8",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows2008");
+    },
+  },
+  {
+    value: "wxp",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windowsXP2003");
+    },
+  },
+  {
+    value: "w2k",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.windows2000");
+    },
+  },
+  {
+    value: "solaris",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.solaris");
+    },
+  },
+  {
+    value: "other",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.other");
+    },
+  },
 ] as const;
 
 export const cpuTypes = [
@@ -113,82 +180,151 @@ export const cpuTypes = [
 export const cpuFlags: { name: string; description: string }[] = [
   {
     name: "nested-virt",
-    description:
-      "Controls nested virtualization — 'svm' on AMD CPUs, 'vmx' on Intel. Use a CPU model similar to the host, with the same vendor, not x86-64-vX.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.controlsNestedVirtualizationSvmOn");
+    },
   },
   {
     name: "aes",
-    description: "Activate AES instruction set for HW acceleration.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.activateAESInstructionSetFor");
+    },
   },
   {
     name: "amd-no-ssb",
-    description:
-      "Notifies guest OS that host is not vulnerable for Spectre on AMD CPUs.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.notifiesGuestOSThatHost");
+    },
   },
   {
     name: "amd-ssbd",
-    description:
-      "Improves Spectre mitigation performance with AMD CPUs, best used with 'virt-ssbd'.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.improvesSpectreMitigationPerformanceWith",
+      );
+    },
   },
   {
     name: "hv-evmcs",
-    description:
-      "Improve performance for nested virtualization. Only supported on Intel CPUs.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.improvePerformanceForNestedVirtualization",
+      );
+    },
   },
   {
     name: "hv-tlbflush",
-    description:
-      "Improve performance in overcommitted Windows guests. May lead to guest bluescreens on old CPUs.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.improvePerformanceInOvercommittedWindows",
+      );
+    },
   },
   {
     name: "ibpb",
-    description: "Allows improved Spectre mitigation with AMD CPUs.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.allowsImprovedSpectreMitigationWith",
+      );
+    },
   },
   {
     name: "md-clear",
-    description:
-      "Required to let the guest OS know if MDS is mitigated correctly.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.requiredToLetTheGuest");
+    },
   },
   {
     name: "pcid",
-    description:
-      "Meltdown fix cost reduction on Westmere, Sandy-, and IvyBridge Intel CPUs.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.meltdownFixCostReductionOn");
+    },
   },
   {
     name: "pdpe1gb",
-    description:
-      "Allow guest OS to use 1GB size pages, if host HW supports it.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.allowGuestOSToUse");
+    },
   },
   {
     name: "spec-ctrl",
-    description: "Allows improved Spectre mitigation with Intel CPUs.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.allowsImprovedSpectreMitigationWith2",
+      );
+    },
   },
   {
     name: "ssbd",
-    description: "Protection for 'Speculative Store Bypass' for Intel models.",
+    get description() {
+      return i18n.t(
+        "vms:vmConfigConstants.protectionForSpeculativeStoreBypass",
+      );
+    },
   },
   {
     name: "virt-ssbd",
-    description:
-      "Basis for 'Speculative Store Bypass' protection for AMD models.",
+    get description() {
+      return i18n.t("vms:vmConfigConstants.basisForSpeculativeStoreBypass");
+    },
   },
 ];
 
 /** watchdog model — PVE's $watchdog_fmt, default i6300esb. */
 export const watchdogModels = [
-  { value: "i6300esb", label: "Intel 6300ESB (default)" },
+  {
+    value: "i6300esb",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.intel6300ESBDefault");
+    },
+  },
   { value: "ib700", label: "iBASE 700" },
 ];
 
 /** watchdog action taken when the guest stops polling the device. */
 export const watchdogActions = [
-  { value: "", label: "Default (none)" },
-  { value: "reset", label: "Reset" },
-  { value: "shutdown", label: "Shutdown" },
-  { value: "poweroff", label: "Power off" },
-  { value: "pause", label: "Pause" },
-  { value: "debug", label: "Debug" },
-  { value: "none", label: "None" },
+  {
+    value: "",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.defaultNone");
+    },
+  },
+  {
+    value: "reset",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.reset");
+    },
+  },
+  {
+    value: "shutdown",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.shutdown");
+    },
+  },
+  {
+    value: "poweroff",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.powerOff");
+    },
+  },
+  {
+    value: "pause",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.pause");
+    },
+  },
+  {
+    value: "debug",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.debug");
+    },
+  },
+  {
+    value: "none",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.none");
+    },
+  },
 ];
 
 /** VNC server keyboard layout. Proxmox's enum, in its own order. */
@@ -221,69 +357,239 @@ export const keyboardLayouts = [
 ];
 
 export const scsiControllers = [
-  { value: "virtio-scsi-pci", label: "VirtIO SCSI" },
-  { value: "virtio-scsi-single", label: "VirtIO SCSI Single" },
+  {
+    value: "virtio-scsi-pci",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOSCSI");
+    },
+  },
+  {
+    value: "virtio-scsi-single",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOSCSISingle");
+    },
+  },
   { value: "lsi", label: "LSI 53C895A" },
   { value: "lsi53c810", label: "LSI 53C810" },
-  { value: "megasas", label: "MegaRAID SAS" },
-  { value: "pvscsi", label: "VMware PVSCSI" },
+  {
+    value: "megasas",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.megaRAIDSAS");
+    },
+  },
+  {
+    value: "pvscsi",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.vMwarePVSCSI");
+    },
+  },
 ] as const;
 
 export const netModels = [
-  { value: "virtio", label: "VirtIO (paravirt.)" },
-  { value: "e1000", label: "Intel E1000" },
-  { value: "e1000e", label: "Intel E1000E" },
-  { value: "vmxnet3", label: "VMware vmxnet3" },
-  { value: "rtl8139", label: "Realtek RTL8139" },
+  {
+    value: "virtio",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOParavirt");
+    },
+  },
+  {
+    value: "e1000",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.intelE1000");
+    },
+  },
+  {
+    value: "e1000e",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.intelE1000E");
+    },
+  },
+  {
+    value: "vmxnet3",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.vMwareVmxnet3");
+    },
+  },
+  {
+    value: "rtl8139",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.realtekRTL8139");
+    },
+  },
 ] as const;
 
 export const diskFormats = [
-  { value: "qcow2", label: "QEMU image (qcow2)" },
-  { value: "raw", label: "Raw disk image (raw)" },
-  { value: "vmdk", label: "VMware image (vmdk)" },
+  {
+    value: "qcow2",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.qemuImageQcow2");
+    },
+  },
+  {
+    value: "raw",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.rawDiskImageRaw");
+    },
+  },
+  {
+    value: "vmdk",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.vMwareImageVmdk");
+    },
+  },
 ] as const;
 
 export const cacheModes = [
-  { value: "none", label: "No cache (none)" },
-  { value: "directsync", label: "Direct sync" },
-  { value: "writethrough", label: "Write through" },
-  { value: "writeback", label: "Write back (unsafe)" },
-  { value: "unsafe", label: "Unsafe" },
+  {
+    value: "none",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.noCacheNone");
+    },
+  },
+  {
+    value: "directsync",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.directSync");
+    },
+  },
+  {
+    value: "writethrough",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.writeThrough");
+    },
+  },
+  {
+    value: "writeback",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.writeBackUnsafe");
+    },
+  },
+  {
+    value: "unsafe",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.unsafe");
+    },
+  },
 ] as const;
 
 export const vgaTypes = [
-  { value: "std", label: "Standard VGA" },
+  {
+    value: "std",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.standardVGA");
+    },
+  },
   { value: "qxl", label: "SPICE (QXL)" },
-  { value: "virtio", label: "VirtIO-GPU" },
-  { value: "virtio-gl", label: "VirtIO-GPU (GL)" },
-  { value: "vmware", label: "VMware compatible" },
-  { value: "cirrus", label: "Cirrus Logic" },
-  { value: "serial0", label: "Serial terminal" },
-  { value: "none", label: "None" },
+  {
+    value: "virtio",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOGPU");
+    },
+  },
+  {
+    value: "virtio-gl",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOGPUGL");
+    },
+  },
+  {
+    value: "vmware",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.vMwareCompatible");
+    },
+  },
+  {
+    value: "cirrus",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.cirrusLogic");
+    },
+  },
+  {
+    value: "serial0",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.serialTerminal");
+    },
+  },
+  {
+    value: "none",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.none");
+    },
+  },
 ] as const;
 
 export const biosOptions = [
-  { value: "seabios", label: "SeaBIOS (Legacy)" },
+  {
+    value: "seabios",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.seaBIOSLegacy");
+    },
+  },
   { value: "ovmf", label: "OVMF (UEFI)" },
 ] as const;
 
 export const machineTypes = [
-  { value: "pc", label: "i440fx (Default)" },
+  {
+    value: "pc",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.i440fxDefault");
+    },
+  },
   { value: "q35", label: "Q35" },
 ] as const;
 
 export const audioDevices = [
-  { value: "", label: "None" },
-  { value: "ich9-intel-hda", label: "ich9 Intel HDA" },
-  { value: "intel-hda", label: "Intel HDA" },
-  { value: "AC97", label: "AC97" },
+  {
+    value: "",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.none");
+    },
+  },
+  {
+    value: "ich9-intel-hda",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.ich9IntelHDA");
+    },
+  },
+  {
+    value: "intel-hda",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.intelHDA");
+    },
+  },
+  {
+    value: "AC97",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.ac97");
+    },
+  },
 ] as const;
 
 export const diskBusTypes = [
-  { value: "scsi", label: "SCSI" },
-  { value: "ide", label: "IDE" },
-  { value: "sata", label: "SATA" },
-  { value: "virtio", label: "VirtIO Block" },
+  {
+    value: "scsi",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.scsi");
+    },
+  },
+  {
+    value: "ide",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.ide");
+    },
+  },
+  {
+    value: "sata",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.sata");
+    },
+  },
+  {
+    value: "virtio",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.virtIOBlock");
+    },
+  },
 ] as const;
 
 /**
@@ -400,13 +706,28 @@ export const RESTART_REQUIRED_FIELDS = new Set([
 ]);
 
 export const rngSources = [
-  { value: "/dev/urandom", label: "/dev/urandom (recommended)" },
+  {
+    value: "/dev/urandom",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.devUrandomRecommended");
+    },
+  },
   { value: "/dev/random", label: "/dev/random" },
-  { value: "/dev/hwrng", label: "/dev/hwrng (hardware)" },
+  {
+    value: "/dev/hwrng",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.devHwrngHardware");
+    },
+  },
 ] as const;
 
 export const serialOptions = [
-  { value: "socket", label: "Socket (qm terminal)" },
+  {
+    value: "socket",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.socketQmTerminal");
+    },
+  },
   { value: "/dev/ttyS0", label: "/dev/ttyS0" },
   { value: "/dev/ttyS1", label: "/dev/ttyS1" },
   { value: "/dev/ttyS2", label: "/dev/ttyS2" },
@@ -414,14 +735,39 @@ export const serialOptions = [
 ] as const;
 
 export const virtiofsCacheModes = [
-  { value: "auto", label: "Auto" },
-  { value: "always", label: "Always" },
-  { value: "never", label: "Never" },
+  {
+    value: "auto",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.auto");
+    },
+  },
+  {
+    value: "always",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.always");
+    },
+  },
+  {
+    value: "never",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.never");
+    },
+  },
 ] as const;
 
 export const efiTypes = [
-  { value: "4m", label: "4M (Secure Boot capable)" },
-  { value: "2m", label: "2M (legacy)" },
+  {
+    value: "4m",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.n4mSecureBootCapable");
+    },
+  },
+  {
+    value: "2m",
+    get label() {
+      return i18n.t("vms:vmConfigConstants.n2MLegacy");
+    },
+  },
 ] as const;
 
 export const tpmVersions = [

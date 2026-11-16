@@ -15,6 +15,7 @@ import { useDestroyVM } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface DestroyDialogProps {
   open: boolean;
@@ -33,6 +34,7 @@ export function DestroyDialog({
   kind,
   resourceName,
 }: DestroyDialogProps) {
+  const { t } = useTranslation("vms");
   const navigate = useNavigate();
   const destroyMutation = useDestroyVM(true);
   const settle = useSaveOutcome(open ? resourceId : null);
@@ -44,7 +46,9 @@ export function DestroyDialog({
   function handleSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
     settle(destroyMutation.mutateAsync({ clusterId, resourceId, kind }), {
-      action: `Destroying ${resourceName}`,
+      action: t("destroyDialogActions.action", {
+        resourceName,
+      }),
       onSuccess: (data) => {
         setUpid(data.upid);
       },

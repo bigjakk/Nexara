@@ -14,6 +14,7 @@ import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import type { ResourceKind, Snapshot } from "../types/vm";
 import { formatExactDate } from "@/lib/format";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation } from "react-i18next";
 
 interface SnapshotPanelProps {
   clusterId: string;
@@ -28,6 +29,7 @@ export function SnapshotPanel({
   kind,
   resourceName,
 }: SnapshotPanelProps) {
+  const { t } = useTranslation("vms");
   const queryClient = useQueryClient();
   const { data: snapshots, isLoading } = useSnapshots(
     clusterId,
@@ -129,19 +131,24 @@ export function SnapshotPanel({
           clusterId={clusterId}
           upid={upid}
           onComplete={handleTaskComplete}
-          description="Snapshot operation"
+          description={t("snapshotPanel.snapshotOperation")}
         />
       )}
 
       <Panel
         flush
-        title="Snapshots"
+        title={t("snapshotPanel.snapshots")}
         aside={
           isLoading
-            ? "Loading..."
+            ? t("snapshotPanel.loading")
             : taken.length === 0
               ? undefined
-              : `${String(taken.length)} taken${newest !== undefined ? `, the newest on ${formatExactDate(newest * 1000)}` : ""}`
+              : newest !== undefined
+                ? t("snapshotPanel.takenNewestOn", {
+                    number: String(taken.length),
+                    date: formatExactDate(newest * 1000),
+                  })
+                : t("snapshotPanel.taken", { number: String(taken.length) })
         }
         actions={
           <Button
@@ -152,20 +159,19 @@ export function SnapshotPanel({
             }}
           >
             <Camera className="h-4 w-4" />
-            Take snapshot
+            {t("snapshotPanel.takeSnapshot")}
           </Button>
         }
       >
         {isLoading && (
           <p className="px-[18px] py-6 text-sm text-muted-foreground">
-            Reading this guest&apos;s snapshots...
+            {t("snapshotPanel.readingThisGuestSSnapshots")}
           </p>
         )}
 
         {!isLoading && snapshots && snapshots.length === 0 && (
           <p className="px-[18px] py-6 text-sm text-muted-foreground">
-            No snapshots found. Take one before a risky change, so there is a
-            state to roll back to.
+            {t("snapshotPanel.noSnapshotsFoundTakeOne")}
           </p>
         )}
 
@@ -233,6 +239,7 @@ function SnapshotNode({
   rollbackPending,
   formatDate,
 }: SnapshotNodeProps) {
+  const { t } = useTranslation("vms");
   const children = childrenMap.get(snap.name) ?? [];
   const isCurrent = snap.name === "current";
 
@@ -257,9 +264,11 @@ function SnapshotNode({
                 : "min-w-0 truncate font-medium"
             }
           >
-            {isCurrent ? "Current state" : snap.name}
+            {isCurrent ? t("snapshotPanel.currentState") : snap.name}
           </span>
-          {snap.vmstate ? <Badge variant="outline">With RAM</Badge> : null}
+          {snap.vmstate ? (
+            <Badge variant="outline">{t("snapshotPanel.withRAM")}</Badge>
+          ) : null}
           {snap.description ? (
             <span
               className="min-w-0 truncate text-muted-foreground"
@@ -287,7 +296,7 @@ function SnapshotNode({
                   }}
                   disabled={rollbackPending}
                 >
-                  Confirm
+                  {t("snapshotPanel.confirm")}
                 </Button>
                 <Button
                   size="sm"
@@ -296,7 +305,7 @@ function SnapshotNode({
                     onConfirmRollback(null);
                   }}
                 >
-                  Cancel
+                  {t("snapshotPanel.cancel")}
                 </Button>
               </>
             ) : (
@@ -309,7 +318,7 @@ function SnapshotNode({
                 }}
               >
                 <RotateCcw className="h-3.5 w-3.5" />
-                Rollback
+                {t("snapshotPanel.rollback")}
               </Button>
             )}
             {confirmDelete === snap.name ? (
@@ -322,7 +331,7 @@ function SnapshotNode({
                   }}
                   disabled={deletePending}
                 >
-                  Confirm
+                  {t("snapshotPanel.confirm")}
                 </Button>
                 <Button
                   size="sm"
@@ -331,7 +340,7 @@ function SnapshotNode({
                     onConfirmDelete(null);
                   }}
                 >
-                  Cancel
+                  {t("snapshotPanel.cancel")}
                 </Button>
               </>
             ) : (
@@ -344,7 +353,7 @@ function SnapshotNode({
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Delete
+                {t("snapshotPanel.delete")}
               </Button>
             )}
           </div>

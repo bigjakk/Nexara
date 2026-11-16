@@ -88,6 +88,8 @@ import type { VMConfig } from "../../types/vm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 const selectClass =
   "flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
@@ -146,6 +148,7 @@ export function AddDeviceMenu({
   onAddCDROM,
   onAddDisk,
 }: AddDeviceMenuProps) {
+  const { t } = useTranslation("vms");
   const [dialog, setDialog] = useState<DeviceDialog>(null);
 
   const hasEfi = config["efidisk0"] != null;
@@ -157,27 +160,28 @@ export function AddDeviceMenu({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="sm" className="gap-1.5">
-            <Plus className="h-4 w-4" /> Add device
+            <Plus className="h-4 w-4" /> {t("addDeviceMenu.addDevice")}
             <ChevronDown className="h-3.5 w-3.5 opacity-70" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem onClick={onAddDisk}>
-            <HardDrive className="mr-2 h-4 w-4" /> Hard disk
+            <HardDrive className="mr-2 h-4 w-4" /> {t("addDeviceMenu.hardDisk")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("cdrom");
             }}
           >
-            <Disc className="mr-2 h-4 w-4" /> CD/DVD drive
+            <Disc className="mr-2 h-4 w-4" /> {t("addDeviceMenu.cdDVDDrive")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("nic");
             }}
           >
-            <Network className="mr-2 h-4 w-4" /> Network device
+            <Network className="mr-2 h-4 w-4" />{" "}
+            {t("addDeviceMenu.networkDevice")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -185,21 +189,22 @@ export function AddDeviceMenu({
               setDialog("usb");
             }}
           >
-            <Usb className="mr-2 h-4 w-4" /> USB device
+            <Usb className="mr-2 h-4 w-4" /> {t("addDeviceMenu.usbDevice")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("pci");
             }}
           >
-            <Cpu className="mr-2 h-4 w-4" /> PCI device
+            <Cpu className="mr-2 h-4 w-4" /> {t("addDeviceMenu.pciDevice")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("serial");
             }}
           >
-            <Terminal className="mr-2 h-4 w-4" /> Serial port
+            <Terminal className="mr-2 h-4 w-4" />{" "}
+            {t("addDeviceMenu.serialPort")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -207,7 +212,8 @@ export function AddDeviceMenu({
               setDialog("cloudinit");
             }}
           >
-            <Monitor className="mr-2 h-4 w-4" /> Cloud-init drive
+            <Monitor className="mr-2 h-4 w-4" />{" "}
+            {t("addDeviceMenu.cloudInitDrive")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -215,14 +221,18 @@ export function AddDeviceMenu({
             }}
             disabled={hasRng}
           >
-            <Dice1 className="mr-2 h-4 w-4" /> VirtIO RNG {hasRng && "(exists)"}
+            <Dice1 className="mr-2 h-4 w-4" />{" "}
+            {hasRng
+              ? t("addDeviceMenu.virtioRngExists")
+              : t("addDeviceMenu.virtioRng")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDialog("virtiofs");
             }}
           >
-            <FolderOpen className="mr-2 h-4 w-4" /> VirtioFS share
+            <FolderOpen className="mr-2 h-4 w-4" />{" "}
+            {t("addDeviceMenu.virtioFSShare")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -231,7 +241,10 @@ export function AddDeviceMenu({
             }}
             disabled={hasEfi}
           >
-            <Key className="mr-2 h-4 w-4" /> EFI disk {hasEfi && "(exists)"}
+            <Key className="mr-2 h-4 w-4" />{" "}
+            {hasEfi
+              ? t("addDeviceMenu.efiDiskExists")
+              : t("addDeviceMenu.efiDisk")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -239,7 +252,10 @@ export function AddDeviceMenu({
             }}
             disabled={hasTpm}
           >
-            <Shield className="mr-2 h-4 w-4" /> TPM state {hasTpm && "(exists)"}
+            <Shield className="mr-2 h-4 w-4" />{" "}
+            {hasTpm
+              ? t("addDeviceMenu.tpmStateExists")
+              : t("addDeviceMenu.tpmState")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -361,6 +377,7 @@ function AddNICDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [model, setModel] = useState("virtio");
   const [bridge, setBridge] = useState(bridges[0] ?? "vmbr0");
   const [firewall, setFirewall] = useState(true);
@@ -392,12 +409,14 @@ function AddNICDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add network device (net{String(idx)})</DialogTitle>
+          <DialogTitle>
+            {t("addDeviceMenu.addNetworkDeviceNetIdx", { idx: String(idx) })}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label className="text-xs">Model</Label>
+              <Label className="text-xs">{t("addDeviceMenu.model")}</Label>
               <select
                 className={selectClass}
                 value={model}
@@ -413,7 +432,7 @@ function AddNICDialog({
               </select>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Bridge</Label>
+              <Label className="text-xs">{t("addDeviceMenu.bridge")}</Label>
               {bridges.length > 0 ? (
                 <select
                   className={selectClass}
@@ -439,7 +458,7 @@ function AddNICDialog({
               )}
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">VLAN Tag</Label>
+              <Label className="text-xs">{t("addDeviceMenu.vlanTag")}</Label>
               <Input
                 type="number"
                 min={1}
@@ -448,11 +467,11 @@ function AddNICDialog({
                 onChange={(e) => {
                   setVlan(e.target.value);
                 }}
-                placeholder="None"
+                placeholder={t("addDeviceMenu.none")}
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Rate (MB/s)</Label>
+              <Label className="text-xs">{t("addDeviceMenu.rateMBS")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -460,11 +479,11 @@ function AddNICDialog({
                 onChange={(e) => {
                   setRate(e.target.value);
                 }}
-                placeholder="Unlimited"
+                placeholder={t("addDeviceMenu.unlimited")}
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">MTU</Label>
+              <Label className="text-xs">{t("addDeviceMenu.mtu")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -472,7 +491,7 @@ function AddNICDialog({
                 onChange={(e) => {
                   setMtu(e.target.value);
                 }}
-                placeholder="Default"
+                placeholder={t("addDeviceMenu.default")}
               />
             </div>
           </div>
@@ -486,17 +505,17 @@ function AddNICDialog({
                 }}
               />
               <Label htmlFor="add-nic-fw" className="cursor-pointer text-xs">
-                Firewall
+                {t("addDeviceMenu.firewall")}
               </Label>
             </div>
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!canAdd}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -518,13 +537,21 @@ const usbModes: ReadonlyArray<{ value: USBMode; label: string; hint: string }> =
   [
     {
       value: "mapped",
-      label: "Mapped device",
-      hint: "A cluster resource mapping",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.mappedDevice");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.aClusterResourceMapping");
+      },
     },
     {
       value: "device",
-      label: "Host device",
-      hint: "This device, on any port",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.hostDevice");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.thisDeviceOnAnyPort");
+      },
     },
     {
       // Not "whatever is on the port": a port mapping carries the device's
@@ -532,13 +559,21 @@ const usbModes: ReadonlyArray<{ value: USBMode; label: string; hint: string }> =
       // there (assert_valid, pve-guest-common src/PVE/Mapping/USB.pm). What
       // the port adds is telling two identical devices apart.
       value: "port",
-      label: "Host USB port",
-      hint: "This device, on this port",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.hostUSBPort");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.thisDeviceOnThisPort");
+      },
     },
     {
       value: "spice",
-      label: "SPICE port",
-      hint: "A device redirected from the SPICE client",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.spicePort");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.aDeviceRedirectedFromThe");
+      },
     },
   ];
 
@@ -577,6 +612,7 @@ function AddUSBDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const { canManage } = usePermissions();
   const canCreateMapping = canManage("cluster");
   const mappingsQuery = useNodeUSBMappings(clusterId, nodeName);
@@ -620,10 +656,9 @@ function AddUSBDialog({
   let nameError = "";
   if (needsCreate) {
     if (!MAPPING_ID_PATTERN.test(newName)) {
-      nameError =
-        "Start with a letter; use letters, digits, '_' and '-' (2 to 128 characters).";
+      nameError = t("addDeviceMenu.mappingNamePattern");
     } else if (mappings.some((m) => m.id === newName)) {
-      nameError = `A mapping named "${newName}" already exists for other hardware.`;
+      nameError = t("addDeviceMenu.mappingNameTaken", { newName });
     }
   }
   const typedIdError =
@@ -683,7 +718,7 @@ function AddUSBDialog({
           description: picked.label,
         }),
         {
-          action: `Creating USB mapping ${newName}`,
+          action: t("addDeviceMenu.creatingUSBMappingNewName", { newName }),
           onSuccess: () => {
             add(buildUSB({ host: "", mapping: newName, usb3, spice: false }));
           },
@@ -694,11 +729,11 @@ function AddUSBDialog({
   }
 
   const listingFailure = mappingsQuery.isError
-    ? `Could not list the cluster's USB mappings${
-        describeError(mappingsQuery.error)
-          ? `: ${describeError(mappingsQuery.error)}`
-          : "."
-      }`
+    ? describeError(mappingsQuery.error)
+      ? t("addDeviceMenu.couldNotListUsbMappingsReason", {
+          reason: describeError(mappingsQuery.error),
+        })
+      : t("addDeviceMenu.couldNotListUsbMappings")
     : "";
 
   return (
@@ -710,11 +745,15 @@ function AddUSBDialog({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add USB device (usb{String(idx)})</DialogTitle>
+          <DialogTitle>
+            {t("addDeviceMenu.addUSBDeviceUsbIdx", { idx: String(idx) })}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <fieldset className="grid gap-1.5" disabled={busy}>
-            <legend className="sr-only">Pass through</legend>
+            <legend className="sr-only">
+              {t("addDeviceMenu.passThrough")}
+            </legend>
             {usbModes.map((m) => (
               <label
                 key={m.value}
@@ -744,20 +783,20 @@ function AddUSBDialog({
           {mode === "mapped" && (
             <div className="space-y-1">
               <Label htmlFor="add-usb-mapping" className="text-xs">
-                Mapping
+                {t("addDeviceMenu.mapping")}
               </Label>
               {listingFailure ? (
                 <p className="text-xs text-destructive">{listingFailure}</p>
               ) : mappingsQuery.isPending ? (
                 <p className="text-xs text-muted-foreground">
-                  Loading mappings…
+                  {t("addDeviceMenu.loadingMappings")}
                 </p>
               ) : mappings.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  This cluster has no USB mappings yet.{" "}
+                  {t("addDeviceMenu.thisClusterHasNoUSB")}{" "}
                   {canCreateMapping
-                    ? "Pick a host device or port instead, and Nexara creates one."
-                    : "Creating one needs the Manage Cluster permission; ask an administrator."}
+                    ? t("addDeviceMenu.pickAHostDeviceOr")
+                    : t("addDeviceMenu.creatingOneNeedsTheManage")}
                 </p>
               ) : (
                 <select
@@ -769,7 +808,7 @@ function AddUSBDialog({
                     setMappingId(e.target.value);
                   }}
                 >
-                  <option value="">Select a mapping...</option>
+                  <option value="">{t("addDeviceMenu.selectAMapping")}</option>
                   {mappings.map((m) => (
                     <option key={m.id} value={m.id}>
                       {mappingOptionLabel(m)}
@@ -786,7 +825,7 @@ function AddUSBDialog({
           {mode === "device" && (
             <div className="space-y-1">
               <Label htmlFor="add-usb-device" className="text-xs">
-                Device
+                {t("addDeviceMenu.device")}
               </Label>
               <USBDevicePicker
                 id="add-usb-device"
@@ -809,7 +848,7 @@ function AddUSBDialog({
           {mode === "port" && (
             <div className="space-y-1">
               <Label htmlFor="add-usb-port" className="text-xs">
-                Port
+                {t("addDeviceMenu.port")}
               </Label>
               <USBDevicePicker
                 id="add-usb-port"
@@ -830,17 +869,20 @@ function AddUSBDialog({
           )}
           {isHostMode && picked && mappingsQuery.isPending && (
             <p className="text-xs text-muted-foreground">
-              Checking the cluster's USB mappings…
+              {t("addDeviceMenu.checkingTheClusterSUSB")}
             </p>
           )}
           {isHostMode && picked && reusable && (
             <div className="space-y-0.5">
               <p className="text-xs text-muted-foreground">
-                Uses the existing mapping “{reusable.id}”
                 {cleanDeviceText(reusable.description)
-                  ? ` (${cleanDeviceText(reusable.description)})`
-                  : ""}
-                .
+                  ? t("addDeviceMenu.usesTheExistingMappingDescribed", {
+                      id: reusable.id,
+                      description: cleanDeviceText(reusable.description),
+                    })
+                  : t("addDeviceMenu.usesTheExistingMapping", {
+                      id: reusable.id,
+                    })}
               </p>
               {/* A device that is not plugged in now is reused all the same —
                   a new mapping would report the same — so say so here. */}
@@ -852,7 +894,7 @@ function AddUSBDialog({
           {needsCreate && (
             <div className="space-y-1">
               <Label htmlFor="add-usb-mapping-name" className="text-xs">
-                Mapping name
+                {t("addDeviceMenu.mappingName")}
               </Label>
               <Input
                 id="add-usb-mapping-name"
@@ -871,38 +913,32 @@ function AddUSBDialog({
           )}
           {isHostMode && (
             <p className="text-xs text-muted-foreground">
-              Proxmox passes a USB device straight through only for root@pam,
-              and Nexara connects with an API token, so the device goes through
-              a cluster resource mapping
-              {needsCreate
-                ? ", which Nexara creates now, even if you then discard this change"
-                : ""}
-              . Proxmox will not start the VM while the device is missing
-              {mode === "port" ? " or another device is on the port" : ""}.
+              {t("addDeviceMenu.proxmoxPassesAUSBDevice")}
+              {needsCreate ? t("addDeviceMenu.whichNexaraCreatesNowEven") : ""}
+              {t("addDeviceMenu.proxmoxWillNotStartThe")}
+              {mode === "port" ? t("addDeviceMenu.orAnotherDeviceIsOn") : ""}.
             </p>
           )}
           {createDenied && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              Creating a mapping needs the Manage Cluster permission. Pick an
-              existing mapping instead, or ask an administrator.
+              {t("addDeviceMenu.creatingAMappingNeedsThe")}
             </p>
           )}
           {slotsFull && (
             <p className="text-xs text-destructive">
-              All 14 USB slots are in use.
+              {t("addDeviceMenu.all14USBSlotsAre")}
             </p>
           )}
           {createMapping.isError && (
             <p className="text-xs text-destructive">
               {describeError(createMapping.error) ||
-                "Could not create the mapping."}
+                t("addDeviceMenu.couldNotCreateTheMapping")}
             </p>
           )}
 
           {mode === "spice" && (
             <p className="text-xs text-muted-foreground">
-              SPICE USB redirection allows passing host USB devices through the
-              SPICE client.
+              {t("addDeviceMenu.spiceUSBRedirectionAllowsPassing")}
             </p>
           )}
 
@@ -916,13 +952,13 @@ function AddUSBDialog({
               }}
             />
             <Label htmlFor="add-usb-usb3" className="cursor-pointer text-xs">
-              USB 3.0
+              {t("addDeviceMenu.usb30")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button
             onClick={() => {
@@ -931,10 +967,10 @@ function AddUSBDialog({
             disabled={!canAdd}
           >
             {busy
-              ? "Creating mapping…"
+              ? t("addDeviceMenu.creatingMapping")
               : needsCreate
-                ? "Create mapping & add"
-                : "Add"}
+                ? t("addDeviceMenu.createMappingAdd")
+                : t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -956,13 +992,21 @@ const pciModes: ReadonlyArray<{ value: PCIMode; label: string; hint: string }> =
   [
     {
       value: "mapped",
-      label: "Mapped device",
-      hint: "A cluster resource mapping",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.mappedDevice");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.aClusterResourceMapping");
+      },
     },
     {
       value: "device",
-      label: "Host device",
-      hint: "A PCI device of this node",
+      get label() {
+        return i18n.t("vms:addDeviceMenu.hostDevice");
+      },
+      get hint() {
+        return i18n.t("vms:addDeviceMenu.aPCIDeviceOfThis");
+      },
     },
   ];
 
@@ -1005,6 +1049,7 @@ function AddPCIDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const { canManage } = usePermissions();
   const canCreateMapping = canManage("cluster");
   const mappingsQuery = useNodePCIMappings(clusterId, nodeName);
@@ -1061,10 +1106,9 @@ function AddPCIDialog({
   let nameError = "";
   if (needsCreate) {
     if (!MAPPING_ID_PATTERN.test(newName)) {
-      nameError =
-        "Start with a letter; use letters, digits, '_' and '-' (2 to 128 characters).";
+      nameError = t("addDeviceMenu.mappingNamePattern");
     } else if (mappings.some((m) => m.id === newName)) {
-      nameError = `A mapping named "${newName}" already exists for other hardware.`;
+      nameError = t("addDeviceMenu.mappingNameTaken", { newName });
     }
   }
 
@@ -1125,7 +1169,7 @@ function AddPCIDialog({
           ...(label ? { description: label } : {}),
         }),
         {
-          action: `Creating PCI mapping ${newName}`,
+          action: t("addDeviceMenu.creatingPCIMappingNewName", { newName }),
           onSuccess: () => {
             add(newName);
           },
@@ -1152,11 +1196,11 @@ function AddPCIDialog({
   }
 
   const listingFailure = mappingsQuery.isError
-    ? `Could not list the cluster's PCI mappings${
-        describeError(mappingsQuery.error)
-          ? `: ${describeError(mappingsQuery.error)}`
-          : "."
-      }`
+    ? describeError(mappingsQuery.error)
+      ? t("addDeviceMenu.couldNotListPciMappingsReason", {
+          reason: describeError(mappingsQuery.error),
+        })
+      : t("addDeviceMenu.couldNotListPciMappings")
     : "";
 
   return (
@@ -1168,11 +1212,15 @@ function AddPCIDialog({
     >
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add PCI device (hostpci{String(idx)})</DialogTitle>
+          <DialogTitle>
+            {t("addDeviceMenu.addPCIDeviceHostpciIdx", { idx: String(idx) })}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <fieldset className="grid gap-1.5" disabled={busy}>
-            <legend className="sr-only">Pass through</legend>
+            <legend className="sr-only">
+              {t("addDeviceMenu.passThrough")}
+            </legend>
             {pciModes.map((m) => (
               <label
                 key={m.value}
@@ -1202,20 +1250,20 @@ function AddPCIDialog({
           {mode === "mapped" && (
             <div className="space-y-1">
               <Label htmlFor="add-pci-mapping" className="text-xs">
-                Mapping
+                {t("addDeviceMenu.mapping")}
               </Label>
               {listingFailure ? (
                 <p className="text-xs text-destructive">{listingFailure}</p>
               ) : mappingsQuery.isPending ? (
                 <p className="text-xs text-muted-foreground">
-                  Loading mappings…
+                  {t("addDeviceMenu.loadingMappings")}
                 </p>
               ) : mappings.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  This cluster has no PCI mappings yet.{" "}
+                  {t("addDeviceMenu.thisClusterHasNoPCI")}{" "}
                   {canCreateMapping
-                    ? "Pick a host device instead, and Nexara creates one."
-                    : "Creating one needs the Manage Cluster permission; ask an administrator."}
+                    ? t("addDeviceMenu.pickAHostDeviceInstead")
+                    : t("addDeviceMenu.creatingOneNeedsTheManage")}
                 </p>
               ) : (
                 <select
@@ -1227,7 +1275,7 @@ function AddPCIDialog({
                     setMappingId(e.target.value);
                   }}
                 >
-                  <option value="">Select a mapping...</option>
+                  <option value="">{t("addDeviceMenu.selectAMapping")}</option>
                   {mappings.map((m) => (
                     <option key={m.id} value={m.id}>
                       {pciMappingOptionLabel(m)}
@@ -1260,17 +1308,20 @@ function AddPCIDialog({
             pickedPath !== "" &&
             mappingsQuery.isPending && (
               <p className="text-xs text-muted-foreground">
-                Checking the cluster's PCI mappings…
+                {t("addDeviceMenu.checkingTheClusterSPCI")}
               </p>
             )}
           {mode === "device" && reusable && (
             <div className="space-y-0.5">
               <p className="text-xs text-muted-foreground">
-                Uses the existing mapping “{reusable.id}”
                 {cleanDeviceText(reusable.description)
-                  ? ` (${cleanDeviceText(reusable.description)})`
-                  : ""}
-                .
+                  ? t("addDeviceMenu.usesTheExistingMappingDescribed", {
+                      id: reusable.id,
+                      description: cleanDeviceText(reusable.description),
+                    })
+                  : t("addDeviceMenu.usesTheExistingMapping", {
+                      id: reusable.id,
+                    })}
               </p>
               {reusable.checks.length > 0 && (
                 <PCIMappingCheckList mapping={reusable} node={nodeName} />
@@ -1280,7 +1331,7 @@ function AddPCIDialog({
           {needsCreate && (
             <div className="space-y-1">
               <Label htmlFor="add-pci-mapping-name" className="text-xs">
-                Mapping name
+                {t("addDeviceMenu.mappingName")}
               </Label>
               <Input
                 id="add-pci-mapping-name"
@@ -1299,20 +1350,14 @@ function AddPCIDialog({
           )}
           {mode === "device" && (
             <p className="text-xs text-muted-foreground">
-              Proxmox passes a PCI device straight through only for root@pam,
-              and Nexara connects with an API token, so the device goes through
-              a cluster resource mapping
-              {needsCreate
-                ? ", which Nexara creates now, even if you then discard this change"
-                : ""}
-              . Proxmox will not start the VM while the device is missing or no
-              longer matches the mapping.
+              {t("addDeviceMenu.proxmoxPassesAPCIDevice")}
+              {needsCreate ? t("addDeviceMenu.whichNexaraCreatesNowEven") : ""}
+              {t("addDeviceMenu.proxmoxWillNotStartThe2")}
             </p>
           )}
           {createDenied && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              Creating a mapping needs the Manage Cluster permission. Pick an
-              existing mapping instead, or ask an administrator.
+              {t("addDeviceMenu.creatingAMappingNeedsThe")}
             </p>
           )}
           <PCIRiskConfirm
@@ -1325,13 +1370,13 @@ function AddPCIDialog({
           />
           {slotsFull && (
             <p className="text-xs text-destructive">
-              All 16 PCI slots are in use.
+              {t("addDeviceMenu.all16PCISlotsAre")}
             </p>
           )}
           {createMapping.isError && (
             <p className="text-xs text-destructive">
               {describeError(createMapping.error) ||
-                "Could not create the mapping."}
+                t("addDeviceMenu.couldNotCreateTheMapping")}
             </p>
           )}
 
@@ -1346,9 +1391,11 @@ function AddPCIDialog({
                 }}
               />
               <Label htmlFor="add-pci-pcie" className="cursor-pointer text-xs">
-                PCIe
+                {t("addDeviceMenu.pCIe")}
                 {!isQ35 && (
-                  <span className="ml-1 text-muted-foreground">(q35 only)</span>
+                  <span className="ml-1 text-muted-foreground">
+                    {t("addDeviceMenu.q35Only")}
+                  </span>
                 )}
               </Label>
             </div>
@@ -1365,7 +1412,7 @@ function AddPCIDialog({
                 htmlFor="add-pci-rombar"
                 className="cursor-pointer text-xs"
               >
-                ROM-BAR
+                {t("addDeviceMenu.romBAR")}
               </Label>
             </div>
             <div className="flex items-center gap-1.5">
@@ -1378,14 +1425,14 @@ function AddPCIDialog({
                 }}
               />
               <Label htmlFor="add-pci-xvga" className="cursor-pointer text-xs">
-                Primary GPU (x-vga)
+                {t("addDeviceMenu.primaryGPUXVga")}
               </Label>
             </div>
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button
             onClick={() => {
@@ -1394,10 +1441,10 @@ function AddPCIDialog({
             disabled={!canAdd}
           >
             {busy
-              ? "Creating mapping…"
+              ? t("addDeviceMenu.creatingMapping")
               : needsCreate
-                ? "Create mapping & add"
-                : "Add"}
+                ? t("addDeviceMenu.createMappingAdd")
+                : t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1423,6 +1470,7 @@ function AddSerialDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [value, setValue] = useState("socket");
 
   const idx = findNextIndex(config, "serial", 3);
@@ -1438,10 +1486,12 @@ function AddSerialDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add serial port (serial{String(idx)})</DialogTitle>
+          <DialogTitle>
+            {t("addDeviceMenu.addSerialPortSerialIdx", { idx: String(idx) })}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-1">
-          <Label className="text-xs">Type</Label>
+          <Label className="text-xs">{t("addDeviceMenu.type")}</Label>
           <select
             className={selectClass}
             value={value}
@@ -1455,22 +1505,22 @@ function AddSerialDialog({
                 value={o.value}
                 disabled={o.value !== "socket"}
               >
-                {o.value === "socket" ? o.label : `${o.label} (root@pam only)`}
+                {o.value === "socket"
+                  ? o.label
+                  : t("addDeviceMenu.labelRootPamOnly", { label: o.label })}
               </option>
             ))}
           </select>
         </div>
         <p className="text-xs text-muted-foreground">
-          Proxmox attaches a host serial port only for root@pam, and Nexara
-          connects with an API token, so only a socket can be added here. Set a
-          host port in Proxmox, as root@pam.
+          {t("addDeviceMenu.proxmoxAttachesAHostSerial")}
         </p>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!canAdd}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1489,6 +1539,7 @@ function AddRNGDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [source, setSource] = useState("/dev/urandom");
   const [maxBytes, setMaxBytes] = useState("1024");
   const [period, setPeriod] = useState("1000");
@@ -1502,11 +1553,11 @@ function AddRNGDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add VirtIO RNG</DialogTitle>
+          <DialogTitle>{t("addDeviceMenu.addVirtIORNG")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Source</Label>
+            <Label className="text-xs">{t("addDeviceMenu.source")}</Label>
             <select
               className={selectClass}
               value={source}
@@ -1523,7 +1574,7 @@ function AddRNGDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label className="text-xs">Max Bytes</Label>
+              <Label className="text-xs">{t("addDeviceMenu.maxBytes")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -1534,7 +1585,7 @@ function AddRNGDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Period (ms)</Label>
+              <Label className="text-xs">{t("addDeviceMenu.periodMs")}</Label>
               <Input
                 type="number"
                 min={0}
@@ -1548,9 +1599,9 @@ function AddRNGDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
-          <Button onClick={handleAdd}>Add</Button>
+          <Button onClick={handleAdd}>{t("addDeviceMenu.add")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1570,6 +1621,7 @@ function AddVirtioFSDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [dirid, setDirid] = useState("");
   const [cache, setCache] = useState("auto");
   const [directIo, setDirectIo] = useState(false);
@@ -1587,11 +1639,15 @@ function AddVirtioFSDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add VirtioFS share (virtiofs{String(idx)})</DialogTitle>
+          <DialogTitle>
+            {t("addDeviceMenu.addVirtioFSShareVirtiofsIdx", {
+              idx: String(idx),
+            })}
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Directory ID</Label>
+            <Label className="text-xs">{t("addDeviceMenu.directoryID")}</Label>
             <Input
               value={dirid}
               onChange={(e) => {
@@ -1601,7 +1657,7 @@ function AddVirtioFSDialog({
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Cache Mode</Label>
+            <Label className="text-xs">{t("addDeviceMenu.cacheMode")}</Label>
             <select
               className={selectClass}
               value={cache}
@@ -1625,16 +1681,16 @@ function AddVirtioFSDialog({
               }}
             />
             <Label htmlFor="add-vfs-dio" className="cursor-pointer text-xs">
-              Direct I/O
+              {t("addDeviceMenu.directIO")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!canAdd}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1655,6 +1711,7 @@ function AddEFIDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [storage, setStorage] = useState(diskStorages[0]?.storage ?? "");
   const [efitype, setEfitype] = useState("4m");
   const [preEnrolledKeys, setPreEnrolledKeys] = useState(true);
@@ -1677,11 +1734,11 @@ function AddEFIDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add EFI disk</DialogTitle>
+          <DialogTitle>{t("addDeviceMenu.addEFIDisk")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Storage</Label>
+            <Label className="text-xs">{t("addDeviceMenu.storage")}</Label>
             <select
               className={selectClass}
               value={storage}
@@ -1689,7 +1746,7 @@ function AddEFIDialog({
                 setStorage(e.target.value);
               }}
             >
-              <option value="">Select...</option>
+              <option value="">{t("addDeviceMenu.select")}</option>
               {diskStorages.map((s) => (
                 <option key={s.storage} value={s.storage}>
                   {s.storage} ({s.type})
@@ -1698,7 +1755,7 @@ function AddEFIDialog({
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">EFI Type</Label>
+            <Label className="text-xs">{t("addDeviceMenu.efiType")}</Label>
             <select
               className={selectClass}
               value={efitype}
@@ -1722,19 +1779,19 @@ function AddEFIDialog({
               }}
             />
             <Label htmlFor="add-efi-keys" className="cursor-pointer text-xs">
-              Pre-enrolled Keys (Secure Boot)
+              {t("addDeviceMenu.preEnrolledKeysSecureBoot")}
             </Label>
           </div>
           <p className="text-xs text-muted-foreground">
-            BIOS will be set to OVMF (UEFI) when an EFI disk is added.
+            {t("addDeviceMenu.biosWillBeSetTo")}
           </p>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!storage}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1755,6 +1812,7 @@ function AddTPMDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [storage, setStorage] = useState(diskStorages[0]?.storage ?? "");
   const [version, setVersion] = useState("v2.0");
 
@@ -1771,11 +1829,11 @@ function AddTPMDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add TPM state</DialogTitle>
+          <DialogTitle>{t("addDeviceMenu.addTPMState")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Storage</Label>
+            <Label className="text-xs">{t("addDeviceMenu.storage")}</Label>
             <select
               className={selectClass}
               value={storage}
@@ -1783,7 +1841,7 @@ function AddTPMDialog({
                 setStorage(e.target.value);
               }}
             >
-              <option value="">Select...</option>
+              <option value="">{t("addDeviceMenu.select")}</option>
               {diskStorages.map((s) => (
                 <option key={s.storage} value={s.storage}>
                   {s.storage} ({s.type})
@@ -1792,7 +1850,7 @@ function AddTPMDialog({
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Version</Label>
+            <Label className="text-xs">{t("addDeviceMenu.version")}</Label>
             <select
               className={selectClass}
               value={version}
@@ -1810,10 +1868,10 @@ function AddTPMDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!storage}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1843,6 +1901,7 @@ function AddCloudInitDialog({
   onAdd: (key: string, value: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const [storage, setStorage] = useState(diskStorages[0]?.storage ?? "");
   // Find first available slot
   const availableSlot =
@@ -1859,11 +1918,11 @@ function AddCloudInitDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Add cloud-init drive</DialogTitle>
+          <DialogTitle>{t("addDeviceMenu.addCloudInitDrive")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Storage</Label>
+            <Label className="text-xs">{t("addDeviceMenu.storage")}</Label>
             <select
               className={selectClass}
               value={storage}
@@ -1871,7 +1930,7 @@ function AddCloudInitDialog({
                 setStorage(e.target.value);
               }}
             >
-              <option value="">Select...</option>
+              <option value="">{t("addDeviceMenu.select")}</option>
               {diskStorages.map((s) => (
                 <option key={s.storage} value={s.storage}>
                   {s.storage} ({s.type})
@@ -1880,7 +1939,7 @@ function AddCloudInitDialog({
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Disk Slot</Label>
+            <Label className="text-xs">{t("addDeviceMenu.diskSlot")}</Label>
             <select
               className={selectClass}
               value={slot}
@@ -1895,7 +1954,7 @@ function AddCloudInitDialog({
                   disabled={config[b.value] != null}
                 >
                   {b.label}
-                  {config[b.value] != null ? " (in use)" : ""}
+                  {config[b.value] != null ? t("addDeviceMenu.inUse") : ""}
                 </option>
               ))}
             </select>
@@ -1903,10 +1962,10 @@ function AddCloudInitDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!storage}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1942,6 +2001,7 @@ function AddCDROMDialog({
   onAdd: (key: string, isoVolid: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("vms");
   const availableSlot =
     cdromBusSlots.find((b) => config[b.value] == null)?.value ?? "ide2";
   const [slot, setSlot] = useState(availableSlot);
@@ -1959,11 +2019,11 @@ function AddCDROMDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add CD/DVD drive</DialogTitle>
+          <DialogTitle>{t("addDeviceMenu.addCDDVDDrive")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Bus/Slot</Label>
+            <Label className="text-xs">{t("addDeviceMenu.busSlot")}</Label>
             <select
               className={selectClass}
               value={slot}
@@ -1978,13 +2038,13 @@ function AddCDROMDialog({
                   disabled={config[b.value] != null}
                 >
                   {b.label}
-                  {config[b.value] != null ? " (in use)" : ""}
+                  {config[b.value] != null ? t("addDeviceMenu.inUse") : ""}
                 </option>
               ))}
             </select>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">ISO Image</Label>
+            <Label className="text-xs">{t("addDeviceMenu.isoImage")}</Label>
             <select
               className={selectClass}
               value={iso}
@@ -1992,7 +2052,9 @@ function AddCDROMDialog({
                 setIso(e.target.value);
               }}
             >
-              <option value="none">No media (empty drive)</option>
+              <option value="none">
+                {t("addDeviceMenu.noMediaEmptyDrive")}
+              </option>
               {isoFiles.map((f) => (
                 <option key={f.volid} value={f.volid}>
                   {f.volid}
@@ -2003,10 +2065,10 @@ function AddCDROMDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("addDeviceMenu.cancel")}
           </Button>
           <Button onClick={handleAdd} disabled={!slotFree}>
-            Add
+            {t("addDeviceMenu.add")}
           </Button>
         </DialogFooter>
       </DialogContent>

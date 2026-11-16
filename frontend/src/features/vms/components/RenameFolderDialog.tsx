@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/page/Field";
 import { useUpdateVMFolder } from "../api/folder-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { useTranslation } from "react-i18next";
 
 interface RenameFolderDialogProps {
   open: boolean;
@@ -28,6 +29,7 @@ export function RenameFolderDialog({
   folderId,
   currentName,
 }: RenameFolderDialogProps) {
+  const { t } = useTranslation("vms");
   const update = useUpdateVMFolder();
   // The dialog shows a failure itself (the hook opts out of the app's toast),
   // and one that lands after it was closed is toasted instead.
@@ -54,7 +56,9 @@ export function RenameFolderDialog({
     }
     setError(null);
     settle(update.mutateAsync({ clusterId, folderId, name: trimmed }), {
-      action: `Renaming folder ${currentName}`,
+      action: t("renameFolderDialogActions.action", {
+        currentName,
+      }),
       onSuccess: () => {
         onOpenChange(false);
       },

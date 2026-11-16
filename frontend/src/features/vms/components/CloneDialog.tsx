@@ -18,6 +18,7 @@ import { useCloneVM, useClusterVMIDs } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { TaskProgressBanner } from "./TaskProgressBanner";
 import type { ResourceKind } from "../types/vm";
+import { useTranslation } from "react-i18next";
 
 interface CloneDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ export function CloneDialog({
   kind,
   sourceName,
 }: CloneDialogProps) {
+  const { t } = useTranslation("vms");
   const { data: nodes } = useClusterNodes(clusterId);
   const { data: storageList } = useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
@@ -97,7 +99,7 @@ export function CloneDialog({
         },
       }),
       {
-        action: `Cloning ${sourceName}`,
+        action: t("cloneDialogActions.action", { sourceName }),
         onSuccess: (data) => {
           setUpid(data.upid);
         },

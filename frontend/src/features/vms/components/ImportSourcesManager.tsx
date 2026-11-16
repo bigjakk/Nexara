@@ -16,6 +16,7 @@ import { useDeleteImportSource, useImportSources } from "../api/import-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { EsxiSourceForm } from "./EsxiSourceForm";
 import type { ImportSource } from "@/types/api";
+import { useTranslation } from "react-i18next";
 
 interface ImportSourcesManagerProps {
   clusterId: string;
@@ -29,6 +30,7 @@ interface SourceGroup {
 }
 
 export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
+  const { t } = useTranslation("vms");
   const { data: sources } = useImportSources(clusterId);
   const { canManage } = usePermissions();
   const deleteMutation = useDeleteImportSource();
@@ -65,7 +67,10 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
     if (!deleteTarget) return;
     // A failure keeps the dialog open, which shows it.
     settle(deleteMutation.mutateAsync({ clusterId, storage: deleteTarget }), {
-      action: `Removing import source ${deleteTarget}`,
+      action: t(
+        "importSourcesManagerActions.action",
+        { deleteTarget },
+      ),
       onSuccess: () => {
         setDeleteTarget(null);
       },
