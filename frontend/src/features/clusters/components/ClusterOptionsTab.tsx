@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import { ApiClientError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   useClusterOptions,
   useUpdateClusterOptions,
@@ -475,6 +476,9 @@ function GeneralSection({
     message: string;
   } | null>(null);
   const networksQuery = useNetworkInterfaces(clusterId);
+  // The section shows a failed save itself (the hook opts out of the app's
+  // toast), and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   // One prefix for the ids that tie each row's label to its control.
   const uid = useId();
   const id = (name: string) => `${uid}-${name}`;
@@ -565,7 +569,8 @@ function GeneralSection({
       return;
     }
 
-    updateOpts.mutate(params, {
+    settle(updateOpts.mutateAsync(params), {
+      action: "Saving the datacenter options",
       onSuccess: () => {
         setDirty(false);
         setFeedback({ kind: "success", message: "Datacenter options saved." });

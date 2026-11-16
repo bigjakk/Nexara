@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiFetch, sessionScope } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import {
   onRuleWriteError,
   requireRuleDigest,
@@ -519,6 +520,7 @@ export interface EvacuateResponse {
 export function useEvacuateNode(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: { target_node?: string | undefined }) =>
       apiClient.post<EvacuateResponse>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/evacuate`,
@@ -811,9 +813,19 @@ export function useSetNodeTimezone(clusterId: string, nodeName: string) {
   });
 }
 
-export function useShutdownNode(clusterId: string, nodeName: string) {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useShutdownNode(
+  clusterId: string,
+  nodeName: string,
+  errorsShownByCaller = false,
+) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: () =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/shutdown`,
@@ -829,6 +841,7 @@ export function useShutdownNode(clusterId: string, nodeName: string) {
 export function useRebootNode(clusterId: string, nodeName: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: () =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/reboot`,
@@ -841,10 +854,18 @@ export function useRebootNode(clusterId: string, nodeName: string) {
   });
 }
 
-/** Enter (enable=true) or exit (enable=false) HA node maintenance via SSH. */
-export function useSetNodeMaintenance(clusterId: string, nodeName: string) {
+/**
+ * Enter (enable=true) or exit (enable=false) HA node maintenance via SSH.
+ * `errorsShownByCaller` as for useShutdownNode.
+ */
+export function useSetNodeMaintenance(
+  clusterId: string,
+  nodeName: string,
+  errorsShownByCaller = false,
+) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: (enable: boolean) =>
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/nodes/${nodeName}/maintenance`,

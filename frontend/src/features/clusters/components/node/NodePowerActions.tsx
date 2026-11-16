@@ -45,6 +45,7 @@ import {
 } from "../../api/cluster-queries";
 import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { NodeShutdownConfirm } from "./NodeShutdownConfirm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 
@@ -79,7 +80,10 @@ export function NodePowerActions({
 }) {
   const reboot = useRebootNode(clusterId, nodeName);
   const evacuate = useEvacuateNode(clusterId, nodeName);
-  const maintenance = useSetNodeMaintenance(clusterId, nodeName);
+  const maintenance = useSetNodeMaintenance(clusterId, nodeName, true);
+  // These show a failure in the page's banner (the hooks opt out of the app's
+  // toast), and one that lands after the node's page was left is toasted.
+  const settle = useSaveOutcome(`${clusterId}/${nodeName}`);
   // Generated on demand, and Proxmox shells out to a long list of commands to
   // build it, so the pending state is held for however long that takes.
   const report = useDownloadNodeReport(clusterId, nodeName);
@@ -112,7 +116,8 @@ export function NodePowerActions({
     setActionError(null);
     setMigrations(null);
     const params = mode === "single" ? { target_node: targetNode } : {};
-    evacuate.mutate(params, {
+    settle(evacuate.mutateAsync(params), {
+      action: `Evacuating ${nodeName}`,
       onSuccess: (data) => {
         setMigrations(data.migrations);
         // Focus the first successful migration task.
@@ -207,7 +212,10 @@ export function NodePowerActions({
               <AlertDialogAction
                 onClick={() => {
                   setActionError(null);
-                  maintenance.mutate(!inMaintenance, { onError: handleError });
+                  settle(maintenance.mutateAsync(!inMaintenance), {
+                    action: `${inMaintenance ? "Taking" : "Putting"} ${nodeName} ${inMaintenance ? "out of" : "into"} maintenance`,
+                    onError: handleError,
+                  });
                 }}
                 disabled={maintenance.isPending}
               >
@@ -448,7 +456,10 @@ export function NodePowerActions({
             <AlertDialogAction
               onClick={() => {
                 setActionError(null);
-                reboot.mutate(undefined, { onError: handleError });
+                settle(reboot.mutateAsync(), {
+                  action: `Rebooting ${nodeName}`,
+                  onError: handleError,
+                });
               }}
               disabled={reboot.isPending}
             >

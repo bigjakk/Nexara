@@ -11,6 +11,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useShutdownNode } from "../../api/cluster-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 /**
  * A node's shutdown behind its confirm, shared by the page's power actions and
@@ -37,7 +38,10 @@ export function NodeShutdownConfirm({
   onConfirm?: () => void;
   onError?: (err: unknown) => void;
 }) {
-  const shutdown = useShutdownNode(clusterId, nodeName);
+  // With an onError the caller shows a failure, and one that lands after it
+  // has gone is toasted; without one the app's error toast reports it.
+  const shutdown = useShutdownNode(clusterId, nodeName, onError !== undefined);
+  const settle = useSaveOutcome(`${clusterId}/${nodeName}`);
   return (
     <AlertDialog
       {...(open !== undefined ? { open } : {})}
@@ -60,7 +64,14 @@ export function NodeShutdownConfirm({
           <AlertDialogAction
             onClick={() => {
               onConfirm?.();
-              shutdown.mutate(undefined, onError === undefined ? undefined : { onError });
+              if (onError === undefined) {
+                shutdown.mutate();
+              } else {
+                settle(shutdown.mutateAsync(), {
+                  action: `Shutting down ${nodeName}`,
+                  onError,
+                });
+              }
             }}
             disabled={shutdown.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"

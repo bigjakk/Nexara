@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 
 export interface ClusterOptions {
   console?: string;
@@ -72,6 +73,7 @@ export function useClusterOptions(clusterId: string) {
 export function useUpdateClusterOptions(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: Partial<ClusterOptions>) =>
       apiClient.put<{ status: string }>(
         apiPath`/api/v1/clusters/${clusterId}/options`,
