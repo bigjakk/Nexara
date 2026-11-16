@@ -12,6 +12,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // These tests drive the REAL declarations — the ones setupRoutes mounts —
@@ -572,6 +573,33 @@ func TestCVERouteIsGatedByItsDeclaration(t *testing.T) {
 			t.Error("the handler ran for a request carrying no session")
 		}
 	})
+}
+
+// Only "no completed scan" reads as no_scans with a perfect score; a failed read is an error,
+// not a cluster that was never scanned.
+func TestSecurityPostureTellsNoScanFromAFailedRead(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		lookup map[string]any
+		status int
+		body   string
+	}{
+		{"no completed scan", nil, fiber.StatusOK, `"status":"no_scans"`},
+		{"the read failed", map[string]any{"GetClusterSecuritySummary": errors.New("connection reset")},
+			fiber.StatusInternalServerError, "Failed to get security posture"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := declaredEndpoint(t, fiber.MethodGet, cvePostureScope)
+			e.Handler = handlers.NewCVEHandler(nil, db.New(&backupRunDBTX{lookups: tt.lookup}), "", nil, nil, nil).GetSecurityPosture
+			app := newRegistryApp(t, stubAuth(map[string]bool{"view:cve_scan": true}), e)
+			status, body := sendBody(t, app, authedRequest(http.MethodGet, cveRoute(cvePostureScope)))
+			if status != tt.status || !strings.Contains(string(body), tt.body) {
+				t.Errorf("answered %d %s, want %d carrying %s", status, body, tt.status, tt.body)
+			}
+		})
+	}
 }
 
 // TestEveryCVEEndpointIsDocumented holds the declarations to the standard

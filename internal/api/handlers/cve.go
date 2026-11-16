@@ -476,12 +476,15 @@ func (h *CVEHandler) GetSecurityPosture(c fiber.Ctx, p *apischema.Params) error 
 	}
 
 	summary, err := h.queries.GetClusterSecuritySummary(c.Context(), clusterID)
-	if err != nil {
-		// No scans yet
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No completed scan yet.
 		return c.JSON(securityPostureResponse{
 			Status:       "no_scans",
 			PostureScore: 100,
 		})
+	}
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get security posture")
 	}
 
 	// Phase 2 stores unknown_count and kev_count directly. Older scans
