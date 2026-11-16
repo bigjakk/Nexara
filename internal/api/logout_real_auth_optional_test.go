@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
@@ -232,6 +233,12 @@ func TestLogoutThroughTheRealAuthOptional(t *testing.T) {
 				t:    t,
 				rows: rows,
 				tags: map[string]string{"RevokeSession": "UPDATE 1", "InsertAuditLog": "INSERT 0 1"},
+				// A key no row matches, as GetAPIKeyByHash answers one (a lookup that fails
+				// otherwise is a 503, not an unauthenticated caller).
+				errs: map[string]error{},
+			}
+			if tt.keyOf == uuid.Nil {
+				fake.errs["GetAPIKeyByHash"] = pgx.ErrNoRows
 			}
 			queries := db.New(fake)
 
