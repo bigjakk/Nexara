@@ -493,9 +493,9 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 	}
 
 	// The process-wide publisher — the API server attached the syslog
-	// forwarder to it, so the sync-failure entries the syncer writes through
-	// audit.Write reach a configured SIEM. The tasks it ingests from Proxmox
-	// (task_ingest.go) write their own row and are not forwarded.
+	// forwarder to it, so the syncer's audit entries — sync failures through
+	// audit.Write, the tasks it observes on Proxmox through audit.WriteSourced —
+	// reach a configured SIEM.
 	if application.EventPub != nil {
 		syncer.SetEventPublisher(application.EventPub)
 	}

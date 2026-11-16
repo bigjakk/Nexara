@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auditkey"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -367,7 +368,7 @@ func (s *Syncer) ingestTask(ctx context.Context, cluster db.Cluster, nodeName st
 	}
 	details, _ := json.Marshal(detailMap)
 
-	if err := s.queries.InsertAuditLogWithSource(ctx, db.InsertAuditLogWithSourceParams{
+	if err := audit.WriteSourced(ctx, s.queries, s.eventPub, db.InsertAuditLogWithSourceParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: mapping.ResourceType,

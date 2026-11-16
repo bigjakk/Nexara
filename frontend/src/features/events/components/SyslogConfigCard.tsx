@@ -278,7 +278,7 @@ export function SyslogConfigCard() {
             <SettingRow
               label="Enable syslog forwarding"
               htmlFor="syslog-enabled"
-              description="Every audit entry, background work included, is sent to the server below as it is recorded, in RFC 5424 format. Tasks started outside Nexara and found on Proxmox are not sent. Severity is derived from the action type."
+              description="Every audit entry, background work and tasks found on Proxmox included, is sent to the server below as it is recorded, in RFC 5424 format. Severity is derived from the action type."
               className="first:pt-3.5"
             >
               <Switch

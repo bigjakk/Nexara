@@ -1,7 +1,8 @@
 // Package audit is the one path an audit entry takes: the audit_log row, the
 // audit_entry event that shows it live, and the copy the syslog forwarder sends.
 // Request handlers reach it through handlers.AuditLogAs; background code (the
-// collector, the scheduler, the engines) calls Write. Both go through write, so
+// collector, the scheduler, the engines) calls Write, and the collector files
+// the tasks it observes on Proxmox with WriteSourced. Both go through write, so
 // an action recorded by either looks the same in audit_log, on the WS stream and
 // in syslog. TestGuard_AuditRowsGoThroughWrite keeps a bare InsertAuditLog out
 // of production code.
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -70,18 +72,63 @@ func WriteForKey(ctx context.Context, q Inserter, pub Publisher, p db.InsertAudi
 	return write(ctx, q, pub, p, apiKeyID)
 }
 
-func write(ctx context.Context, q Inserter, pub Publisher, p db.InsertAuditLogParams, apiKeyID uuid.UUID) error {
-	if p.Details == nil {
-		p.Details = json.RawMessage(`{}`)
-	}
+// SourcedInserter is the query WriteSourced records the row with.
+type SourcedInserter interface {
+	InsertAuditLogWithSource(ctx context.Context, arg db.InsertAuditLogWithSourceParams) error
+}
 
-	// One decode serves three purposes: redacting secrets, injecting
-	// api_key_id, and lifting the guest identity out for the syslog
-	// forwarder. Re-marshalled only when something was actually changed, so
-	// an untouched details blob reaches the row byte-for-byte as the caller
-	// wrote it.
+// WriteSourced records an entry filed from what another system reports, such
+// as a task observed on Proxmox: redacted as Write redacts, inserted with its
+// source and CreatedAt, and forwarded stamped with CreatedAt (the time the row
+// carries), not the time of the pass. It publishes nothing; the caller
+// announces the entry when it is ready to. Its error is the insert's.
+func WriteSourced(ctx context.Context, q SourcedInserter, pub Publisher, p db.InsertAuditLogWithSourceParams) error {
 	var m map[string]any
-	if err := json.Unmarshal(p.Details, &m); err != nil {
+	p.Details, m = prepare(p.Details, uuid.Nil)
+	err := q.InsertAuditLogWithSource(ctx, p)
+	forward(pub, message(p.ClusterID, p.UserID, p.ResourceType, p.ResourceID, p.Action, p.Details, p.CreatedAt), m)
+	return err
+}
+
+func write(ctx context.Context, q Inserter, pub Publisher, p db.InsertAuditLogParams, apiKeyID uuid.UUID) error {
+	var m map[string]any
+	p.Details, m = prepare(p.Details, apiKeyID)
+
+	err := q.InsertAuditLog(ctx, p)
+
+	// The syslog copy is handed over before the publish, so it never waits
+	// behind Redis.
+	msg := message(p.ClusterID, p.UserID, p.ResourceType, p.ResourceID, p.Action, p.Details, time.Now())
+	forward(pub, msg, m)
+
+	if pub != nil {
+		pctx, cancel := context.WithTimeout(ctx, publishTimeout)
+		if _, perr := redisutil.BoundedByContext(pctx, func(c context.Context) (struct{}, error) {
+			pub.ClusterEvent(c, msg.ClusterID, events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
+			return struct{}{}, nil
+		}); perr != nil {
+			if n := publishTimeouts.Add(1); n == 1 || n%100 == 0 {
+				slog.Warn("audit: the audit_entry event was dropped, Redis did not answer in time",
+					"dropped_total", n, "bound", publishTimeout)
+			}
+		}
+		cancel()
+	}
+	return err
+}
+
+// prepare returns the details the row and the syslog copy get, and their
+// decoded form. One decode serves three purposes: redacting secrets, injecting
+// api_key_id (when apiKeyID is set), and lifting the guest identity out for the
+// syslog forwarder. Re-marshalled only when something was actually changed, so
+// an untouched details blob reaches the row byte-for-byte as the caller wrote
+// it. nil details are recorded as {}.
+func prepare(details json.RawMessage, apiKeyID uuid.UUID) (out json.RawMessage, decoded map[string]any) {
+	if details == nil {
+		details = json.RawMessage(`{}`)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(details, &m); err != nil {
 		m = nil
 	}
 	rewrite := redactSecrets(m)
@@ -97,49 +144,34 @@ func write(ctx context.Context, q Inserter, pub Publisher, p db.InsertAuditLogPa
 		if err != nil {
 			enriched = json.RawMessage(`{}`) // never the bytes a redaction was to change
 		}
-		p.Details = enriched
+		details = enriched
 	}
+	return details, m
+}
 
+// message is the syslog copy of one row. A row with no user is sent as the
+// nil UUID, a row with no cluster with an empty cluster id.
+func message(cluster, user pgtype.UUID, resourceType, resourceID, action string, details json.RawMessage, at time.Time) proxsyslog.Message {
 	var cidStr string
-	if p.ClusterID.Valid {
-		cidStr = uuid.UUID(p.ClusterID.Bytes).String()
+	if cluster.Valid {
+		cidStr = uuid.UUID(cluster.Bytes).String()
 	}
-
-	err := q.InsertAuditLog(ctx, p)
-
-	// The syslog copy is handed over before the publish, so it never waits
-	// behind Redis. vmid and resource_name are promoted to first-class fields
-	// so a SIEM decoder can key a rule on the guest without re-parsing the
-	// details JSON. A row with no user is sent as the nil UUID.
-	forward(pub, proxsyslog.Message{
-		Timestamp:    time.Now().UTC(),
-		UserID:       uuid.UUID(p.UserID.Bytes).String(),
+	return proxsyslog.Message{
+		Timestamp:    at.UTC(),
+		UserID:       uuid.UUID(user.Bytes).String(),
 		ClusterID:    cidStr,
-		ResourceType: p.ResourceType,
-		ResourceID:   p.ResourceID,
-		Action:       p.Action,
-		Details:      string(p.Details),
-	}, m)
-
-	if pub != nil {
-		pctx, cancel := context.WithTimeout(ctx, publishTimeout)
-		if _, perr := redisutil.BoundedByContext(pctx, func(c context.Context) (struct{}, error) {
-			pub.ClusterEvent(c, cidStr, events.KindAuditEntry, p.ResourceType, p.ResourceID, p.Action)
-			return struct{}{}, nil
-		}); perr != nil {
-			if n := publishTimeouts.Add(1); n == 1 || n%100 == 0 {
-				slog.Warn("audit: the audit_entry event was dropped, Redis did not answer in time",
-					"dropped_total", n, "bound", publishTimeout)
-			}
-		}
-		cancel()
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Action:       action,
+		Details:      string(details),
 	}
-	return err
 }
 
 // forward hands msg, with the guest identity lifted out of the decoded
-// details, to pub's syslog forwarder when it has one. Forward runs off the
-// caller's goroutine and drops rather than waits when its queue is full.
+// details, to pub's syslog forwarder when it has one. vmid and resource_name
+// are promoted to first-class fields so a SIEM decoder can key a rule on the
+// guest without re-parsing the details JSON. Forward runs off the caller's
+// goroutine and drops rather than waits when its queue is full.
 func forward(pub Publisher, msg proxsyslog.Message, m map[string]any) {
 	src, ok := pub.(forwarderSource)
 	if !ok {

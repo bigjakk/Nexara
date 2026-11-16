@@ -14,8 +14,6 @@ import (
 // each with why. An entry that no longer matches a call fails the guard.
 var bareInsertExempt = map[string]string{
 	"internal/api/handlers/oidc.go": "lane L15 is removing this call; drop the entry when it lands",
-	"internal/collector/task_ingest.go": "tasks observed on Proxmox: a sourced insert dated at the task's start, " +
-		"announced after linking; not yet forwarded",
 }
 
 // TestGuard_AuditRowsGoThroughWrite fails on a production call to InsertAuditLog
@@ -61,7 +59,7 @@ func TestGuard_AuditRowsGoThroughWrite(t *testing.T) {
 					return true
 				}
 				t.Errorf("%s: a bare %s skips the audit_entry event and the syslog forward; "+
-					"call audit.Write(ctx, queries, eventPub, db.InsertAuditLogParams{...}) instead",
+					"call audit.Write (or audit.WriteSourced for a sourced row) instead",
 					fset.Position(call.Pos()), sel.Sel.Name)
 				return true
 			})
