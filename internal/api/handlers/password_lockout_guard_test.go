@@ -163,9 +163,9 @@ func TestGuard_OnlyThePasswordRoutesTouchTheLockout(t *testing.T) {
 }
 
 // TestGuard_ADirectorySignInFailureLogsNothingTyped: tryLDAPLogin's log calls pass none
-// of its typed parameters (the identifier is sometimes a password), and none after the
-// bind passes the bind's raw err, whose text can carry the search filter. The lines
-// after a successful bind log the directory's own address, a variable of their own.
+// of its typed parameters (the identifier is sometimes a password), and none from the
+// search on passes a raw err: the search's and the bind's error text can carry the
+// search filter, and with it what was typed.
 func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 	t.Parallel()
 	_, sources := authParsedSources(t)
@@ -189,7 +189,7 @@ func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 			typed[n.Name] = true
 		}
 	}
-	var bind token.Pos
+	var bind, search token.Pos // the first directory call that sees the typed name, and the bind
 	logs := 0
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -200,8 +200,13 @@ func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 		if !ok {
 			return true
 		}
-		if sel.Sel.Name == "Authenticate" {
+		switch sel.Sel.Name {
+		case "Authenticate":
 			bind = call.Pos()
+		case "Search":
+			if !search.IsValid() {
+				search = call.Pos()
+			}
 		}
 		if x, ok := sel.X.(*ast.Ident); !ok || (x.Name != "slog" && x.Name != "logger") {
 			return true
@@ -213,13 +218,13 @@ func TestGuard_ADirectorySignInFailureLogsNothingTyped(t *testing.T) {
 			case !ok:
 			case typed[id.Name]:
 				t.Errorf("tryLDAPLogin logs %s, what the caller typed", id.Name)
-			case id.Name == "err" && bind.IsValid() && call.Pos() > bind:
-				t.Error("tryLDAPLogin logs the bind's raw err, whose text can carry the typed identifier")
+			case id.Name == "err" && search.IsValid() && call.Pos() > search:
+				t.Error("tryLDAPLogin logs a raw err from the search on, whose text can carry the typed identifier")
 			}
 		}
 		return true
 	})
-	if !bind.IsValid() || logs == 0 {
-		t.Fatalf("found the bind: %t, log calls: %d: this guard has gone stale", bind.IsValid(), logs)
+	if !bind.IsValid() || !search.IsValid() || logs == 0 {
+		t.Fatalf("found the search: %t, the bind: %t, log calls: %d: this guard has gone stale", search.IsValid(), bind.IsValid(), logs)
 	}
 }
