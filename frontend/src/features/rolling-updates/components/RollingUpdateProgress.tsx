@@ -40,6 +40,8 @@ import type {
   GuestSnapshot,
   HAConflict,
 } from "@/types/api";
+import { formatTime } from "@/lib/format";
+import { DateTime } from "@/components/DateTime";
 
 interface RollingUpdateProgressProps {
   clusterId: string;
@@ -125,7 +127,7 @@ function nodeTimes(node: RollingUpdateNode): Array<[string, string]> {
     ["Restore done", node.restore_completed_at],
   ];
   return times.flatMap(([label, at]) =>
-    at ? [[label, new Date(at).toLocaleTimeString()] as [string, string]] : [],
+    at ? [[label, formatTime(at)] as [string, string]] : [],
   );
 }
 
@@ -479,7 +481,7 @@ export function RollingUpdateProgress({
             <Fact label="At a time">{String(job.parallelism)}</Fact>
             <Fact label="Reboot">{job.reboot_after_update ? "yes" : "no"}</Fact>
             <Fact label="Created">
-              {new Date(job.created_at).toLocaleString()}
+              <DateTime value={job.created_at} />
             </Fact>
           </>
         }

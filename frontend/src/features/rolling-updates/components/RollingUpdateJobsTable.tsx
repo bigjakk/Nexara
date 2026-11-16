@@ -15,6 +15,7 @@ import {
   RollingUpdateJobConfirm,
   type PendingJobAction,
 } from "./RollingUpdateJobConfirm";
+import { DateTime } from "@/components/DateTime";
 
 const STATUS_LABEL: Record<RollingUpdateJob["status"], string> = {
   pending: "Pending",
@@ -119,12 +120,10 @@ export function RollingUpdateJobsTable({
                 {job.reboot_after_update ? "Yes" : "No"}
               </TableCell>
               <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
-                {new Date(job.created_at).toLocaleString()}
+                <DateTime value={job.created_at} />
               </TableCell>
               <TableCell className="whitespace-nowrap py-2 text-muted-foreground">
-                {job.completed_at
-                  ? new Date(job.completed_at).toLocaleString()
-                  : "—"}
+                <DateTime value={job.completed_at} />
               </TableCell>
               <TableCell className="py-1.5 text-right">
                 <div className="flex items-center justify-end gap-1">
