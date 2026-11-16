@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -38,12 +39,16 @@ func runningTask(_ fiber.Ctx, _ uuid.UUID, node, upid string) (*proxmox.TaskStat
 // members set, those alone. onRecord answers TaskUPIDOnRecord, and
 // insertConflicts makes the insert find its UPID taken. With task set it is
 // that task's row too: GetTaskByUpid answers it, and UpdateTaskHistory counts
-// its writes and updates one row. audits counts the audit rows written, and
-// details keeps the last one's.
+// its writes and updates one row — or, with missed, none, after which
+// GetTaskByUpid answers reread, or fails with rereadErr. audits counts the
+// audit rows written, and details keeps the last one's.
 type taskInsertDBTX struct {
 	args            []any
 	task            *db.TaskHistory
 	updates         int
+	missed          bool
+	reread          *db.TaskHistory
+	rereadErr       error
 	members         []string
 	onRecord        bool
 	insertConflicts bool
@@ -54,6 +59,9 @@ type taskInsertDBTX struct {
 func (d *taskInsertDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	if d.task != nil && strings.Contains(sql, "-- name: UpdateTaskHistory :execrows") {
 		d.updates++
+		if d.missed {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	if strings.Contains(sql, "-- name: InsertAuditLog :exec") {
@@ -70,6 +78,13 @@ func (*taskInsertDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) 
 
 func (d *taskInsertDBTX) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if d.task != nil && strings.Contains(sql, "-- name: GetTaskByUpid :one") {
+		switch {
+		case d.updates == 0:
+		case d.rereadErr != nil:
+			return failRow{err: d.rereadErr}
+		case d.reread != nil:
+			return replayRow{row: *d.reread}
+		}
 		return replayRow{row: *d.task}
 	}
 	if strings.Contains(sql, "-- name: GetNodeByClusterAndName :one") {
@@ -262,17 +277,28 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 		status, source, body string
 		owner                uuid.UUID
 		want                 int
+		// missed: the write matched no row, and the re-read finds reread or rereadErr.
+		missed    bool
+		reread    *db.TaskHistory
+		rereadErr error
 	}{
-		{"running", "filed", `{"progress":40}`, caller, http.StatusOK},
-		{"completed", "filed", `{"progress":40}`, caller, http.StatusConflict},
-		{"running", "filed", `{"status":"failed"}`, caller, http.StatusBadRequest},
-		{"running", "filed", `{"finished_at":"2026-01-01T00:00:00Z"}`, caller, http.StatusBadRequest},
+		{"running", "filed", `{"progress":40}`, caller, http.StatusOK, false, nil, nil},
+		{"completed", "filed", `{"progress":40}`, caller, http.StatusConflict, false, nil, nil},
+		{"running", "filed", `{"status":"failed"}`, caller, http.StatusBadRequest, false, nil, nil},
+		{"running", "filed", `{"finished_at":"2026-01-01T00:00:00Z"}`, caller, http.StatusBadRequest, false, nil, nil},
 		// Only the caller's own filing: not a task Nexara or Proxmox recorded, nor another user's.
-		{"running", "nexara", `{"progress":40}`, caller, http.StatusForbidden},
-		{"running", "proxmox", `{"progress":40}`, caller, http.StatusForbidden},
-		{"running", "filed", `{"exit_status":"forged"}`, uuid.New(), http.StatusForbidden},
+		{"running", "nexara", `{"progress":40}`, caller, http.StatusForbidden, false, nil, nil},
+		{"running", "proxmox", `{"progress":40}`, caller, http.StatusForbidden, false, nil, nil},
+		{"running", "filed", `{"exit_status":"forged"}`, uuid.New(), http.StatusForbidden, false, nil, nil},
+		// The write found no running filing of the caller's: taken over, finished, or could not tell.
+		{"running", "filed", `{"progress":40}`, caller, http.StatusForbidden, true,
+			&db.TaskHistory{Status: "running", Source: "nexara", UserID: uuid.New()}, nil},
+		{"running", "filed", `{"progress":40}`, caller, http.StatusConflict, true,
+			&db.TaskHistory{Status: "completed", Source: "filed", UserID: caller}, nil},
+		{"running", "filed", `{"progress":40}`, caller, http.StatusServiceUnavailable, true, nil, errors.New("db down")},
 	} {
-		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source, UserID: tt.owner}}
+		dbtx := &taskInsertDBTX{task: &db.TaskHistory{ClusterID: clusterID, Status: tt.status, Source: tt.source, UserID: tt.owner},
+			missed: tt.missed, reread: tt.reread, rereadErr: tt.rereadErr}
 		handler := NewTaskHandler(db.New(dbtx), nil, 0)
 		handler.taskStatus = runningTask
 		app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
@@ -290,7 +316,7 @@ func TestTaskUpdateWritesOnlyARunningNexaraTask(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = resp.Body.Close()
-		if resp.StatusCode != tt.want || (dbtx.updates == 1) != (tt.want == http.StatusOK) {
+		if resp.StatusCode != tt.want || (dbtx.updates == 1) != (tt.want == http.StatusOK || tt.missed) {
 			t.Errorf("a %s %s task, %s: status %d after %d writes, want %d", tt.status, tt.source, tt.body,
 				resp.StatusCode, dbtx.updates, tt.want)
 		}

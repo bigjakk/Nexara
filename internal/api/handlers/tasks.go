@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/url"
 	"slices"
@@ -527,7 +528,13 @@ func (h *TaskHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	if updated == 0 {
 		// The statement holds the ownership too: taken over in between, the row
 		// is no longer the caller's filing and gets the same refusal.
-		if now, err := h.queries.GetTaskByUpid(c.Context(), upid); err != nil || now.Source != "filed" || now.UserID != uid {
+		now, err := h.queries.GetTaskByUpid(c.Context(), upid)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			// Could not look is not "not yours".
+			slog.Error("task update: re-read the task", "error", err)
+			return fiber.NewError(fiber.StatusServiceUnavailable, "Could not read the task back. Try again.")
+		}
+		if err != nil || now.Source != "filed" || now.UserID != uid {
 			return errNotYourFiledTask
 		}
 		return fiber.NewError(fiber.StatusConflict, "The task finished before it could be updated")
