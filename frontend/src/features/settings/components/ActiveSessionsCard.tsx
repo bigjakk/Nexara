@@ -22,10 +22,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { formatRelativeTime } from "@/lib/format";
 import { sessionLabel } from "@/lib/session-label";
 import type { UserSession } from "@/types/api";
 import { useSessions, useRevokeSession } from "../api/session-queries";
+import { DateTime } from "@/components/DateTime";
 
 function DeviceIcon({ type }: { type: string }) {
   const className = "h-4 w-4 shrink-0 text-muted-foreground";
@@ -114,7 +114,7 @@ export function ActiveSessionsCard() {
                   </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
-                  {formatRelativeTime(session.last_used_at)}
+                  <DateTime value={session.last_used_at} />
                 </TableCell>
                 <TableCell className="text-right">
                   <Button

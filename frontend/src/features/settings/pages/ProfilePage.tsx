@@ -28,6 +28,7 @@ import {
 } from "../api/profile-queries";
 import { useAuthStore } from "@/stores/auth-store";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { formatDateValue } from "@/lib/format";
 
 /** What a save that never got an answer reads as (describeError gives ""). */
 const CONNECTION_FAILED =
@@ -147,10 +148,10 @@ export function ProfilePage() {
 
   const sourceLabel =
     AUTH_SOURCE_LABELS[profile.auth_source] ?? profile.auth_source;
-  const memberSince = new Date(profile.created_at).toLocaleDateString(
-    undefined,
-    { year: "numeric", month: "long", day: "numeric" },
-  );
+  const memberSince = formatDateValue(profile.created_at, {
+    kind: "date",
+    locale: { year: "numeric", month: "long", day: "numeric" },
+  });
 
   return (
     <div className="space-y-5">

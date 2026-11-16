@@ -47,6 +47,7 @@ import {
   useCreateAPIKey,
   useRevokeAPIKey,
 } from "../api/api-key-queries";
+import { DateTime } from "@/components/DateTime";
 
 type ExpiryOption = "never" | "30" | "90" | "365";
 
@@ -78,9 +79,8 @@ function getKeyStatus(key: {
   return { label: "Active", variant: "healthy" };
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "Never";
-  return new Date(dateStr).toLocaleDateString();
+function formatDate(dateStr: string | null) {
+  return <DateTime value={dateStr} kind="date" fallback="Never" />;
 }
 
 export function APIKeysPage() {
