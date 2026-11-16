@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 
 /**
@@ -156,6 +157,7 @@ export function useHAResources(clusterId: string) {
 export function useCreateHAResource(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: CreateHAResourceRequest) =>
       apiClient.post(apiPath`/api/v1/clusters/${clusterId}/ha/resources`, data),
     onSuccess: () => {
@@ -167,6 +169,7 @@ export function useCreateHAResource(clusterId: string) {
 export function useUpdateHAResource(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ sid, ...data }: UpdateHAResourceRequest & { sid: string }) =>
       apiClient.put(
         apiPath`/api/v1/clusters/${clusterId}/ha/resources/${sid}`,
@@ -181,6 +184,7 @@ export function useUpdateHAResource(clusterId: string) {
 export function useDeleteHAResource(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (sid: string) =>
       apiClient.delete(
         apiPath`/api/v1/clusters/${clusterId}/ha/resources/${sid}`,
@@ -203,6 +207,7 @@ export function useHAGroups(clusterId: string) {
 export function useCreateHAGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: CreateHAGroupRequest) =>
       apiClient.post(apiPath`/api/v1/clusters/${clusterId}/ha/groups`, data),
     onSuccess: () => {
@@ -214,6 +219,7 @@ export function useCreateHAGroup(clusterId: string) {
 export function useUpdateHAGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       group,
       ...data
@@ -231,6 +237,7 @@ export function useUpdateHAGroup(clusterId: string) {
 export function useDeleteHAGroup(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (group: string) =>
       apiClient.delete(
         apiPath`/api/v1/clusters/${clusterId}/ha/groups/${group}`,
@@ -277,6 +284,7 @@ export function useHARules(clusterId: string) {
 export function useCreateHARule(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (data: CreateHARuleRequest) =>
       apiClient.post(apiPath`/api/v1/clusters/${clusterId}/ha/rules`, data),
     onSuccess: () => {
@@ -288,6 +296,7 @@ export function useCreateHARule(clusterId: string) {
 export function useDeleteHARule(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (rule: string) =>
       apiClient.delete(apiPath`/api/v1/clusters/${clusterId}/ha/rules/${rule}`),
     onSuccess: () => {
@@ -299,6 +308,7 @@ export function useDeleteHARule(clusterId: string) {
 export function useUpdateHARule(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ rule, ...data }: UpdateHARuleRequest & { rule: string }) =>
       apiClient.put(
         apiPath`/api/v1/clusters/${clusterId}/ha/rules/${rule}`,
@@ -338,6 +348,7 @@ export function useHAStatus(clusterId: string) {
 export function useArmHA(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: () =>
       apiClient.post(apiPath`/api/v1/clusters/${clusterId}/ha/arm`, {}),
     onSuccess: () => {
@@ -350,6 +361,7 @@ export function useArmHA(clusterId: string) {
 export function useDisarmHA(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (resourceMode: "freeze" | "ignore") =>
       apiClient.post(apiPath`/api/v1/clusters/${clusterId}/ha/disarm`, {
         resource_mode: resourceMode,

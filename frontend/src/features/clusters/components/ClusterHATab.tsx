@@ -34,6 +34,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import {
   useHAResources,
@@ -215,6 +216,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const [grpNodes, setGrpNodes] = useState("");
   const [grpComment, setGrpComment] = useState("");
   const [grpEditing, setGrpEditing] = useState<HAGroup | null>(null);
+  // The tab shows a failure in its banner (the hooks opt out of the app's
+  // toast), and one that lands after it was left is toasted instead. A group
+  // save is told apart by its dialog, as its success closes and clears it.
+  const settle = useSaveOutcome();
+  const settleGroupCreate = useSaveOutcome(grpCreateOpen);
+  const settleGroupEdit = useSaveOutcome(grpEditing?.group ?? null);
 
   // --- Rule dialog state ---
   const [ruleCreateOpen, setRuleCreateOpen] = useState(false);
@@ -265,13 +272,14 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
 
   const handleCreateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
-    createGroup.mutate(
-      {
+    settleGroupCreate(
+      createGroup.mutateAsync({
         group: grpName,
         nodes: grpNodes,
         ...(grpComment ? { comment: grpComment } : {}),
-      },
+      }),
       {
+        action: `Creating HA group ${grpName}`,
         onSuccess: () => {
           setGrpCreateOpen(false);
           setGrpName("");
@@ -286,13 +294,14 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
   const handleUpdateGroup = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (!grpEditing) return;
-    updateGroup.mutate(
-      {
+    settleGroupEdit(
+      updateGroup.mutateAsync({
         group: grpEditing.group,
         nodes: grpNodes,
         comment: grpComment,
-      },
+      }),
       {
+        action: `Saving HA group ${grpEditing.group}`,
         onSuccess: () => {
           setGrpEditing(null);
         },
@@ -314,26 +323,45 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
       setPendingState({ sid, state });
       return;
     }
-    updateResource.mutate({ sid, state }, { onError: handleMutationError });
+    settle(updateResource.mutateAsync({ sid, state }), {
+      action: `Setting ${sid} to ${state}`,
+      onError: handleMutationError,
+    });
   };
 
   const handleQuickRuleDisable = (rule: HARuleEntry, disabled: boolean) => {
-    updateRule.mutate(
-      { rule: rule.rule, type: rule.type, disable: disabled ? 1 : 0 },
-      { onError: handleMutationError },
+    settle(
+      updateRule.mutateAsync({
+        rule: rule.rule,
+        type: rule.type,
+        disable: disabled ? 1 : 0,
+      }),
+      {
+        action: `${disabled ? "Disabling" : "Enabling"} HA rule ${rule.rule}`,
+        onError: handleMutationError,
+      },
     );
   };
 
   const handleDeleteResource = (sid: string) => {
-    deleteResource.mutate(sid, { onError: handleMutationError });
+    settle(deleteResource.mutateAsync(sid), {
+      action: `Removing ${sid} from HA`,
+      onError: handleMutationError,
+    });
   };
 
   const handleDeleteGroup = (group: string) => {
-    deleteGroup.mutate(group, { onError: handleMutationError });
+    settle(deleteGroup.mutateAsync(group), {
+      action: `Deleting HA group ${group}`,
+      onError: handleMutationError,
+    });
   };
 
   const handleDeleteRule = (rule: string) => {
-    deleteRule.mutate(rule, { onError: handleMutationError });
+    settle(deleteRule.mutateAsync(rule), {
+      action: `Deleting HA rule ${rule}`,
+      onError: handleMutationError,
+    });
   };
 
   const {
@@ -1220,10 +1248,10 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           setPendingState(null);
         }}
         onConfirm={(p) => {
-          updateResource.mutate(
-            { sid: p.sid, state: p.state },
-            { onError: handleMutationError },
-          );
+          settle(updateResource.mutateAsync({ sid: p.sid, state: p.state }), {
+            action: `Setting ${p.sid} to ${p.state}`,
+            onError: handleMutationError,
+          });
         }}
         title={(p) => {
           const name = vmNameBySID.get(p.sid);

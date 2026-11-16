@@ -24,6 +24,7 @@ import {
   type HARuleEntry,
 } from "@/features/ha/api/ha-queries";
 import { ApiClientError, sessionScope } from "@/lib/api-client";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VMResponse } from "@/types/api";
 import type { NodeResponse } from "@/types/api";
 
@@ -122,6 +123,7 @@ export function HARuleForm(props: Props) {
   const createMut = useCreateHARule(props.clusterId);
   const updateMut = useUpdateHARule(props.clusterId);
   const createResourceMut = useCreateHAResource(props.clusterId);
+  const settle = useSaveOutcome();
   const haResourcesQuery = useHAResources(props.clusterId);
   const groupsQuery = useHAGroups(props.clusterId);
   const hasFailback = haResourceHasFailback(props.pveVersion);
@@ -247,7 +249,7 @@ export function HARuleForm(props: Props) {
     return out;
   }, [selectedSIDs, managedSIDs, haResourcesQuery.isSuccess]);
 
-  const handleSubmit = async (e: React.SyntheticEvent) => {
+  const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setSubmitError(null);
     const resources = Array.from(selectedSIDs).join(",");
@@ -259,7 +261,7 @@ export function HARuleForm(props: Props) {
     // whoever signs in next's token.
     const ended = sessionScope();
 
-    try {
+    const write = async () => {
       // Bring any not-yet-managed selections under HA first, so Proxmox accepts
       // the rule. Sequential — concurrent writes contend on the HA config lock.
       if (autoManage && unmanagedSelected.length > 0) {
@@ -318,10 +320,18 @@ export function HARuleForm(props: Props) {
           disable: disable ? 1 : 0,
         });
       }
-      props.onSuccess();
-    } catch (err) {
-      setSubmitError(describeHARuleError(err));
-    }
+    };
+    // The form shows a failure itself (the hooks opt out of the app's toast),
+    // and one that lands after it was closed is toasted instead.
+    settle(write(), {
+      action: `Saving HA rule ${props.mode === "create" ? name : props.rule.rule}`,
+      onSuccess: () => {
+        props.onSuccess();
+      },
+      onError: (err) => {
+        setSubmitError(describeHARuleError(err));
+      },
+    });
   };
 
   const isPending =
@@ -335,7 +345,7 @@ export function HARuleForm(props: Props) {
     (type === "node-affinity" && nodePriorities.size === 0);
 
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label>Rule Name</Label>
         <Input

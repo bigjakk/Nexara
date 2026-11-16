@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { AlertTriangle, ShieldCheck, ShieldOff } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 import { useArmHA, useDisarmHA } from "../api/ha-queries";
 
@@ -54,6 +55,11 @@ export function HAMaintenanceCard({
   const [disarmOpen, setDisarmOpen] = useState(false);
   const [resourceMode, setResourceMode] = useState<ResourceMode>("freeze");
   const [error, setError] = useState<string | null>(null);
+  // The card shows a failure itself (the hooks opt out of the app's toast),
+  // and one that lands after it was left is toasted instead. Disarm is told
+  // apart by its dialog, which its success closes.
+  const settleArm = useSaveOutcome();
+  const settleDisarm = useSaveOutcome(disarmOpen);
 
   if (!isPVEAtLeast(pveVersion, PVE_FEATURES.HA_ARM_DISARM)) return null;
   if (!canManage("ha")) return null;
@@ -64,7 +70,8 @@ export function HAMaintenanceCard({
 
   const handleDisarm = () => {
     setError(null);
-    disarmHA.mutate(resourceMode, {
+    settleDisarm(disarmHA.mutateAsync(resourceMode), {
+      action: "Disarming HA",
       onSuccess: () => {
         setDisarmOpen(false);
       },
@@ -160,7 +167,10 @@ export function HAMaintenanceCard({
                 <AlertDialogAction
                   onClick={() => {
                     setError(null);
-                    armHA.mutate(undefined, { onError: handleError });
+                    settleArm(armHA.mutateAsync(undefined), {
+                      action: "Re-arming HA",
+                      onError: handleError,
+                    });
                   }}
                   disabled={armHA.isPending}
                 >

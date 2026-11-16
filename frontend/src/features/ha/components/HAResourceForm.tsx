@@ -23,6 +23,7 @@ import {
   type UpdateHAResourceRequest,
 } from "@/features/ha/api/ha-queries";
 import { ApiClientError } from "@/lib/api-client";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VMResponse } from "@/types/api";
 
 function describeHAResourceError(err: unknown): string {
@@ -150,6 +151,9 @@ export function HAResourceForm(props: Props) {
   const groupsQuery = useHAGroups(props.clusterId);
   const createMut = useCreateHAResource(props.clusterId);
   const updateMut = useUpdateHAResource(props.clusterId);
+  // The form shows a failure itself (mutError; the hooks opt out of the app's
+  // toast), and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome();
 
   const resource = props.mode === "edit" ? props.resource : null;
   // What the form showed on opening, which an edit's changes are measured
@@ -202,8 +206,8 @@ export function HAResourceForm(props: Props) {
     const groupValue = group === "__none__" ? "" : group;
 
     if (props.mode === "create") {
-      createMut.mutate(
-        {
+      settle(
+        createMut.mutateAsync({
           sid,
           state,
           ...(groupValue ? { group: groupValue } : {}),
@@ -215,8 +219,14 @@ export function HAResourceForm(props: Props) {
             : {}),
           ...(hasFailback ? { failback: failback ? 1 : 0 } : {}),
           ...(comment ? { comment } : {}),
+        }),
+        {
+          action: `Adding ${sid} to HA`,
+          onSuccess: () => {
+            props.onSuccess();
+          },
+          onError: () => undefined,
         },
-        { onSuccess: props.onSuccess },
       );
     } else {
       const changes = changedFields(
@@ -237,10 +247,13 @@ export function HAResourceForm(props: Props) {
         props.onSuccess();
         return;
       }
-      updateMut.mutate(
-        { sid: props.resource.sid, ...changes },
-        { onSuccess: props.onSuccess },
-      );
+      settle(updateMut.mutateAsync({ sid: props.resource.sid, ...changes }), {
+        action: `Saving HA resource ${props.resource.sid}`,
+        onSuccess: () => {
+          props.onSuccess();
+        },
+        onError: () => undefined,
+      });
     }
   };
 
