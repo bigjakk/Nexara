@@ -1,23 +1,48 @@
+import i18n from "@/lib/i18n";
 import type { ConsoleStatus, ConsoleType } from "../types/console";
 
 /** A console's state in words: beside its dot, and read out with it. */
 export const CONSOLE_STATUS_TEXT: Record<ConsoleStatus, string> = {
-  idle: "Not connected",
-  connecting: "Connecting",
-  connected: "Connected",
-  reconnecting: "Reconnecting",
-  disconnected: "Disconnected",
-  error: "Connection failed",
-  "guest-stopped": "Powered off",
+  get idle() {
+    return i18n.t("console:consoleStatus.statusIdle");
+  },
+  get connecting() {
+    return i18n.t("console:consoleStatus.statusConnecting");
+  },
+  get connected() {
+    return i18n.t("console:consoleStatus.statusConnected");
+  },
+  get reconnecting() {
+    return i18n.t("console:consoleStatus.statusReconnecting");
+  },
+  get disconnected() {
+    return i18n.t("console:consoleStatus.statusDisconnected");
+  },
+  get error() {
+    return i18n.t("console:consoleStatus.statusError");
+  },
+  get "guest-stopped"() {
+    return i18n.t("console:consoleStatus.statusGuestStopped");
+  },
 };
 
 /** What a console type is, for a list that names it apart from its label. */
 export const CONSOLE_TYPE_TEXT: Record<ConsoleType, string> = {
-  node_shell: "Node shell",
-  vm_serial: "Serial terminal",
-  ct_attach: "Container terminal",
-  vm_vnc: "VNC display",
-  ct_vnc: "Container console",
+  get node_shell() {
+    return i18n.t("console:consoleStatus.typeNodeShell");
+  },
+  get vm_serial() {
+    return i18n.t("console:consoleStatus.typeVmSerial");
+  },
+  get ct_attach() {
+    return i18n.t("console:consoleStatus.typeCtAttach");
+  },
+  get vm_vnc() {
+    return i18n.t("console:consoleStatus.typeVmVnc");
+  },
+  get ct_vnc() {
+    return i18n.t("console:consoleStatus.typeCtVnc");
+  },
 };
 
 /**

@@ -17,6 +17,7 @@ import { ConsoleTabBar } from "./ConsoleTabBar";
 import { QuickConnect } from "./QuickConnect";
 import { VNCViewer } from "./VNCViewer";
 import { Terminal } from "./Terminal";
+import { useTranslation } from "react-i18next";
 
 /** A window control in the bar: touch-sized on a phone. */
 function WindowButton({
@@ -73,6 +74,7 @@ function TitleBar({
   onPopOut: (() => void) | undefined;
   hasTabs: boolean;
 }) {
+  const { t } = useTranslation("console");
   const windowMode = useConsoleStore((s) => s.windowMode);
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const isMobile = useIsMobile();
@@ -100,7 +102,7 @@ function TitleBar({
       </div>
       {!hasTabs && (
         <span className="flex items-center pl-3 text-[13px] font-medium">
-          Console
+          {t("floatingConsole.console")}
         </span>
       )}
       {/* What is left of the bar: the handle the window is dragged by. */}
@@ -113,7 +115,7 @@ function TitleBar({
             console is always a full-screen takeover. */}
         {onPopOut && (
           <WindowButton
-            title="Open in new tab"
+            title={t("floatingConsole.openInNewTab")}
             onClick={(e) => {
               // Once per click sequence: the next tab's button takes its place.
               if (e.detail > 1) return;
@@ -124,7 +126,7 @@ function TitleBar({
           </WindowButton>
         )}
         <WindowButton
-          title="Minimize"
+          title={t("floatingConsole.minimize")}
           onClick={() => {
             setWindowMode("minimized");
           }}
@@ -133,7 +135,11 @@ function TitleBar({
         </WindowButton>
         {!isMobile && (
           <WindowButton
-            title={windowMode === "maximized" ? "Restore" : "Maximize"}
+            title={
+              windowMode === "maximized"
+                ? t("floatingConsole.restore")
+                : t("floatingConsole.maximize")
+            }
             onClick={() => {
               setWindowMode(
                 windowMode === "maximized" ? "floating" : "maximized",
@@ -148,7 +154,7 @@ function TitleBar({
           </WindowButton>
         )}
         <WindowButton
-          title="Close"
+          title={t("floatingConsole.close")}
           danger
           onClick={() => {
             setWindowMode("hidden");
@@ -178,6 +184,7 @@ const resizeCorners: { dir: ResizeDir; className: string }[] = [
  * Renders as a PiP preview when minimized.
  */
 export function FloatingConsole() {
+  const { t } = useTranslation("console");
   const isMobile = useIsMobile();
   const windowMode = useConsoleStore((s) => s.windowMode);
   const windowPosition = useConsoleStore((s) => s.windowPosition);
@@ -334,7 +341,7 @@ export function FloatingConsole() {
   if (windowMode === "hidden") return null;
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
-  const activeLabel = activeTab?.label ?? "Console";
+  const activeLabel = activeTab?.label ?? t("floatingConsole.console");
   const popOut = activeTab
     ? () => {
         popOutConsoleTab(activeTab.id);
@@ -418,7 +425,7 @@ export function FloatingConsole() {
       >
         {tabs.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-neutral-400">
-            No console sessions
+            {t("floatingConsole.noConsoleSessions")}
           </div>
         ) : (
           tabs.map((tab) =>
@@ -459,7 +466,7 @@ export function FloatingConsole() {
                     if (e.detail > 1) return;
                     popOut();
                   }}
-                  title="Open in new tab"
+                  title={t("floatingConsole.openInNewTab")}
                 >
                   <ExternalLink className="h-4 w-4" />
                 </button>
@@ -467,7 +474,7 @@ export function FloatingConsole() {
               <button
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-white/25 hover:text-white"
                 onClick={showConsole}
-                title="Restore"
+                title={t("floatingConsole.restore")}
               >
                 <Maximize className="h-4 w-4" />
               </button>
@@ -476,7 +483,7 @@ export function FloatingConsole() {
                 onClick={() => {
                   useConsoleStore.getState().setWindowMode("hidden");
                 }}
-                title="Close"
+                title={t("floatingConsole.close")}
               >
                 <X className="h-4 w-4" />
               </button>

@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { useConsoleStore } from "@/stores/console-store";
 import { CONSOLE_STATUS_TEXT } from "../lib/console-status";
 import { ConsoleStateDot } from "./ConsoleState";
+import { useTranslation } from "react-i18next";
 
 /**
  * The floating window's sessions as tabs: a state dot, the label, and on hover
@@ -10,6 +11,7 @@ import { ConsoleStateDot } from "./ConsoleState";
  * underline the app's page tabs do.
  */
 export function ConsoleTabBar() {
+  const { t } = useTranslation("console");
   const tabs = useConsoleStore((s) => s.tabs);
   const activeTabId = useConsoleStore((s) => s.activeTabId);
   const setActiveTab = useConsoleStore((s) => s.setActiveTab);
@@ -21,7 +23,11 @@ export function ConsoleTabBar() {
   }
 
   return (
-    <div role="tablist" aria-label="Console sessions" className="flex h-full">
+    <div
+      role="tablist"
+      aria-label={t("consoleTabBar.consoleSessions")}
+      className="flex h-full"
+    >
       {tabs.map((tab) => {
         const active = tab.id === activeTabId;
         return (
@@ -59,8 +65,10 @@ export function ConsoleTabBar() {
                   e.stopPropagation();
                   reconnectTab(tab.id);
                 }}
-                aria-label={`Reconnect ${tab.label}`}
-                title="Reconnect"
+                aria-label={t("consoleTabBar.reconnectLabel", {
+                  label: tab.label,
+                })}
+                title={t("consoleTabBar.reconnect")}
               >
                 <RotateCcw className="h-3 w-3" />
               </button>
@@ -70,8 +78,8 @@ export function ConsoleTabBar() {
                   e.stopPropagation();
                   removeTab(tab.id);
                 }}
-                aria-label={`Close ${tab.label}`}
-                title="Close"
+                aria-label={t("consoleTabBar.closeLabel", { label: tab.label })}
+                title={t("consoleTabBar.close")}
               >
                 <X className="h-3 w-3" />
               </button>

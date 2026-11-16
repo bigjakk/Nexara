@@ -18,6 +18,7 @@ import type { VMResponse, NodeResponse } from "@/types/api";
 import type { ConsoleClickKeys } from "../lib/console-session";
 import { guestState } from "@/lib/guest-state";
 import { openConsole } from "../lib/open-console";
+import { useTranslation } from "react-i18next";
 
 interface VMEntry {
   clusterId: string;
@@ -41,6 +42,7 @@ export function QuickConnect({
    */
   appearance?: "primary" | "compact";
 }) {
+  const { t } = useTranslation("console");
   const [open, setOpen] = useState(false);
   const { canConsole } = usePermissions();
 
@@ -138,8 +140,8 @@ export function QuickConnect({
           variant="ghost"
           size="icon"
           className="h-7 w-7 text-muted-foreground"
-          aria-label="New console"
-          title="New console"
+          aria-label={t("quickConnect.newConsole")}
+          title={t("quickConnect.newConsole")}
           onClick={() => {
             setOpen(true);
           }}
@@ -155,22 +157,22 @@ export function QuickConnect({
           }}
         >
           <Plus className="h-4 w-4" />
-          New console
+          {t("quickConnect.newConsole")}
         </Button>
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg gap-3">
           <DialogHeader>
-            <DialogTitle>Open a console</DialogTitle>
+            <DialogTitle>{t("quickConnect.openAConsole")}</DialogTitle>
             <DialogDescription>
-              Choose a running guest to open its console.
+              {t("quickConnect.chooseARunningGuestTo")}
             </DialogDescription>
           </DialogHeader>
 
           {vmList.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              No VMs or containers found
+              {t("quickConnect.noVMsOrContainersFound")}
             </p>
           ) : (
             <ul className="-mx-6 max-h-80 divide-y overflow-y-auto border-y">
@@ -206,13 +208,13 @@ export function QuickConnect({
                         size="sm"
                         className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
                         disabled={!isRunning}
-                        title="VNC Console"
+                        title={t("quickConnect.vncConsole")}
                         onClick={(e) => {
                           openGuest(vm, "vnc", e);
                         }}
                       >
                         <Monitor className="h-3.5 w-3.5" />
-                        VNC
+                        {t("quickConnect.vnc")}
                       </Button>
                     ) : (
                       <Button
@@ -220,13 +222,13 @@ export function QuickConnect({
                         size="sm"
                         className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
                         disabled={!isRunning}
-                        title="Container Attach"
+                        title={t("quickConnect.containerAttach")}
                         onClick={(e) => {
                           openGuest(vm, "attach", e);
                         }}
                       >
                         <TerminalSquare className="h-3.5 w-3.5" />
-                        Attach
+                        {t("quickConnect.attach")}
                       </Button>
                     )}
                   </li>

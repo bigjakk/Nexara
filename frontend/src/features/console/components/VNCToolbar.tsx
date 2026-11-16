@@ -40,6 +40,7 @@ import { useMountISO } from "../api/console-queries";
 import { ISOPickerDialog } from "./ISOPickerDialog";
 import { typeTextIntoVnc } from "../lib/vnc-keys";
 import { guestState } from "@/lib/guest-state";
+import { useTranslation } from "react-i18next";
 
 // X11 keysyms
 const XK = {
@@ -102,6 +103,7 @@ export function VNCToolbar({
   windowControls = true,
   slot,
 }: VNCToolbarProps) {
+  const { t } = useTranslation("console");
   const windowMode = useConsoleSession((s) => s.windowMode);
   const setWindowMode = useConsoleSession((s) => s.setWindowMode);
   const isMaximized = windowMode === "maximized";
@@ -206,9 +208,11 @@ export function VNCToolbar({
           .join(" ");
         const more = distinct.length > MAX_LISTED_UNMAPPED ? " …" : "";
         toast.warning(
-          `${String(unmapped.length)} character(s) could not be typed`,
+          t("vncToolbar.lengthCharacterSCouldNot", {
+            length: String(unmapped.length),
+          }),
           {
-            description: `Not available on a US keyboard layout: ${listed}${more}`,
+            description: t("vncToolbar.notAvailableOnAUS", { listed, more }),
           },
         );
       }
@@ -256,12 +260,12 @@ export function VNCToolbar({
             <Button
               variant="ghost"
               size="sm"
-              aria-label="Power"
-              title="Power"
+              aria-label={t("vncToolbar.power")}
+              title={t("vncToolbar.power")}
               className={TOOL}
             >
               <Power className="h-3.5 w-3.5" />
-              <span className={word}>Power</span>
+              <span className={word}>{t("vncToolbar.power")}</span>
               <ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
@@ -293,12 +297,12 @@ export function VNCToolbar({
               <Button
                 variant="ghost"
                 size="sm"
-                aria-label="Media"
-                title="Media"
+                aria-label={t("vncToolbar.media")}
+                title={t("vncToolbar.media")}
                 className={TOOL}
               >
                 <Disc className="h-3.5 w-3.5" />
-                <span className={word}>Media</span>
+                <span className={word}>{t("vncToolbar.media")}</span>
                 <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
@@ -308,7 +312,7 @@ export function VNCToolbar({
                   setIsoPickerOpen(true);
                 }}
               >
-                Mount ISO...
+                {t("vncToolbar.mountISO")}
               </DropdownMenuItem>
               {hasISO && (
                 <>
@@ -324,14 +328,14 @@ export function VNCToolbar({
                       }
                     }}
                   >
-                    Eject CD-ROM
+                    {t("vncToolbar.ejectCDROM")}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     disabled
                     className="text-xs text-muted-foreground"
                   >
-                    Current: {currentISO}
+                    {t("vncToolbar.currentCurrentISO", { currentISO })}
                   </DropdownMenuItem>
                 </>
               )}
@@ -355,12 +359,12 @@ export function VNCToolbar({
           <Button
             variant="ghost"
             size="sm"
-            aria-label="Keys"
-            title="Send keys"
+            aria-label={t("vncToolbar.keys")}
+            title={t("vncToolbar.sendKeys")}
             className={TOOL}
           >
             <Keyboard className="h-3.5 w-3.5" />
-            <span className={word}>Keys</span>
+            <span className={word}>{t("vncToolbar.keys")}</span>
             <ChevronDown className="h-3 w-3 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
@@ -370,7 +374,7 @@ export function VNCToolbar({
               rfb?.sendCtrlAltDel();
             }}
           >
-            Ctrl+Alt+Del
+            {t("vncToolbar.ctrlAltDel")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
@@ -381,7 +385,7 @@ export function VNCToolbar({
                   sendKeyCombo(rfb, [XK.Control_L, XK.Alt_L, XK.F1 + n - 1]);
               }}
             >
-              Ctrl+Alt+F{String(n)}
+              {t("vncToolbar.ctrlAltFN", { n: String(n) })}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
@@ -390,14 +394,14 @@ export function VNCToolbar({
               if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Tab]);
             }}
           >
-            Alt+Tab
+            {t("vncToolbar.altTab")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.F4]);
             }}
           >
-            Alt+F4
+            {t("vncToolbar.altF4")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -405,14 +409,14 @@ export function VNCToolbar({
               rfb?.sendKey(XK.Print, null, false);
             }}
           >
-            Print Screen
+            {t("vncToolbar.printScreen")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               if (rfb) sendKeyCombo(rfb, [XK.Alt_L, XK.Sys_Req]);
             }}
           >
-            SysRq
+            {t("vncToolbar.sysRq")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -421,28 +425,28 @@ export function VNCToolbar({
       <Button
         variant="ghost"
         size="sm"
-        aria-label="Paste text into console"
-        title="Paste text into console"
+        aria-label={t("vncToolbar.pasteTextIntoConsole")}
+        title={t("vncToolbar.pasteTextIntoConsole")}
         className={TOOL}
         onClick={() => {
           setPasteOpen(true);
         }}
       >
         <ClipboardPaste className="h-3.5 w-3.5" />
-        <span className={word}>Paste</span>
+        <span className={word}>{t("vncToolbar.paste")}</span>
       </Button>
 
       {/* Screenshot */}
       <Button
         variant="ghost"
         size="sm"
-        aria-label="Screenshot"
-        title="Screenshot"
+        aria-label={t("vncToolbar.screenshot")}
+        title={t("vncToolbar.screenshot")}
         className={TOOL}
         onClick={handleScreenshot}
       >
         <Camera className="h-3.5 w-3.5" />
-        <span className={word}>Screenshot</span>
+        <span className={word}>{t("vncToolbar.screenshot")}</span>
       </Button>
 
       {/* Scale toggle */}
@@ -450,11 +454,13 @@ export function VNCToolbar({
         variant="ghost"
         size="sm"
         onClick={handleScaleToggle}
-        aria-label={scaleMode === "scale" ? "Scale" : "Resize"}
+        aria-label={
+          scaleMode === "scale" ? t("vncToolbar.scale") : t("vncToolbar.resize")
+        }
         title={
           scaleMode === "scale"
-            ? "Switch to resize mode"
-            : "Switch to scale mode"
+            ? t("vncToolbar.switchToResizeMode")
+            : t("vncToolbar.switchToScaleMode")
         }
         className={TOOL}
       >
@@ -464,7 +470,9 @@ export function VNCToolbar({
           <Move className="h-3.5 w-3.5" />
         )}
         <span className={word}>
-          {scaleMode === "scale" ? "Scale" : "Resize"}
+          {scaleMode === "scale"
+            ? t("vncToolbar.scale")
+            : t("vncToolbar.resize")}
         </span>
       </Button>
 
@@ -472,15 +480,15 @@ export function VNCToolbar({
       <Button
         variant="ghost"
         size="sm"
-        aria-label="Connection info"
-        title="Connection info"
+        aria-label={t("vncToolbar.connectionInfo")}
+        title={t("vncToolbar.connectionInfo")}
         className={TOOL}
         onClick={() => {
           setInfoOpen(true);
         }}
       >
         <Info className="h-3.5 w-3.5" />
-        <span className={word}>Info</span>
+        <span className={word}>{t("vncToolbar.info")}</span>
       </Button>
 
       {/* Maximize / Restore (console window, not browser) */}
@@ -489,7 +497,9 @@ export function VNCToolbar({
           variant="ghost"
           size="sm"
           onClick={handleToggleMaximize}
-          title={isMaximized ? "Restore" : "Maximize"}
+          title={
+            isMaximized ? t("vncToolbar.restore") : t("vncToolbar.maximize")
+          }
           className={cn(TOOL, "ml-auto")}
         >
           {isMaximized ? (
@@ -519,16 +529,15 @@ export function VNCToolbar({
           }}
         >
           <DialogHeader>
-            <DialogTitle>Paste into Console</DialogTitle>
+            <DialogTitle>{t("vncToolbar.pasteIntoConsole")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Paste your text below, then click Send to type it into the
-              console.
+              {t("vncToolbar.pasteYourTextBelowThen")}
             </p>
             <textarea
               ref={pasteRef}
-              placeholder="Ctrl+V to paste here..."
+              placeholder={t("vncToolbar.ctrlVToPasteHere")}
               className="h-24 w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-hidden focus:ring-1 focus:ring-ring"
               autoFocus
             />
@@ -540,10 +549,10 @@ export function VNCToolbar({
                   setPasteOpen(false);
                 }}
               >
-                Cancel
+                {t("vncToolbar.cancel")}
               </Button>
               <Button size="sm" onClick={handleSendPaste}>
-                Send
+                {t("vncToolbar.send")}
               </Button>
             </div>
           </div>
@@ -559,11 +568,18 @@ export function VNCToolbar({
       >
         <DialogContent className="max-w-xs">
           <DialogHeader>
-            <DialogTitle>Confirm {confirmAction?.label}</DialogTitle>
+            <DialogTitle>
+              {t("vncToolbar.confirmLabel", { label: confirmAction?.label })}
+            </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Are you sure you want to {confirmAction?.label.toLowerCase()} this{" "}
-            {vmKind === "ct" ? "container" : "VM"}?
+            {vmKind === "ct"
+              ? t("vncToolbar.confirmActionContainer", {
+                  label: confirmAction?.label.toLowerCase(),
+                })
+              : t("vncToolbar.confirmActionVm", {
+                  label: confirmAction?.label.toLowerCase(),
+                })}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button
@@ -573,7 +589,7 @@ export function VNCToolbar({
                 setConfirmAction(null);
               }}
             >
-              Cancel
+              {t("vncToolbar.cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -593,30 +609,40 @@ export function VNCToolbar({
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
-            <DialogTitle>Connection Info</DialogTitle>
+            <DialogTitle>{t("vncToolbar.connectionInfo2")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-1.5 text-sm">
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Node</span>
+              <span className="text-muted-foreground">
+                {t("vncToolbar.node")}
+              </span>
               <span className="font-medium">{tab.node}</span>
             </div>
             {tab.vmid !== undefined && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">VMID</span>
+                <span className="text-muted-foreground">
+                  {t("vncToolbar.vmid")}
+                </span>
                 <span className="font-medium">{String(tab.vmid)}</span>
               </div>
             )}
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Type</span>
+              <span className="text-muted-foreground">
+                {t("vncToolbar.type")}
+              </span>
               <span className="font-medium">{tab.type}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Status</span>
+              <span className="text-muted-foreground">
+                {t("vncToolbar.status")}
+              </span>
               <span className="font-medium capitalize">{tab.status}</span>
             </div>
             {vmData && (
               <div className="flex justify-between">
-                <span className="text-muted-foreground">VM Status</span>
+                <span className="text-muted-foreground">
+                  {t("vncToolbar.vmStatus")}
+                </span>
                 <span className="font-medium capitalize">{vmData.status}</span>
               </div>
             )}

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 import { ExternalLink, RotateCcw, TerminalSquare, X } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -18,11 +19,18 @@ import type { ConsoleTab } from "../types/console";
 /** "2 sessions open, 1 connected": the page's state in a sentence. */
 function sessionSummary(tabs: readonly ConsoleTab[]): string {
   const connected = tabs.filter((t) => t.status === "connected").length;
-  const open = `${String(tabs.length)} ${tabs.length === 1 ? "session" : "sessions"} open`;
-  return `${open}, ${connected === 0 ? "none" : String(connected)} connected`;
+  return connected === 0
+    ? i18n.t("console:consolePage.sessionsOpenNoneConnected", {
+        count: tabs.length,
+      })
+    : i18n.t("console:consolePage.sessionsOpenConnected", {
+        count: tabs.length,
+        connected: String(connected),
+      });
 }
 
 export function ConsolePage() {
+  const { t } = useTranslation("console");
   const { t: td } = useTranslation("dashboard");
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const showConsole = useConsoleStore((s) => s.showConsole);
@@ -48,7 +56,7 @@ export function ConsolePage() {
         <EmptyState
           icon={TerminalSquare}
           title={td("noClustersRegistered")}
-          description="Add a Proxmox cluster to open VNC or serial consoles into your VMs and containers."
+          description={t("consolePage.addAProxmoxClusterTo")}
           action={<AddClusterDialog />}
         />
       </div>
@@ -56,17 +64,17 @@ export function ConsolePage() {
   }
 
   const where = opensInTab
-    ? "Consoles open in a new browser tab."
-    : "Consoles run in the floating window, which stays open as you move between pages.";
+    ? t("consolePage.consolesOpenInANewTab")
+    : t("consolePage.consolesRunInTheFloatingWindow");
 
   if (tabs.length === 0) {
     return (
       <div className="flex min-h-full flex-col gap-5">
-        <PageHeader title="Console" summary={where} />
+        <PageHeader title={t("consolePage.console")} summary={where} />
         <EmptyState
           icon={TerminalSquare}
-          title="No console is open"
-          description="Open one here, or from a guest's or a node's own page."
+          title={t("consolePage.noConsoleIsOpen")}
+          description={t("consolePage.openOneHereOrFrom")}
           action={<QuickConnect />}
         />
       </div>
@@ -76,11 +84,18 @@ export function ConsolePage() {
   return (
     <div className="flex min-h-full flex-col gap-5">
       <PageHeader
-        title="Console"
-        summary={`${sessionSummary(tabs)}. ${where}`}
+        title={t("consolePage.console")}
+        summary={t("consolePage.summary", {
+          sessions: sessionSummary(tabs),
+          where,
+        })}
         actions={<QuickConnect />}
       />
-      <Panel flush title="Open sessions" aside={String(tabs.length)}>
+      <Panel
+        flush
+        title={t("consolePage.openSessions")}
+        aside={String(tabs.length)}
+      >
         <ul className="divide-y border-t">
           {tabs.map((tab) => {
             const clusterName = clusters?.find(
@@ -95,10 +110,13 @@ export function ConsolePage() {
                 <div className="min-w-0 flex-[1_1_14rem]">
                   <p className="truncate text-sm font-medium">{tab.label}</p>
                   <p className="truncate text-[12.5px] text-muted-foreground">
-                    {CONSOLE_TYPE_TEXT[tab.type]} on{" "}
-                    {clusterName !== undefined
-                      ? `${clusterName} / ${tab.node}`
-                      : tab.node}
+                    {t("consolePage.typeOn", {
+                      type: CONSOLE_TYPE_TEXT[tab.type],
+                      where:
+                        clusterName !== undefined
+                          ? `${clusterName} / ${tab.node}`
+                          : tab.node,
+                    })}
                   </p>
                 </div>
                 <span className="w-28 shrink-0 text-[12.5px] text-muted-foreground">
@@ -109,20 +127,24 @@ export function ConsolePage() {
                     variant="outline"
                     size="sm"
                     className="h-7"
-                    aria-label={`Show ${tab.label}`}
+                    aria-label={t("consolePage.showLabel", {
+                      label: tab.label,
+                    })}
                     onClick={() => {
                       setActiveTab(tab.id);
                       showConsole();
                     }}
                   >
-                    Show
+                    {t("consolePage.show")}
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-muted-foreground"
-                    aria-label={`Open ${tab.label} in a new tab`}
-                    title="Open in a new tab"
+                    aria-label={t("consolePage.openLabelInANew", {
+                      label: tab.label,
+                    })}
+                    title={t("consolePage.openInANewTab")}
                     onClick={(e) => {
                       // Once per click sequence: the row goes with its tab.
                       if (e.detail > 1) return;
@@ -135,8 +157,10 @@ export function ConsolePage() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-muted-foreground"
-                    aria-label={`Reconnect ${tab.label}`}
-                    title="Reconnect"
+                    aria-label={t("consolePage.reconnectLabel", {
+                      label: tab.label,
+                    })}
+                    title={t("consolePage.reconnect")}
                     onClick={() => {
                       reconnectTab(tab.id);
                     }}
@@ -147,8 +171,10 @@ export function ConsolePage() {
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-muted-foreground"
-                    aria-label={`Close ${tab.label}`}
-                    title="Close"
+                    aria-label={t("consolePage.closeLabel", {
+                      label: tab.label,
+                    })}
+                    title={t("consolePage.close")}
                     onClick={() => {
                       removeTab(tab.id);
                     }}

@@ -43,6 +43,8 @@ import {
   parseConsoleSessionTarget,
 } from "../lib/console-session";
 import type { ConsoleTab, ConsoleTarget } from "../types/console";
+import { useTranslation } from "react-i18next";
+import i18n from "@/lib/i18n";
 
 /**
  * One console in a browser tab of its own, outside the app shell. Its query
@@ -51,6 +53,7 @@ import type { ConsoleTab, ConsoleTarget } from "../types/console";
  * this page's own, never in the floating console's.
  */
 export function ConsoleSessionPage() {
+  const { t } = useTranslation("console");
   const [params] = useSearchParams();
   const target = useMemo(() => parseConsoleSessionTarget(params), [params]);
   const { canConsole } = usePermissions();
@@ -63,22 +66,22 @@ export function ConsoleSessionPage() {
   if (signingOut) {
     body = (
       <ConsoleSessionNotice
-        title="Signed out in another tab"
-        description="The console has closed."
+        title={t("consoleSessionPage.signedOutInAnotherTab")}
+        description={t("consoleSessionPage.theConsoleHasClosed")}
       />
     );
   } else if (target === null) {
     body = (
       <ConsoleSessionNotice
-        title="This console link is incomplete"
-        description="It does not name a cluster, a node and a console. Open the console again from Nexara."
+        title={t("consoleSessionPage.thisConsoleLinkIsIncomplete")}
+        description={t("consoleSessionPage.itDoesNotNameA")}
       />
     );
   } else if (!canConsole(consolePermission(target.type))) {
     body = (
       <ConsoleSessionNotice
-        title="You cannot open this console"
-        description="Your role does not allow consoles on this kind of resource."
+        title={t("consoleSessionPage.youCannotOpenThisConsole")}
+        description={t("consoleSessionPage.yourRoleDoesNotAllow")}
       />
     );
   } else {
@@ -147,16 +150,16 @@ function judge(
   if (nodes.data === undefined) {
     if (!nodes.isError) return { ok: false, view: <ConsoleSessionLoading /> };
     return notice(
-      "This console link could not be checked",
+      i18n.t("console:consoleSessionPage.linkCouldNotBeChecked"),
       nodes.error instanceof ApiClientError && nodes.error.status === 403
-        ? "Your role cannot list this cluster's nodes, which a console tab checks its link against."
-        : "Nexara could not check it. Reload the tab to try again, or open the console again from Nexara.",
+        ? i18n.t("console:consoleSessionPage.roleCannotListNodes")
+        : i18n.t("console:consoleSessionPage.couldNotCheckIt"),
     );
   }
   if (!nodes.data.some((n) => n.name === target.node)) {
     return notice(
-      "This console link names no node of its cluster",
-      "Open the console again from Nexara.",
+      i18n.t("console:consoleSessionPage.linkNamesNoNode"),
+      i18n.t("console:consoleSessionPage.openTheConsoleAgain"),
     );
   }
   if (target.resourceId === undefined) {
@@ -169,8 +172,8 @@ function judge(
     if (!guest.isError) return { ok: false, view: <ConsoleSessionLoading /> };
     if (!rowUnavailable(guest.error)) {
       return notice(
-        "This console link could not be checked",
-        "Nexara could not check it. Reload the tab to try again, or open the console again from Nexara.",
+        i18n.t("console:consoleSessionPage.linkCouldNotBeChecked"),
+        i18n.t("console:consoleSessionPage.couldNotCheckIt"),
       );
     }
     // The guest row is gone (re-created since the link was made) or hidden
@@ -193,8 +196,8 @@ function judge(
     guest.data.cluster_id !== target.clusterID
   ) {
     return notice(
-      "This console link does not match its guest",
-      "It names one guest and opens another. Open the console again from Nexara.",
+      i18n.t("console:consoleSessionPage.linkDoesNotMatchGuest"),
+      i18n.t("console:consoleSessionPage.namesOneGuestOpensAnother"),
     );
   }
   return {
@@ -269,6 +272,7 @@ function ConsoleSessionGate({
   guestName: string | undefined;
   unconfirmed: boolean;
 }) {
+  const { t } = useTranslation("console");
   const user = useAuthStore((s) => s.user?.id ?? "");
   const identity = consoleIdentity(target);
   const location = useLocation();
@@ -302,15 +306,18 @@ function ConsoleSessionGate({
     const label = consoleLabel(target, guestName);
     const where =
       target.type === "node_shell"
-        ? `node ${target.node}`
-        : `VMID ${String(target.vmid)} on ${target.node}`;
+        ? t("consoleSessionPage.whereNode", { node: target.node })
+        : t("consoleSessionPage.whereVmid", {
+            vmid: String(target.vmid),
+            node: target.node,
+          });
     return (
       <ConsoleSessionNotice
-        title="Open this console?"
+        title={t("consoleSessionPage.openThisConsole")}
         description={
           unconfirmed
-            ? `${label} (${where}) could not be matched to its guest record, so it waits for you to connect.`
-            : `${label} (${where}) was not opened for you from Nexara, so it waits for you to connect.`
+            ? t("consoleSessionPage.labelWhereCouldNotBe", { label, where })
+            : t("consoleSessionPage.labelWhereWasNotOpened", { label, where })
         }
       >
         <Button
@@ -319,7 +326,7 @@ function ConsoleSessionGate({
             setConnect(true);
           }}
         >
-          Connect
+          {t("consoleSessionPage.connect")}
         </Button>
       </ConsoleSessionNotice>
     );
@@ -343,6 +350,7 @@ function ConsoleSessionTab() {
 }
 
 function ConsoleSessionScreen({ tab }: { tab: ConsoleTab }) {
+  const { t } = useTranslation("console");
   const reconnectTab = useConsoleSession((s) => s.reconnectTab);
   const clusterIds = useMemo(() => [tab.clusterID], [tab.clusterID]);
   useLiveUpdates(clusterIds);
@@ -430,23 +438,31 @@ function ConsoleSessionScreen({ tab }: { tab: ConsoleTab }) {
               variant="ghost"
               size="sm"
               className={tool}
-              title="Reconnect"
-              aria-label={`Reconnect ${label}`}
+              title={t("consoleSessionPage.reconnect")}
+              aria-label={t("consoleSessionPage.reconnectLabel", { label })}
               onClick={() => {
                 reconnectTab(tab.id);
               }}
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span className="hidden @5xl:inline">Reconnect</span>
+              <span className="hidden @5xl:inline">
+                {t("consoleSessionPage.reconnect")}
+              </span>
             </Button>
             {fullscreen.supported && (
               <Button
                 variant="ghost"
                 size="sm"
                 className={tool}
-                title={fullscreen.active ? "Exit fullscreen" : "Fullscreen"}
+                title={
+                  fullscreen.active
+                    ? t("consoleSessionPage.exitFullscreen")
+                    : t("consoleSessionPage.fullscreen")
+                }
                 aria-label={
-                  fullscreen.active ? "Exit fullscreen" : "Fullscreen"
+                  fullscreen.active
+                    ? t("consoleSessionPage.exitFullscreen")
+                    : t("consoleSessionPage.fullscreen")
                 }
                 onClick={fullscreen.toggle}
               >
@@ -456,7 +472,9 @@ function ConsoleSessionScreen({ tab }: { tab: ConsoleTab }) {
                   <Maximize className="h-3.5 w-3.5" />
                 )}
                 <span className="hidden @5xl:inline">
-                  {fullscreen.active ? "Exit fullscreen" : "Fullscreen"}
+                  {fullscreen.active
+                    ? t("consoleSessionPage.exitFullscreen")
+                    : t("consoleSessionPage.fullscreen")}
                 </span>
               </Button>
             )}
@@ -542,13 +560,14 @@ function useDocumentFullscreen() {
 }
 
 function ConsoleSessionLoading() {
+  const { t } = useTranslation("console");
   return (
     <div
       role="status"
       className="flex h-screen items-center justify-center gap-2 bg-background text-sm text-muted-foreground supports-[height:100dvh]:h-dvh"
     >
       <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />
-      Checking this console
+      {t("consoleSessionPage.checkingThisConsole")}
     </div>
   );
 }
@@ -563,6 +582,7 @@ function ConsoleSessionNotice({
   description: string;
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("console");
   return (
     <div className="flex h-screen items-center justify-center bg-background p-4 supports-[height:100dvh]:h-dvh">
       <div className="panel w-full max-w-md rounded-[10px] px-6 py-7">
@@ -580,7 +600,7 @@ function ConsoleSessionNotice({
           {children}
           {/* A page load, not an in-app navigation: this tab becomes the app. */}
           <Button variant="outline" size="sm" asChild>
-            <a href="/">Open Nexara</a>
+            <a href="/">{t("consoleSessionPage.openNexara")}</a>
           </Button>
         </div>
       </div>

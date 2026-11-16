@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import i18n from "@/lib/i18n";
 import { useAuthStore } from "@/stores/auth-store";
 import { useConsoleStore } from "@/stores/console-store";
 import { usePreferencesStore } from "@/stores/preferences-store";
@@ -52,8 +53,8 @@ export function openConsole(request: ConsoleRequest, keys: ConsoleClickKeys) {
  */
 export function openConsoleInNewTab(target: ConsoleTarget): boolean {
   if (target.node === "") {
-    toast.error("This console cannot open yet", {
-      description: "Its node is still loading. Try again in a moment.",
+    toast.error(i18n.t("console:openConsoleLaunch.thisConsoleCannotOpenYet"), {
+      description: i18n.t("console:openConsoleLaunch.itsNodeIsStillLoading"),
     });
     return false;
   }

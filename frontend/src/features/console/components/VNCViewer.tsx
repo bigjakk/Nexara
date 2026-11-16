@@ -25,6 +25,7 @@ import {
   createConsoleTokenMinter,
   wsAuthProtocols,
 } from "../api/console-queries";
+import { useTranslation } from "react-i18next";
 
 interface VNCViewerProps {
   tab: ConsoleTab;
@@ -390,6 +391,7 @@ function ConsoleStateOverlay({
   accessRemoved: boolean;
   onReconnect: () => void;
 }) {
+  const { t } = useTranslation("console");
   const actionMutation = useVMAction();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
@@ -398,7 +400,6 @@ function ConsoleStateOverlay({
   if (status === "connected") return null;
 
   const isCt = tab.kind === "ct" || tab.type === "ct_vnc";
-  const kindLabel = isCt ? "Container" : "VM";
   const hasResource = tab.resourceId !== undefined && tab.kind !== undefined;
 
   function handleStart() {
@@ -416,7 +417,7 @@ function ConsoleStateOverlay({
           setFocusedTask({
             clusterId: tab.clusterID,
             upid: data.upid,
-            description: `Start ${guestName}`.trim(),
+            description: t("vncViewer.startGuest", { guestName }).trim(),
           });
           setPanelOpen(true);
         },
@@ -436,7 +437,9 @@ function ConsoleStateOverlay({
     return (
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 bg-black/60 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
-        {status === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+        {status === "reconnecting"
+          ? t("vncViewer.reconnecting")
+          : t("vncViewer.connecting")}
       </div>
     );
   }
@@ -445,10 +448,14 @@ function ConsoleStateOverlay({
     return (
       <StageNotice
         status={status}
-        title={`${kindLabel} is powered off`}
+        title={
+          isCt
+            ? t("vncViewer.containerIsPoweredOff")
+            : t("vncViewer.vmIsPoweredOff")
+        }
         description={
           hasResource
-            ? "The console will connect automatically when it powers on."
+            ? t("vncViewer.theConsoleWillConnectAutomatically")
             : undefined
         }
       >
@@ -464,7 +471,11 @@ function ConsoleStateOverlay({
             ) : (
               <Play className="h-3.5 w-3.5" />
             )}
-            {actionMutation.isPending ? "Starting…" : `Start ${kindLabel}`}
+            {actionMutation.isPending
+              ? t("vncViewer.starting")
+              : isCt
+                ? t("vncViewer.startContainer")
+                : t("vncViewer.startVm")}
           </Button>
         )}
         <Button
@@ -474,7 +485,7 @@ function ConsoleStateOverlay({
           onClick={onReconnect}
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          Connect anyway
+          {t("vncViewer.connectAnyway")}
         </Button>
       </StageNotice>
     );
@@ -487,21 +498,21 @@ function ConsoleStateOverlay({
       status={status}
       title={
         isError
-          ? "Console connection failed"
+          ? t("vncViewer.consoleConnectionFailed")
           : sessionEnded
-            ? "Session ended"
+            ? t("vncViewer.sessionEnded")
             : accessRemoved
-              ? "Console access removed"
-              : "Console disconnected"
+              ? t("vncViewer.consoleAccessRemoved")
+              : t("vncViewer.consoleDisconnected")
       }
       description={
         isError
-          ? "The console session could not be established."
+          ? t("vncViewer.theConsoleSessionCouldNot")
           : sessionEnded
-            ? "Sign in again to use the console."
+            ? t("vncViewer.signInAgainToUse")
             : accessRemoved
-              ? "Your permission to this console was removed. Ask an administrator if you still need it."
-              : "Automatic reconnect attempts were exhausted."
+              ? t("vncViewer.yourPermissionToThisConsole")
+              : t("vncViewer.automaticReconnectAttemptsWereExhausted")
       }
     >
       <Button
@@ -511,7 +522,7 @@ function ConsoleStateOverlay({
         onClick={onReconnect}
       >
         <RotateCcw className="h-3.5 w-3.5" />
-        {isError ? "Retry" : "Reconnect"}
+        {isError ? t("vncViewer.retry") : t("vncViewer.reconnect")}
       </Button>
     </StageNotice>
   );
