@@ -592,3 +592,27 @@ func TestTOTP_Disable_ARecoveryCodeTheDatabaseCannotCheckDisablesNothing(t *test
 		t.Errorf("the session's count = %s, want nothing counted", n)
 	}
 }
+
+// TestTOTP_VerifyLogin_ARecoveryCodeSpentByAConcurrentRequestIsAWrongCode: two sign-ins
+// that matched the same code both delete it; only the one whose delete removed the row
+// has used it. The other is refused 401 as a wrong code, not signed in.
+func TestTOTP_VerifyLogin_ARecoveryCodeSpentByAConcurrentRequestIsAWrongCode(t *testing.T) {
+	t.Parallel()
+	user, _ := epochTOTPUser(t, epochLoginEmail, 0)
+	store := newEpochStore(user)
+	plain, hashes, err := auth.NewTOTPService(totpTestKey).GenerateRecoveryCodes(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.recoveryCodes[user.ID] = []db.ListRecoveryCodesRow{{ID: uuid.New(), CodeHash: hashes[0]}}
+	// The other request's delete lands right behind this one's list.
+	store.after["ListRecoveryCodes"] = func(s *epochStore) { delete(s.recoveryCodes, user.ID) }
+	a := newEpochApp(t, store, epochOptions{totp: true})
+	body := `{"totp_pending_token":"` + epochFirstStep(t, a, epochLoginEmail) + `","recovery_code":"` + plain[0] + `"}`
+	if resp := a.post(t, "/auth/totp/verify-login", body); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401: a code another request spent signed this one in", resp.StatusCode)
+	}
+	if n := len(store.liveSessionsOf(user.ID)); n != 0 {
+		t.Errorf("%d sessions created, want none", n)
+	}
+}

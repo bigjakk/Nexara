@@ -74,13 +74,18 @@ func (q *Queries) DeleteAllRecoveryCodes(ctx context.Context, userID uuid.UUID) 
 	return err
 }
 
-const deleteRecoveryCode = `-- name: DeleteRecoveryCode :exec
+const deleteRecoveryCode = `-- name: DeleteRecoveryCode :execrows
 DELETE FROM totp_recovery_codes WHERE id = $1
 `
 
-func (q *Queries) DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteRecoveryCode, id)
-	return err
+// The row count is the spend: two requests that matched the same code both send this,
+// and only the one that deletes the row has used it (consumeRecoveryCode).
+func (q *Queries) DeleteRecoveryCode(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRecoveryCode, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getUserTOTPSecret = `-- name: GetUserTOTPSecret :one

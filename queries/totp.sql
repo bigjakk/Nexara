@@ -13,7 +13,9 @@ INSERT INTO totp_recovery_codes (user_id, code_hash) VALUES ($1, $2);
 -- name: ListRecoveryCodes :many
 SELECT id, code_hash FROM totp_recovery_codes WHERE user_id = $1;
 
--- name: DeleteRecoveryCode :exec
+-- name: DeleteRecoveryCode :execrows
+-- The row count is the spend: two requests that matched the same code both send this,
+-- and only the one that deletes the row has used it (consumeRecoveryCode).
 DELETE FROM totp_recovery_codes WHERE id = $1;
 
 -- name: DeleteAllRecoveryCodes :exec

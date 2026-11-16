@@ -1085,8 +1085,15 @@ func (h *TOTPHandler) consumeRecoveryCode(ctx context.Context, userID uuid.UUID,
 
 	for _, rc := range codes {
 		if h.totpService.ValidateRecoveryCode(rc.CodeHash, inputCode) {
-			if err := h.queries.DeleteRecoveryCode(ctx, rc.ID); err != nil {
+			n, err := h.queries.DeleteRecoveryCode(ctx, rc.ID)
+			if err != nil {
 				return fmt.Errorf("delete recovery code: %w", err)
+			}
+			if n == 0 {
+				// Another request spent it between the list and the delete: for this one
+				// it is a code that no longer exists, a wrong code and counted as one.
+				// Never "could not check", which would make the race a free retry.
+				return errNoMatchingRecoveryCode
 			}
 			return nil
 		}

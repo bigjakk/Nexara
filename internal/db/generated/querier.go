@@ -736,7 +736,9 @@ type Querier interface {
 	// without touching anything still in flight.
 	DeleteOldVirtioWinDownloads(ctx context.Context, finishedAt pgtype.Timestamptz) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
-	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) error
+	// The row count is the spend: two requests that matched the same code both send this,
+	// and only the one that deletes the row has used it (consumeRecoveryCode).
+	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteReportRun(ctx context.Context, id uuid.UUID) error
 	DeleteReportSchedule(ctx context.Context, id uuid.UUID) error
 	DeleteRole(ctx context.Context, id uuid.UUID) error
