@@ -66,7 +66,7 @@ func TestTrackTaskWritesTheRowThenTheAuditEntryThenTheEvent(t *testing.T) {
 	if _, err := app.Test(httptest.NewRequest(http.MethodPost, "/", nil)); err != nil {
 		t.Fatal(err)
 	}
-	var order []string
+	order := make([]string, 0, len(capture.calls))
 	for _, q := range capture.calls {
 		order = append(order, strings.Fields(strings.TrimPrefix(q.sql, "-- name: "))[0])
 	}

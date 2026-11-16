@@ -157,7 +157,7 @@ func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 	go func() { done <- s.SyncAllPBS(context.Background()) }()
 	select {
 	case results := <-done:
-		var synced []uuid.UUID
+		synced := make([]uuid.UUID, 0, len(results))
 		for _, r := range results {
 			synced = append(synced, r.PBSServerID)
 		}
