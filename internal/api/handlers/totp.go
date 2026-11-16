@@ -36,16 +36,14 @@ const (
 	totpLockoutDuration  = 5 * time.Minute
 
 	// The sign-in step's recovery codes count apart from its authenticator codes
-	// (totpRecoveryLockoutPolicy), so that whoever has only the password and spends the
-	// codes' budget does not also lock the owner's way back in. A recovery code is 8
-	// characters of a 32-letter alphabet, ten of them live: a guess is right about once
-	// in 10^11, so the budget can be small and slow. It is the current-password lockout's
-	// shape — five in an hour, then half an hour — whose window is at least the lock, so
-	// tripping it is the fastest way to guess (see passwordLockoutWindow), and it also
-	// caps the bcrypt comparisons a guess costs (one per live code).
-	totpRecoveryLockoutThreshold = 5
-	totpRecoveryLockoutWindow    = 60 * time.Minute
-	totpRecoveryLockoutDuration  = 30 * time.Minute
+	// (totpRecoveryLockoutPolicy), with the same figures, so that wrong authenticator
+	// codes no longer block a recovery code, and the reverse: the owner who has lost the
+	// device never waits longer than before. It does not stop someone who has the
+	// password and keeps trying both kinds from keeping both locked; the remedy for that
+	// is still an administrator's reset.
+	totpRecoveryLockoutThreshold = totpLockoutThreshold
+	totpRecoveryLockoutWindow    = totpLockoutWindow
+	totpRecoveryLockoutDuration  = totpLockoutDuration
 )
 
 // The answers of a setup that cannot go on until the caller proves it is the owner.
@@ -820,7 +818,7 @@ const (
 	totpLockedMessage = "Too many failed 2FA attempts — try again in a few minutes"
 	// totpRecoveryLockedMessage is the sign-in step's lock on recovery codes, which
 	// leaves the authenticator's codes usable.
-	totpRecoveryLockedMessage = "Too many wrong recovery codes — try a recovery code again later. A code from your authenticator app still works."
+	totpRecoveryLockedMessage = "Too many wrong recovery codes — try a recovery code again in a few minutes. A code from your authenticator app still works."
 	// totpLockoutUnavailableMessage is the 503 of a code that could not be counted,
 	// and so was not checked.
 	totpLockoutUnavailableMessage = "The two-factor code cannot be checked right now because its attempt limit could not be counted; " +

@@ -295,8 +295,10 @@ password. A pending token issued before this rule existed is refused as expired.
 
 Wrong codes count against the account, whichever pending token they come with: five
 wrong authenticator codes within 10 minutes lock authenticator codes for 5 minutes,
-and five wrong recovery codes within 60 minutes lock recovery codes for 30 minutes.
+and five wrong recovery codes within 10 minutes lock recovery codes for 5 minutes.
 The two locks are separate, so while one holds the other kind of code still works.
+Someone who has the password and keeps sending both kinds can still keep both locked;
+the remedy is an administrator's reset of the account's 2FA.
 A locked kind is answered `429` with a `Retry-After` header, and the attempt that
 arms a lock is answered `429` too and destroys its pending token. A pending token
 also takes at most five attempts of either kind.
