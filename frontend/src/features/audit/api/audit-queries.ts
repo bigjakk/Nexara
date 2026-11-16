@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 export interface AuditLogEntry {
   id: string;
@@ -30,10 +31,11 @@ export interface AuditLogEntry {
 }
 
 export function useRecentActivity() {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["recent-activity"],
     queryFn: () =>
       apiClient.list<AuditLogEntry>(apiPath`/api/v1/audit-log/recent`),
-    refetchInterval: 120_000,
+    refetchInterval,
   });
 }

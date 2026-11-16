@@ -13,6 +13,7 @@ import type {
   NotificationDLQEntry,
   NotificationDLQSummary,
 } from "@/types/api";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- Alert Rules ---
 
@@ -93,10 +94,11 @@ export function useAlerts(filters?: {
 }
 
 export function useAlertSummary() {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["alert-summary"],
     queryFn: () => apiClient.get<AlertSummary>(apiPath`/api/v1/alerts/summary`),
-    refetchInterval: 30000,
+    refetchInterval,
   });
 }
 
@@ -274,24 +276,26 @@ export function useNotificationDLQ(state?: string) {
   const params = new URLSearchParams();
   if (state) params.set("state", state);
 
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["notification-dlq", state ?? "all"],
     queryFn: () =>
       apiClient.list<NotificationDLQEntry>(
         apiPath`/api/v1/notification-dlq?${params}`,
       ),
-    refetchInterval: 30000,
+    refetchInterval,
   });
 }
 
 export function useNotificationDLQSummary() {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["notification-dlq-summary"],
     queryFn: () =>
       apiClient.get<NotificationDLQSummary>(
         apiPath`/api/v1/notification-dlq/summary`,
       ),
-    refetchInterval: 30000,
+    refetchInterval,
   });
 }
 

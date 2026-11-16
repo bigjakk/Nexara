@@ -17,10 +17,12 @@ import type {
   CephPoolMetric,
   CreatePoolRequest,
 } from "../types/ceph";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- Live Proxmox data ---
 
 export function useCephStatus(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "status"],
     queryFn: () =>
@@ -28,21 +30,23 @@ export function useCephStatus(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/ceph/status`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 
 export function useCephOSDs(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "osds"],
     queryFn: () =>
       apiClient.list<CephOSD>(apiPath`/api/v1/clusters/${clusterId}/ceph/osds`),
     enabled: clusterId.length > 0,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 
 export function useCephPools(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "pools"],
     queryFn: () =>
@@ -50,7 +54,7 @@ export function useCephPools(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/ceph/pools`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 
@@ -88,6 +92,7 @@ export function useCephCrushRules(clusterId: string) {
 // --- DB metrics ---
 
 export function useCephMetrics(clusterId: string, timeframe: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ceph", "metrics", timeframe],
     queryFn: () =>
@@ -95,7 +100,7 @@ export function useCephMetrics(clusterId: string, timeframe: string) {
         apiPath`/api/v1/clusters/${clusterId}/ceph/metrics?timeframe=${timeframe}`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 

@@ -4,6 +4,7 @@ import { apiPath } from "@/lib/api-path";
 import type { SortDirection } from "@/hooks/useTableSort";
 import type { TaskStatusResponse } from "@/features/vms/types/vm";
 import type { TaskSortKey } from "../lib/task-columns";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 /** A row from the reconciled task_history table (server-authoritative status). */
 export interface TaskRecord {
@@ -75,6 +76,7 @@ export function useTasks({
   params.set("sort", sort);
   params.set("order", order);
 
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: [
       "tasks",
@@ -92,7 +94,7 @@ export function useTasks({
     // while the next page loads — consumers derive page counts from `total`,
     // which would otherwise collapse to 0 during every page transition.
     placeholderData: (prev) => prev,
-    refetchInterval: 60_000, // WS events invalidate immediately; this is a fallback
+    refetchInterval, // WS events invalidate immediately; this is a fallback
   });
 }
 

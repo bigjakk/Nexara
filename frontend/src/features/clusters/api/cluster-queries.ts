@@ -15,6 +15,7 @@ import type {
   StorageResponse,
   VMResponse,
 } from "@/types/api";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 export function useCluster(id: string) {
   return useQuery({
@@ -880,12 +881,13 @@ export function useSetNodeMaintenance(
 }
 
 export function useClusterVMs(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "vms"],
     queryFn: () =>
       apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${clusterId}/vms`),
     enabled: clusterId.length > 0,
-    refetchInterval: 60_000, // WS events handle immediate updates
+    refetchInterval, // WS events handle immediate updates
   });
 }
 
@@ -1024,6 +1026,7 @@ export function useNodeSensors(
   nodeName: string,
   enabled = true,
 ) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "nodes", nodeName, "sensors"],
     queryFn: () =>
@@ -1032,7 +1035,7 @@ export function useNodeSensors(
       ),
     enabled: enabled && clusterId.length > 0 && nodeName.length > 0,
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 

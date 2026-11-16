@@ -8,6 +8,7 @@ import type {
   HistoryTarget,
   HistoryWindow,
 } from "../types/history";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 const WINDOW_MS: Record<Exclude<HistoryWindow, "">, number> = {
   "24h": 24 * 3600_000,
@@ -115,6 +116,7 @@ export function routeKey(target: HistoryTarget): string {
  */
 export function useHistory(p: HistoryParams) {
   const { target, page, enabled } = p;
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: [
       "history",
@@ -131,7 +133,7 @@ export function useHistory(p: HistoryParams) {
     // Keep the previous page (and its total) while the next one loads, as the
     // task tables do, so the pager does not collapse on every page turn.
     placeholderData: (prev) => prev,
-    refetchInterval: 60_000, // WS events invalidate immediately; this is a fallback
+    refetchInterval, // WS events invalidate immediately; this is a fallback
   });
 }
 

@@ -50,6 +50,7 @@ import type {
   VeeamSessionLogRecord,
   VeeamTaskSession,
 } from "../types/backup";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- PBS Server Queries ---
 
@@ -74,6 +75,7 @@ export function usePBSDatastores(pbsId: string) {
 }
 
 export function usePBSDatastoreStatus(pbsId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", "status"],
     queryFn: () =>
@@ -81,7 +83,7 @@ export function usePBSDatastoreStatus(pbsId: string) {
         apiPath`/api/v1/pbs-servers/${pbsId}/datastores/status`,
       ),
     enabled: pbsId.length > 0,
-    refetchInterval: 120_000,
+    refetchInterval,
   });
 }
 
@@ -144,6 +146,7 @@ export function usePBSVerifyJobs(pbsId: string) {
 // --- Task Queries (live proxy) ---
 
 export function usePBSTasks(pbsId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "tasks"],
     queryFn: () =>
@@ -151,7 +154,7 @@ export function usePBSTasks(pbsId: string) {
         apiPath`/api/v1/pbs-servers/${pbsId}/tasks?limit=50`,
       ),
     enabled: pbsId.length > 0,
-    refetchInterval: 120_000, // WS pbs_change events handle real-time; this is a fallback
+    refetchInterval, // WS pbs_change events handle real-time; this is a fallback
   });
 }
 
@@ -161,6 +164,7 @@ export function usePBSDatastoreMetrics(
   pbsId: string,
   timeframe: string = "latest",
 ) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "metrics", timeframe],
     queryFn: () =>
@@ -168,7 +172,7 @@ export function usePBSDatastoreMetrics(
         apiPath`/api/v1/pbs-servers/${pbsId}/metrics?timeframe=${timeframe}`,
       ),
     enabled: pbsId.length > 0,
-    refetchInterval: timeframe === "latest" ? 120_000 : false,
+    refetchInterval: timeframe === "latest" ? refetchInterval : false,
   });
 }
 
@@ -180,6 +184,7 @@ export function usePBSDatastoreRRD(
   timeframe: string = "hour",
   cf: string = "AVERAGE",
 ) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["pbs-servers", pbsId, "datastores", store, "rrd", timeframe, cf],
     queryFn: () =>
@@ -187,7 +192,7 @@ export function usePBSDatastoreRRD(
         apiPath`/api/v1/pbs-servers/${pbsId}/datastores/${store}/rrd?timeframe=${timeframe}&cf=${cf}`,
       ),
     enabled: pbsId.length > 0 && store.length > 0,
-    refetchInterval: 120_000,
+    refetchInterval,
   });
 }
 
@@ -680,12 +685,13 @@ export function usePruneJobs(pbsId: string, store: string) {
 // --- Backup Coverage ---
 
 export function useBackupCoverage() {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["backup-coverage"],
     queryFn: () =>
       apiClient.list<BackupCoverageEntry>(apiPath`/api/v1/backup-coverage`),
     staleTime: 60_000,
-    refetchInterval: 120_000,
+    refetchInterval,
   });
 }
 
@@ -787,6 +793,7 @@ export function useVeeamRepositoryMetrics(
 }
 
 export function useVeeamJobs(serverId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["veeam-servers", serverId, "jobs"],
     queryFn: () =>
@@ -794,7 +801,7 @@ export function useVeeamJobs(serverId: string) {
     enabled: serverId.length > 0,
     // A running job's progress moves; the collector refreshes job state on
     // its own cadence, so this only has to keep the page roughly current.
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 
@@ -804,6 +811,7 @@ export function useVeeamJobs(serverId: string) {
  * newest few hundred, cannot promise of a job that seldom runs.
  */
 export function useVeeamSessions(serverId: string, jobId?: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: [
       "veeam-servers",
@@ -818,7 +826,7 @@ export function useVeeamSessions(serverId: string, jobId?: string) {
           : apiPath`/api/v1/veeam-servers/${serverId}/sessions?job_id=${jobId}`,
       ),
     enabled: serverId.length > 0 && jobId !== "",
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 

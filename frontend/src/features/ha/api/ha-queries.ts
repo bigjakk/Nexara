@@ -3,6 +3,7 @@ import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 /**
  * An HA resource as the API returns it: Proxmox's raw resource config, where a
@@ -321,6 +322,7 @@ export function useUpdateHARule(clusterId: string) {
 }
 
 export function useHAManagerStatus(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "manager-status"],
     queryFn: () =>
@@ -328,11 +330,12 @@ export function useHAManagerStatus(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/ha/manager-status`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30_000,
+    refetchInterval,
   });
 }
 
 export function useHAStatus(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "ha", "status"],
     queryFn: () =>
@@ -340,7 +343,7 @@ export function useHAStatus(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/ha/status`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval: 30_000,
+    refetchInterval,
   });
 }
 

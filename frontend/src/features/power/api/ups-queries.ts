@@ -14,6 +14,7 @@ import type {
   UpsMetrics,
   UpsRange,
 } from "../types/ups";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // UPS monitoring is global scope: one NUT server can feed nodes of several
 // clusters, so nothing here is per cluster. Readings move between polls
@@ -59,13 +60,14 @@ export function useUpsDevice(id: string) {
 }
 
 export function useUpsMetrics(id: string, range: UpsRange) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: upsKeys.metrics(id, range),
     queryFn: () =>
       apiClient.get<UpsMetrics>(
         apiPath`/api/v1/ups-devices/${id}/metrics?range=${range}`,
       ),
-    refetchInterval: 60_000,
+    refetchInterval,
     enabled: id !== "",
   });
 }
@@ -89,6 +91,7 @@ export function useUpsCommandRuns(id: string) {
 export const UPS_EVENTS_LIMIT = 100;
 
 export function useUpsEvents(upsId?: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: upsKeys.events(upsId),
     queryFn: () =>
@@ -97,7 +100,7 @@ export function useUpsEvents(upsId?: string) {
           ? apiPath`/api/v1/ups-events?limit=${String(UPS_EVENTS_LIMIT)}`
           : apiPath`/api/v1/ups-events?ups_id=${upsId}&limit=${String(UPS_EVENTS_LIMIT)}`,
       ),
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 

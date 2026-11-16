@@ -22,10 +22,12 @@ import type {
   ApplianceTemplate,
   ISCSITarget,
 } from "../types/storage";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- Storage pools for a cluster ---
 
 export function useClusterStorage(clusterId: string) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "storage"],
     queryFn: () =>
@@ -34,7 +36,7 @@ export function useClusterStorage(clusterId: string) {
       ),
     enabled: clusterId.length > 0,
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval,
   });
 }
 

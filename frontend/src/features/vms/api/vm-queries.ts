@@ -22,6 +22,7 @@ import type {
   VMConfig,
 } from "../types/vm";
 import { anyRunInFlight, type InFlightSightings } from "../lib/schedule-status";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- Shared invalidation helper ---
 // Every mutation that changes VM/CT inventory (create, clone, destroy, migrate,
@@ -77,6 +78,7 @@ export function useResourcePools(clusterId: string) {
 // apiPath refuses an empty id, and building it in the hook body would throw
 // during render while the id is still loading.
 export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: [
       "clusters",
@@ -91,7 +93,7 @@ export function useVM(clusterId: string, vmId: string, kind: ResourceKind) {
           : apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}`,
       ),
     enabled: clusterId.length > 0 && vmId.length > 0,
-    refetchInterval: 60_000, // WS events handle immediate updates
+    refetchInterval, // WS events handle immediate updates
   });
 }
 
@@ -676,10 +678,11 @@ export interface TaskHistoryEntry {
 }
 
 export function useTaskHistory(): UseQueryResult<TaskHistoryEntry[]> {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["task-history"],
     queryFn: () => apiClient.list<TaskHistoryEntry>(apiPath`/api/v1/tasks`),
-    refetchInterval: 60_000, // WS events handle immediate updates; polling is a safety fallback
+    refetchInterval, // WS events handle immediate updates; polling is a safety fallback
   });
 }
 
@@ -731,6 +734,7 @@ export function useGuestAgentInfo(
   vmId: string,
   enabled: boolean,
 ) {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters", clusterId, "vms", vmId, "agent"],
     queryFn: () =>
@@ -738,7 +742,7 @@ export function useGuestAgentInfo(
         apiPath`/api/v1/clusters/${clusterId}/vms/${vmId}/agent`,
       ),
     enabled: enabled && clusterId.length > 0 && vmId.length > 0,
-    refetchInterval: 30_000,
+    refetchInterval,
   });
 }
 

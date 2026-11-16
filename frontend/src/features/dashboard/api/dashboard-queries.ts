@@ -15,14 +15,16 @@ import type {
   VMResponse,
   StorageResponse,
 } from "@/types/api";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 export function useClusters() {
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: ["clusters"],
     queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),
     // Refresh periodically so cluster status and Ceph health surfaced in the
     // header/dashboard/sidebar stay current without a manual reload.
-    refetchInterval: 30_000,
+    refetchInterval,
   });
 }
 

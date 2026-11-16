@@ -3,6 +3,7 @@ import { apiClient } from "@/lib/api-client";
 import { apiPath, type ApiPath } from "@/lib/api-path";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
+import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // Re-export the canonical audit entry type (owned by the audit feature) so
 // Events-tab consumers such as AuditLogPanel share one shape — including the
@@ -55,6 +56,7 @@ export function useEvents({
   if (startTime) params.set("start_time", startTime);
   if (endTime) params.set("end_time", endTime);
 
+  const refetchInterval = useRefreshInterval();
   return useQuery({
     queryKey: [
       "audit-log",
@@ -71,7 +73,7 @@ export function useEvents({
     ],
     queryFn: () =>
       apiClient.page<AuditLogEntry>(apiPath`/api/v1/audit-log?${params}`),
-    refetchInterval: 120_000,
+    refetchInterval,
   });
 }
 
