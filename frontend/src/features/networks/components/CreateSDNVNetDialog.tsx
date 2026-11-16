@@ -74,12 +74,13 @@ export function CreateSDNVNetDialog({
     const params: CreateSDNVNetRequest = { vnet, zone };
     if (tag) params.tag = Number(tag);
     if (alias) params.alias = alias;
-    // On an edit an unticked box is sent as 0, which clears the setting; a
-    // create leaves it out.
+    // On an edit, a box that was set and is now unticked is sent as 0, which
+    // clears the setting. One never set sends nothing: before pve-network
+    // 0.9.9 there is no isolate-ports option to clear, and naming it fails.
     if (vlanaware) params.vlanaware = 1;
-    else if (isEdit) params.vlanaware = 0;
+    else if (isEdit && initialData.vlanaware === 1) params.vlanaware = 0;
     if (isolate) params.isolate = 1;
-    else if (isEdit) params.isolate = 0;
+    else if (isEdit && initialData.isolate === 1) params.isolate = 0;
 
     if (isEdit) {
       const updateParams: Omit<CreateSDNVNetRequest, "vnet"> =

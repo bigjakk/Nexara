@@ -41,4 +41,26 @@ describe("CreateSDNVNetDialog — edit", () => {
       ]);
     });
   });
+
+  // Older pve-network has no isolate-ports, and a delete naming it fails the
+  // whole edit; a flag never set must send no key at all.
+  it("sends neither flag when neither was ever set", async () => {
+    stubApi({ "/api/v1/clusters/c1/sdn/zones": { items: [], total: 0 } });
+    const user = setupUser();
+    renderWithProviders(
+      <CreateSDNVNetDialog
+        clusterId="c1"
+        initialData={{ vnet: "vnet01", zone: "zone01", alias: "lab" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit VNet vnet01" }));
+    await user.click(await screen.findByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(bodiesOf("PUT", VNET_PATH)).toEqual([
+        { zone: "zone01", alias: "lab" },
+      ]);
+    });
+  });
 });
