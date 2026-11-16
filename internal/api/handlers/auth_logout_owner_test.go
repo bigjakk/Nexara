@@ -168,7 +168,7 @@ func TestLogout_AnAccessTokenNamesWhoIsSigningOut(t *testing.T) {
 		{
 			name: "an API key that did not authenticate",
 			header: func(*testing.T, *authRaceApp) string {
-				return "Bearer nxra_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+				return "Bearer " + apiKeyTokenPrefix + strings.Repeat("A", 43)
 			},
 			want: http.StatusOK, sent: 1, ended: ended, cookieWant: cookieCleared,
 		},
