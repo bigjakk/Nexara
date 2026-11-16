@@ -67,6 +67,7 @@ import {
 import { TokenSecretDialog } from "./TokenSecretDialog";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
 import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
+import { useInCluster, useSingleFlight } from "./accessSaves";
 import { holdFocusInDialog } from "./holdFocusInDialog";
 import { DateTime } from "@/components/DateTime";
 
@@ -149,6 +150,9 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
   const usersQuery = useAccessUsers(clusterId);
   const createUser = useCreateAccessUser(clusterId);
   const deleteUser = useDeleteAccessUser(clusterId);
+  const createUserOnce = useSingleFlight(createUser.mutateAsync);
+  const deleteUserOnce = useSingleFlight(deleteUser.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -193,31 +197,32 @@ export function AccessUsersSection({ clusterId, capabilities }: Props) {
     e.preventDefault();
     setCreateError("");
     const id = userid.trim();
-    settleCreate(
-      createUser.mutateAsync({
-        userid: id,
-        ...(comment ? { comment } : {}),
-        ...(password ? { password } : {}),
-      }),
-      {
-        action: `Creating user ${id}`,
-        // Not once the dialog has been dismissed: this would close, and clear,
-        // whichever one has been opened in its place.
-        onSuccess: () => {
-          setCreateOpen(false);
-          resetCreate();
-        },
-        onError: (err) => {
-          setCreateError(errorMessage(err, "Failed to create user"));
-        },
+    const sent = createUserOnce({
+      userid: id,
+      ...(comment ? { comment } : {}),
+      ...(password ? { password } : {}),
+    });
+    if (sent === null) return;
+    settleCreate(sent, {
+      action: inCluster(`Creating user ${id}`),
+      // Not once the dialog has been dismissed: this would close, and clear,
+      // whichever one has been opened in its place.
+      onSuccess: () => {
+        setCreateOpen(false);
+        resetCreate();
       },
-    );
+      onError: (err) => {
+        setCreateError(errorMessage(err, "Failed to create user"));
+      },
+    });
   };
 
   const handleDelete = (target: string, force: boolean) => {
     setSectionError("");
-    const action = `Deleting user ${target}`;
-    settleDelete(deleteUser.mutateAsync({ userid: target, force }), {
+    const action = inCluster(`Deleting user ${target}`);
+    const sent = deleteUserOnce({ userid: target, force });
+    if (sent === null) return;
+    settleDelete(sent, {
       action,
       lateFailure: (err) =>
         isOverridable(err) ? refusedBeyondOverride(action) : undefined,
@@ -583,6 +588,10 @@ function UserTokens({
   const createToken = useCreateAccessToken(clusterId);
   const updateToken = useUpdateAccessToken(clusterId);
   const deleteToken = useDeleteAccessToken(clusterId);
+  const createTokenOnce = useSingleFlight(createToken.mutateAsync);
+  const updateTokenOnce = useSingleFlight(updateToken.mutateAsync);
+  const deleteTokenOnce = useSingleFlight(deleteToken.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   const [tokenName, setTokenName] = useState("");
   const [tokenComment, setTokenComment] = useState("");
@@ -615,7 +624,7 @@ function UserTokens({
   // ended: useSaveOutcome stays silent then, so a secret never reaches the next
   // user's screen.)
   const secretNotShown = (tokenid: string, regenerated: boolean) => {
-    const token = fullTokenId(tokenid);
+    const token = inCluster(fullTokenId(tokenid));
     toast.error(
       regenerated
         ? `Regenerated the API token ${token}, but its new secret could not be shown because this view was closed. The old secret no longer works, and Proxmox shows a secret only once: regenerate the token again to get a new one.`
@@ -628,35 +637,36 @@ function UserTokens({
     e.preventDefault();
     setError("");
     const name = tokenName.trim();
-    settle(
-      createToken.mutateAsync({
-        userid,
-        tokenid: name,
-        privsep,
-        ...(tokenComment ? { comment: tokenComment } : {}),
-      }),
-      {
-        action: `Creating token ${fullTokenId(name)}`,
-        onSuccess: (created) => {
-          setMinted(created);
-          setTokenName("");
-          setTokenComment("");
-          setPrivsep(true);
-        },
-        onError: (err) => {
-          setError(errorMessage(err, "Failed to create token"));
-        },
-        onLateSuccess: () => {
-          secretNotShown(name, false);
-        },
+    const sent = createTokenOnce({
+      userid,
+      tokenid: name,
+      privsep,
+      ...(tokenComment ? { comment: tokenComment } : {}),
+    });
+    if (sent === null) return;
+    settle(sent, {
+      action: inCluster(`Creating token ${fullTokenId(name)}`),
+      onSuccess: (created) => {
+        setMinted(created);
+        setTokenName("");
+        setTokenComment("");
+        setPrivsep(true);
       },
-    );
+      onError: (err) => {
+        setError(errorMessage(err, "Failed to create token"));
+      },
+      onLateSuccess: () => {
+        secretNotShown(name, false);
+      },
+    });
   };
 
   const handleRevoke = (tokenid: string, force: boolean) => {
     setError("");
-    const action = `Revoking token ${fullTokenId(tokenid)}`;
-    settle(deleteToken.mutateAsync({ userid, tokenid, force }), {
+    const action = inCluster(`Revoking token ${fullTokenId(tokenid)}`);
+    const sent = deleteTokenOnce({ userid, tokenid, force });
+    if (sent === null) return;
+    settle(sent, {
       action,
       lateFailure: (err) =>
         isOverridable(err) ? refusedBeyondOverride(action) : undefined,
@@ -682,37 +692,36 @@ function UserTokens({
 
   const handleRegenerate = (tokenid: string, force: boolean) => {
     setError("");
-    const action = `Regenerating token ${fullTokenId(tokenid)}`;
-    settle(
-      updateToken.mutateAsync({ userid, tokenid, regenerate: true, force }),
-      {
-        action,
-        lateFailure: (err) =>
-          isOverridable(err) ? refusedBeyondOverride(action) : undefined,
-        onSuccess: (updated) => {
-          setSelfConflict(null);
-          setRegenTarget(null);
-          setMinted(updated);
-        },
-        onError: (err) => {
-          setRegenTarget(null);
-          if (isOverridable(err)) {
-            setSelfConflict({
-              message: err.message,
-              tokenid,
-              action: "regenerate",
-            });
-            return;
-          }
-          setSelfConflict(null);
-          setError(errorMessage(err, "Failed to regenerate token"));
-        },
-        // The old secret stopped working when the new one was issued.
-        onLateSuccess: () => {
-          secretNotShown(tokenid, true);
-        },
+    const action = inCluster(`Regenerating token ${fullTokenId(tokenid)}`);
+    const sent = updateTokenOnce({ userid, tokenid, regenerate: true, force });
+    if (sent === null) return;
+    settle(sent, {
+      action,
+      lateFailure: (err) =>
+        isOverridable(err) ? refusedBeyondOverride(action) : undefined,
+      onSuccess: (updated) => {
+        setSelfConflict(null);
+        setRegenTarget(null);
+        setMinted(updated);
       },
-    );
+      onError: (err) => {
+        setRegenTarget(null);
+        if (isOverridable(err)) {
+          setSelfConflict({
+            message: err.message,
+            tokenid,
+            action: "regenerate",
+          });
+          return;
+        }
+        setSelfConflict(null);
+        setError(errorMessage(err, "Failed to regenerate token"));
+      },
+      // The old secret stopped working when the new one was issued.
+      onLateSuccess: () => {
+        secretNotShown(tokenid, true);
+      },
+    });
   };
 
   return (
@@ -1007,6 +1016,8 @@ function EditUserDialog({
 }) {
   const userQuery = useAccessUser(clusterId, userid);
   const updateUser = useUpdateAccessUser(clusterId);
+  const updateUserOnce = useSingleFlight(updateUser.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   // null means "untouched": the fetched value shows through until edited, and
   // the field stays out of the save.
@@ -1045,8 +1056,10 @@ function EditUserDialog({
     setError("");
     // Named: it can land on another page, or over another account's open Edit
     // dialog.
-    const action = `Saving ${edit.userid}`;
-    settle(updateUser.mutateAsync({ ...edit, force }), {
+    const action = inCluster(`Saving ${edit.userid}`);
+    const sent = updateUserOnce({ ...edit, force });
+    if (sent === null) return;
+    settle(sent, {
       action,
       // A forced save is past the self-credential refusal, so a 409 to it is
       // an error like any other, in the words the server gave it: only an

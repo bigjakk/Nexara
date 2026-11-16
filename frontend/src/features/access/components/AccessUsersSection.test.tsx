@@ -1019,6 +1019,29 @@ describe("an edit sends only what the operator touched", () => {
     ]);
   });
 
+  // Save is held by its pending flag only once that has rendered, a macrotask
+  // after the submit: a second submit in between sent the edit twice.
+  it("sends an edit once though it is submitted again before Save is held", async () => {
+    renderSection();
+    const edit = await openEdit();
+    fill(within(edit).getByRole("textbox", { name: "Email" }), "a@example.com");
+    const request = holdNextPut();
+    const form = edit.querySelector("form");
+    if (form === null) throw new Error("the edit dialog has no form");
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    request.resolve({});
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(mockedPut).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves enable out when only the comment of a disabled account is edited", async () => {
     mockedGet.mockImplementation((path: string) =>
       path === OWN_URL

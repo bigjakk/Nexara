@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 
@@ -75,9 +75,13 @@ describe("a failed group delete", () => {
   it("is reported by the global toast, and by nothing else", async () => {
     const user = userEvent.setup();
     mockedDelete.mockRejectedValueOnce(denied());
-    renderOnAppClient(
+    const { qc } = renderOnAppClient(
       <AccessGroupsSection clusterId={CLUSTER} capabilities={capabilities} />,
     );
+    // The cluster page's read: the toast names the cluster (there can be two).
+    act(() => {
+      qc.setQueryData(["clusters", CLUSTER], { name: "cluster01" });
+    });
 
     await user.click(
       await screen.findByRole("button", { name: `Delete ${GROUP}` }),
@@ -88,7 +92,9 @@ describe("a failed group delete", () => {
     await user.click(within(ask).getByRole("button", { name: "Delete Group" }));
 
     await waitFor(() => {
-      expect(mockedToastError).toHaveBeenCalledWith(DENIED);
+      expect(mockedToastError).toHaveBeenCalledWith(
+        `Deleting group ${GROUP} in cluster01 failed: ${DENIED}`,
+      );
     });
     expect(mockedToastError).toHaveBeenCalledTimes(1);
     // The confirmation closes on any outcome, so the toast is all the operator
@@ -125,7 +131,9 @@ describe("a failed role delete", () => {
     await user.click(within(ask).getByRole("button", { name: "Delete Role" }));
 
     await waitFor(() => {
-      expect(mockedToastError).toHaveBeenCalledWith(DENIED);
+      expect(mockedToastError).toHaveBeenCalledWith(
+        `Deleting role ${ROLE} failed: ${DENIED}`,
+      );
     });
     expect(mockedToastError).toHaveBeenCalledTimes(1);
     await waitFor(() => {

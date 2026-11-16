@@ -50,6 +50,7 @@ import {
 } from "../api/access-queries";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
 import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
+import { useInCluster, useSingleFlight } from "./accessSaves";
 
 interface Props {
   clusterId: string;
@@ -114,6 +115,10 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   const createRole = useCreateAccessRole(clusterId);
   const updateRole = useUpdateAccessRole(clusterId);
   const deleteRole = useDeleteAccessRole(clusterId);
+  const createRoleOnce = useSingleFlight(createRole.mutateAsync);
+  const updateRoleOnce = useSingleFlight(updateRole.mutateAsync);
+  const deleteRoleOnce = useSingleFlight(deleteRole.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   const catalogue = usePrivilegeCatalogue(rolesQuery.data);
   const [editing, setEditing] = useState<RoleEditor | null>(null);
@@ -182,10 +187,8 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     const privs = editing.privs.join(",");
     const roleid = editing.isNew ? editing.roleid.trim() : editing.roleid;
     if (editing.isNew) {
-      save(
-        createRole.mutateAsync({ roleid, privs }),
-        `Creating role ${roleid}`,
-      );
+      const sent = createRoleOnce({ roleid, privs });
+      if (sent !== null) save(sent, inCluster(`Creating role ${roleid}`));
       return;
     }
     saveEdit(editing.openingId, roleid, privs, false);
@@ -197,8 +200,10 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
     privs: string,
     force: boolean,
   ) => {
-    const action = `Saving role ${roleid}`;
-    save(updateRole.mutateAsync({ roleid, privs, force }), action, (err) => {
+    const action = inCluster(`Saving role ${roleid}`);
+    const sent = updateRoleOnce({ roleid, privs, force });
+    if (sent === null) return;
+    save(sent, action, (err) => {
       // A forced save is past the refusal, so its 409 is an error like any
       // other; only an unforced one has an override to be sent to.
       if (force || !isOverridable(err)) return false;
@@ -246,8 +251,10 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
   );
 
   const handleDelete = (target: string, force: boolean) => {
-    const action = `Deleting role ${target}`;
-    settleDelete(deleteRole.mutateAsync({ roleid: target, force }), {
+    const action = inCluster(`Deleting role ${target}`);
+    const sent = deleteRoleOnce({ roleid: target, force });
+    if (sent === null) return;
+    settleDelete(sent, {
       action,
       lateFailure: (err) =>
         !force && isOverridable(err)
@@ -266,7 +273,11 @@ export function AccessRolesSection({ clusterId, capabilities }: Props) {
         }
         // The section has nowhere to show it, so it is toasted.
         toast.error(
-          err instanceof ApiClientError ? err.message : "Failed to delete role",
+          `${action} failed: ${
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to delete role"
+          }`,
         );
       },
     });

@@ -56,6 +56,7 @@ import {
 } from "../api/access-queries";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
 import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
+import { useInCluster, useSingleFlight } from "./accessSaves";
 
 interface Props {
   clusterId: string;
@@ -76,6 +77,10 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
   const usersQuery = useAccessUsers(clusterId);
   const groupsQuery = useAccessGroups(clusterId);
   const updateACL = useUpdateAccessACL(clusterId);
+  // Grant and revoke share the mutation, but not the guard: each is its own save.
+  const grantOnce = useSingleFlight(updateACL.mutateAsync);
+  const revokeOnce = useSingleFlight(updateACL.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   const [grantOpen, setGrantOpen] = useState(false);
   const [path, setPath] = useState("/");
@@ -152,8 +157,12 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
   const sendGrant = (input: UpdateACLInput, to: string, force: boolean) => {
     setError("");
-    const action = `Granting ${input.roles} on ${input.path} to ${to}`;
-    settleGrant(updateACL.mutateAsync({ ...input, force }), {
+    const action = inCluster(
+      `Granting ${input.roles} on ${input.path} to ${to}`,
+    );
+    const sent = grantOnce({ ...input, force });
+    if (sent === null) return;
+    settleGrant(sent, {
       action,
       lateFailure: (err) =>
         !force && isOverridable(err)
@@ -192,51 +201,52 @@ export function AccessACLSection({ clusterId, capabilities }: Props) {
 
   const handleRevoke = (entry: AccessACLEntry, force: boolean) => {
     setRevokeError("");
-    const action = `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`;
+    const action = inCluster(
+      `Revoking ${entry.roleid} on ${entry.path} from ${entry.ugid}`,
+    );
     const kind =
       entry.type === "group"
         ? "groups"
         : entry.type === "token"
           ? "tokens"
           : "users";
-    settleRevoke(
-      updateACL.mutateAsync({
-        path: entry.path,
-        roles: entry.roleid,
-        [kind]: entry.ugid,
-        delete: true,
-        force,
-      }),
-      {
-        action,
-        lateFailure: (err) =>
-          !force && isOverridable(err)
-            ? refusedBeyondOverride(action)
-            : undefined,
-        // These run only while the confirmation that sent the request is still
-        // the one open — this entry's, not another's that has replaced it — so
-        // closing it cannot close another's: useSaveOutcome holds them to that,
-        // and nothing here checks it a second time.
-        onSuccess: () => {
-          setRevokeTarget(null);
-          setRevokeConflict(null);
-        },
-        onError: (err) => {
-          setRevokeConflict(null);
-          if (!force && isOverridable(err)) {
-            setRevokeTarget(null);
-            setRevokeConflict({ message: err.message, entry });
-            return;
-          }
-          setRevokeError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to revoke access",
-          );
-          setRevokeTarget(null);
-        },
+    const sent = revokeOnce({
+      path: entry.path,
+      roles: entry.roleid,
+      [kind]: entry.ugid,
+      delete: true,
+      force,
+    });
+    if (sent === null) return;
+    settleRevoke(sent, {
+      action,
+      lateFailure: (err) =>
+        !force && isOverridable(err)
+          ? refusedBeyondOverride(action)
+          : undefined,
+      // These run only while the confirmation that sent the request is still
+      // the one open — this entry's, not another's that has replaced it — so
+      // closing it cannot close another's: useSaveOutcome holds them to that,
+      // and nothing here checks it a second time.
+      onSuccess: () => {
+        setRevokeTarget(null);
+        setRevokeConflict(null);
       },
-    );
+      onError: (err) => {
+        setRevokeConflict(null);
+        if (!force && isOverridable(err)) {
+          setRevokeTarget(null);
+          setRevokeConflict({ message: err.message, entry });
+          return;
+        }
+        setRevokeError(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to revoke access",
+        );
+        setRevokeTarget(null);
+      },
+    });
   };
 
   const entryCount = aclQuery.data?.length ?? 0;

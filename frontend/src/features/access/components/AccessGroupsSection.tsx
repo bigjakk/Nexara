@@ -50,6 +50,7 @@ import {
 } from "../api/access-queries";
 import { SelfCredentialConfirm } from "./SelfCredentialConfirm";
 import { isOverridable, refusedBeyondOverride } from "./selfCredentialRefusal";
+import { useInCluster, useSingleFlight } from "./accessSaves";
 
 interface Props {
   clusterId: string;
@@ -61,6 +62,9 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   const groupsQuery = useAccessGroups(clusterId);
   const createGroup = useCreateAccessGroup(clusterId);
   const deleteGroup = useDeleteAccessGroup(clusterId);
+  const createGroupOnce = useSingleFlight(createGroup.mutateAsync);
+  const deleteGroupOnce = useSingleFlight(deleteGroup.mutateAsync);
+  const inCluster = useInCluster(clusterId);
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -100,8 +104,10 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
   );
 
   const handleDelete = (target: string, force: boolean) => {
-    const action = `Deleting group ${target}`;
-    settleDelete(deleteGroup.mutateAsync({ groupid: target, force }), {
+    const action = inCluster(`Deleting group ${target}`);
+    const sent = deleteGroupOnce({ groupid: target, force });
+    if (sent === null) return;
+    settleDelete(sent, {
       action,
       lateFailure: (err) =>
         !force && isOverridable(err)
@@ -120,9 +126,11 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
         }
         // The section has nowhere to show it, so it is toasted.
         toast.error(
-          err instanceof ApiClientError
-            ? err.message
-            : "Failed to delete group",
+          `${action} failed: ${
+            err instanceof ApiClientError
+              ? err.message
+              : "Failed to delete group"
+          }`,
         );
       },
     });
@@ -132,36 +140,38 @@ export function AccessGroupsSection({ clusterId, capabilities }: Props) {
     e.preventDefault();
     setError("");
     const id = groupid.trim();
-    settleCreate(
-      createGroup.mutateAsync({ groupid: id, ...(comment ? { comment } : {}) }),
-      {
-        action: `Creating group ${id}`,
-        // Not once the dialog has been dismissed: this would close, and clear,
-        // whichever one has been opened in its place.
-        onSuccess: () => {
-          setCreateOpen(false);
+    const sent = createGroupOnce({
+      groupid: id,
+      ...(comment ? { comment } : {}),
+    });
+    if (sent === null) return;
+    settleCreate(sent, {
+      action: inCluster(`Creating group ${id}`),
+      // Not once the dialog has been dismissed: this would close, and clear,
+      // whichever one has been opened in its place.
+      onSuccess: () => {
+        setCreateOpen(false);
+        setGroupid("");
+        setComment("");
+      },
+      // A dismissal keeps what was typed, which is this section's and not the
+      // dialog's, so a group that was created after one would leave its own
+      // id for the next Create to repeat. Put it away as a success does,
+      // unless a dialog is open: that one is showing the same text as its own.
+      onLateSuccess: (_, { open }) => {
+        if (!open) {
           setGroupid("");
           setComment("");
-        },
-        // A dismissal keeps what was typed, which is this section's and not the
-        // dialog's, so a group that was created after one would leave its own
-        // id for the next Create to repeat. Put it away as a success does,
-        // unless a dialog is open: that one is showing the same text as its own.
-        onLateSuccess: (_, { open }) => {
-          if (!open) {
-            setGroupid("");
-            setComment("");
-          }
-        },
-        onError: (err) => {
-          setError(
-            err instanceof ApiClientError
-              ? err.message
-              : "Failed to create group",
-          );
-        },
+        }
       },
-    );
+      onError: (err) => {
+        setError(
+          err instanceof ApiClientError
+            ? err.message
+            : "Failed to create group",
+        );
+      },
+    });
   };
 
   const groupCount = groupsQuery.data?.length ?? 0;
@@ -483,6 +493,8 @@ function EditGroupDialog({
   onClose: () => void;
 }) {
   const updateGroup = useUpdateAccessGroup(clusterId);
+  const updateGroupOnce = useSingleFlight(updateGroup.mutateAsync);
+  const inCluster = useInCluster(clusterId);
   const [comment, setComment] = useState(initialComment);
   const [error, setError] = useState("");
 
@@ -496,10 +508,12 @@ function EditGroupDialog({
   const handleSave = (e: React.SyntheticEvent) => {
     e.preventDefault();
     setError("");
-    settle(updateGroup.mutateAsync({ groupid, comment }), {
+    const sent = updateGroupOnce({ groupid, comment });
+    if (sent === null) return;
+    settle(sent, {
       // Named: it can land on another page, or over another group's open Edit
       // dialog.
-      action: `Saving group ${groupid}`,
+      action: inCluster(`Saving group ${groupid}`),
       // Not once dismissed: onClose would close whichever dialog has been
       // opened in this one's place.
       onSuccess: onClose,
