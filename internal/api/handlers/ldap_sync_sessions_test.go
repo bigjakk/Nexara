@@ -338,8 +338,8 @@ func TestLDAPSync_TheLeaseIsShortRenewedAndNamedInThe409(t *testing.T) {
 	store := newEpochStore(user)
 	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{})
 	store.leaseLost = true
-	if status := sync(); status == http.StatusOK || !store.user(user.ID).IsActive || len(store.named("RenewLDAPSyncLease")) != 1 {
-		t.Errorf("with the lease lost: status %d, active %t, %d renewals; want a failure, active, one renewal",
+	if status := sync(); status != http.StatusConflict || !store.user(user.ID).IsActive || len(store.named("RenewLDAPSyncLease")) != 1 {
+		t.Errorf("with the lease lost: status %d, active %t, %d renewals; want 409, active, one renewal",
 			status, store.user(user.ID).IsActive, len(store.named("RenewLDAPSyncLease")))
 	}
 

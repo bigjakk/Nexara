@@ -578,6 +578,11 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	}
 	switch {
 	case err == nil:
+	case errors.Is(err, errLDAPSyncLeaseLost):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error":   "ldap_sync_running",
+			"message": "Another sync of this directory took over while this one ran, so this one stopped. Its counts are in the audit log.",
+		})
 	case errors.Is(err, errLDAPSyncTooManyMissing):
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "ldap_sync_too_many_missing",

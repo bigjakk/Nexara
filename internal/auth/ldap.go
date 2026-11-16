@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -35,7 +36,15 @@ type LDAPConfig struct {
 	GroupSearchBaseDN    string
 	GroupFilter          string // e.g. (member={{userDN}})
 	GroupAttribute       string // e.g. cn
+	// RequestTimeout bounds each request on the connection; 0 is ldapRequestTimeout.
+	// Only tests set it.
+	RequestTimeout time.Duration
 }
+
+// ldapRequestTimeout bounds every request, for sign-in and sync alike: go-ldap waits
+// for ever by default, and a directory that accepts the connection and never answers
+// would hold a sign-in, or the sync and its scheduler slot, until a restart.
+const ldapRequestTimeout = time.Minute
 
 // LDAPUser represents a user found in the LDAP directory.
 type LDAPUser struct {
@@ -93,6 +102,12 @@ func (c *LDAPClient) dial() (*ldap.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrLDAPConnection, err)
 	}
+
+	timeout := c.cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = ldapRequestTimeout
+	}
+	conn.SetTimeout(timeout)
 
 	if c.cfg.StartTLS && !isLDAPS {
 		if err := conn.StartTLS(tlsCfg); err != nil {
