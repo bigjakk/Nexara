@@ -108,11 +108,8 @@ export function ChannelForm({
   // The add dialog stays mounted and toggles, so its open flag tells one
   // dialog's save from the next's.
   const settle = useSaveOutcome(open);
-  // A target on a private network is refused until confirmed (422); the
-  // confirmation is stored on the channel.
-  const privateWarning = isEdit
-    ? null
-    : privateAddressWarningFromError(createMutation.error);
+  // The settings the last create sent, so its outcome is shown only for them.
+  const [sentTarget, setSentTarget] = useState<string | null>(null);
 
   // Invalid headers hold Save: sent as {} they would store a channel that
   // silently drops the Authorization the operator typed.
@@ -171,6 +168,15 @@ export function ChannelForm({
     }
   };
 
+  // A target on a private network is refused until confirmed (422), and the
+  // confirmation is for the target that was refused: once the settings change,
+  // the refusal is dropped and Create asks the server again.
+  const target = JSON.stringify([channelType, buildConfig()]);
+  const outcomeShown = !isEdit && sentTarget === target;
+  const privateWarning = outcomeShown
+    ? privateAddressWarningFromError(createMutation.error)
+    : null;
+
   const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
     if (headersError !== null) return;
@@ -194,6 +200,7 @@ export function ChannelForm({
   };
 
   const create = (allowPrivate: boolean) => {
+    setSentTarget(target);
     settle(
       createMutation.mutateAsync({
         name,
@@ -366,7 +373,7 @@ export function ChannelForm({
             }}
           />
         )}
-        {!isEdit && createMutation.error !== null && privateWarning === null && (
+        {outcomeShown && createMutation.error !== null && privateWarning === null && (
           <p role="alert" className="text-sm text-destructive">
             {createMutation.error.message}
           </p>
