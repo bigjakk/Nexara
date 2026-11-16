@@ -127,7 +127,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
                 components={{
                   strong: <strong />,
                   strong2: <strong />,
-                  link: (
+                  navlink: (
                     <Link
                       to={`/clusters/${clusterId}?tab=options`}
                       className="underline"

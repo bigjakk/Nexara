@@ -92,7 +92,7 @@
     "drsConfiguration": "DRS configuration",
     "howNexaraSpreadsGuestsAcross": "How Nexara spreads guests across this cluster's nodes.",
     "proxmoxNativeDynamicLoadBalancer": "Proxmox native Dynamic Load Balancer is active",
-    "thisClusterSProxmoxCRS": "This cluster's Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS <strong>Automatic</strong> mode is disabled to avoid conflicting migrations; <strong2>Advisory</strong2> still works as a read-only second opinion. Manage the native balancer under <link>Datacenter → Options → CRS</link>.",
+    "thisClusterSProxmoxCRS": "This cluster's Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS <strong>Automatic</strong> mode is disabled to avoid conflicting migrations; <strong2>Advisory</strong2> still works as a read-only second opinion. Manage the native balancer under <navlink>Datacenter → Options → CRS</navlink>.",
     "mode": "Mode",
     "disabledTurnsDRSOffAdvisory": "Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs.",
     "disabledTurnsDRSOffAdvisoryNative": "Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs. Automatic is unavailable while Proxmox native CRS rebalancing is on.",
