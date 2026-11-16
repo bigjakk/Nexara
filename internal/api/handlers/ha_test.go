@@ -185,11 +185,11 @@ func TestHARuleDeleteDetails(t *testing.T) {
 		got := decodeDetails(t, haRuleDeleteDetails(context.Background(), nil, clusterID, "keep-apart", snapshot, false))
 
 		for key, want := range map[string]any{
-			"rule":      "keep-apart",
-			"type":      "resource-affinity",
-			"resources": "vm:abc",
-			"nodes":     "pve-01,pve-02",
-			"strict":    float64(1),
+			"rule":        "keep-apart",
+			"type":        "resource-affinity",
+			"resources":   "vm:abc",
+			"nodes":       "pve-01,pve-02",
+			"strict":      float64(1),
 			"affinity":    "negative",
 			"comment_set": true, // never its text: a Viewer reads the row
 			"disable":     float64(1),
