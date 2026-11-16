@@ -40,13 +40,13 @@ func TestConsoleOpenRefusalIsOncePerMinute(t *testing.T) {
 		{"an id that names no cluster", uuid.NewString(), ConsoleRefusedPermission, true, false},
 		{"another such id", uuid.NewString(), ConsoleRefusedPermission, false, false},
 	} {
-		row, write := ConsoleOpenRefusal(context.Background(), oneCluster(known), rdb, user, tt.cluster, tt.reason, "vm_serial")
-		if write != tt.write || row.ClusterID.Valid != tt.filed {
-			t.Errorf("%s: write %v, cluster set %v; want %v, %v", tt.name, write, row.ClusterID.Valid, tt.write, tt.filed)
+		cluster, _, write := ConsoleOpenRefusal(context.Background(), oneCluster(known), rdb, user, tt.cluster, tt.reason, "vm_serial")
+		if write != tt.write || cluster.Valid != tt.filed {
+			t.Errorf("%s: write %v, cluster set %v; want %v, %v", tt.name, write, cluster.Valid, tt.write, tt.filed)
 		}
 	}
 	mr.FastForward(consoleRefusalEvery)
-	if _, write := ConsoleOpenRefusal(context.Background(), oneCluster(known), rdb, user, known.String(),
+	if _, _, write := ConsoleOpenRefusal(context.Background(), oneCluster(known), rdb, user, known.String(),
 		ConsoleRefusedPermission, "vm_serial"); !write {
 		t.Error("a minute later the refusal is not written")
 	}

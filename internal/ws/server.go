@@ -12,6 +12,7 @@ import (
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/audit"
@@ -461,12 +462,19 @@ func (s *Server) auditScopeRefusal(c fiber.Ctx, userID uuid.UUID, scope *auth.Co
 		s.logger.Warn("ws auth: no database to audit a console token refused for another console", "user_id", userID)
 		return
 	}
-	row, write := audit.ConsoleOpenRefusal(c.Context(), s.queries, s.redis, userID, scope.ClusterID,
+	cluster, details, write := audit.ConsoleOpenRefusal(c.Context(), s.queries, s.redis, userID, scope.ClusterID,
 		audit.ConsoleRefusedScope, scope.Type)
 	if !write {
 		return
 	}
-	if err := audit.Write(c.Context(), s.queries, s.eventPub, row); err != nil {
+	if err := audit.Write(c.Context(), s.queries, s.eventPub, db.InsertAuditLogParams{
+		ClusterID:    cluster,
+		UserID:       pgtype.UUID{Bytes: userID, Valid: userID != uuid.Nil},
+		ResourceType: audit.ConsoleRefusalResource,
+		ResourceID:   userID.String(),
+		Action:       audit.ConsoleOpenRefused,
+		Details:      details,
+	}); err != nil {
 		s.logger.Warn("ws auth: could not audit a console token refused for another console", "user_id", userID, "error", err)
 	}
 }

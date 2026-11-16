@@ -16,8 +16,11 @@ import (
 // ConsoleOpenRefused is the action of the one row a refused console open
 // writes, whether the mint refused the permission (internal/api/handlers,
 // ConsoleToken) or the WebSocket gate refused a token for another console
-// (internal/ws). Its resource is the user ("auth", the user id), as the mint's.
+// (internal/ws). Its resource is the user (ConsoleRefusalResource, the user id), as the mint's.
 const ConsoleOpenRefused = "console_open_refused"
+
+// ConsoleRefusalResource is that row's resource type.
+const ConsoleRefusalResource = "auth"
 
 // Why a console open was refused.
 const (
@@ -37,8 +40,9 @@ type ClusterGetter interface {
 	GetCluster(ctx context.Context, id uuid.UUID) (db.Cluster, error)
 }
 
-// ConsoleOpenRefusal is the row a refused console open writes, and whether to
-// write it: the first refusal of a user, cluster and reason in
+// ConsoleOpenRefusal is the cluster and details of the row a refused console
+// open writes (action ConsoleOpenRefused, resource ConsoleRefusalResource and
+// the user's id), and whether to write it: the first refusal of a user, cluster and reason in
 // consoleRefusalEvery (claimed in Redis, as the silent mint's dedupe is; without
 // Redis, or when it does not answer, every one). The cluster is set only when
 // one by that id is found, so no row is filed under an id that names nothing.
@@ -46,7 +50,7 @@ type ClusterGetter interface {
 // vocabulary before it gets here; nothing a caller typed goes in (no node name,
 // no query value): view:audit is held by every built-in Viewer.
 func ConsoleOpenRefusal(ctx context.Context, clusters ClusterGetter, rdb *redis.Client, userID uuid.UUID,
-	clusterID, reason, consoleType string) (db.InsertAuditLogParams, bool) {
+	clusterID, reason, consoleType string) (pgtype.UUID, json.RawMessage, bool) {
 	ctx, cancel := context.WithTimeout(ctx, consoleRefusalWait)
 	defer cancel()
 	var cluster pgtype.UUID
@@ -57,20 +61,12 @@ func ConsoleOpenRefusal(ctx context.Context, clusters ClusterGetter, rdb *redis.
 		}
 	}
 	details, _ := json.Marshal(map[string]string{"reason": reason, "type": consoleType})
-	row := db.InsertAuditLogParams{
-		ClusterID:    cluster,
-		UserID:       pgtype.UUID{Bytes: userID, Valid: userID != uuid.Nil},
-		ResourceType: "auth",
-		ResourceID:   userID.String(),
-		Action:       ConsoleOpenRefused,
-		Details:      details,
-	}
 	if rdb == nil {
-		return row, true
+		return cluster, details, true
 	}
 	key := "console:refused-audit:" + userID.String() + ":" + scope + ":" + reason
 	first, err := redisutil.BoundedByContext(ctx, func(ctx context.Context) (bool, error) {
 		return rdb.SetNX(ctx, key, "1", consoleRefusalEvery).Result()
 	})
-	return row, err != nil || first
+	return cluster, details, err != nil || first
 }
