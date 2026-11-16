@@ -119,7 +119,7 @@ func (c *LDAPClient) dial() (*ldap.Conn, error) {
 	return conn, nil
 }
 
-func (c *LDAPClient) serviceBind(conn *ldap.Conn) error {
+func (c *LDAPClient) serviceBind(conn ldap.Client) error {
 	if c.cfg.BindDN == "" {
 		return nil
 	}
@@ -213,7 +213,7 @@ func (c *LDAPClient) SearchUser(username string) (*LDAPUser, error) {
 
 // fillGroups reads user's groups, after re-binding as the service account when rebind
 // says so; a bind or search that fails marks the lookup failed instead.
-func (c *LDAPClient) fillGroups(conn *ldap.Conn, user *LDAPUser, rebind bool) {
+func (c *LDAPClient) fillGroups(conn ldap.Client, user *LDAPUser, rebind bool) {
 	if rebind {
 		if err := c.serviceBind(conn); err != nil {
 			user.GroupLookupFailed = true
@@ -263,7 +263,7 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 
 // getUserGroups lists the DNs of the user's groups: none when no group search is
 // configured, an error when the search fails (a timeout, a size limit, no read access).
-func (c *LDAPClient) getUserGroups(conn *ldap.Conn, userDN string) ([]string, error) {
+func (c *LDAPClient) getUserGroups(conn ldap.Client, userDN string) ([]string, error) {
 	if c.cfg.GroupSearchBaseDN == "" || c.cfg.GroupFilter == "" {
 		return nil, nil
 	}

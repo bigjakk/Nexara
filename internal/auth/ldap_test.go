@@ -5,6 +5,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/go-ldap/ldap/v3"
 )
 
 // TestLDAPTLSConfig_NamesTheConfiguredHost: StartTLS verifies the directory's certificate
@@ -62,5 +64,45 @@ func TestLDAPOpen_ADirectoryThatNeverAnswersFails(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("Open is still waiting on a directory that never answers")
+	}
+}
+
+// groupDirectory answers the group search with err, or with entries; the embedded nil
+// Client fails loudly if anything else is asked.
+type groupDirectory struct {
+	ldap.Client
+	entries []*ldap.Entry
+	err     error
+}
+
+func (d groupDirectory) Bind(string, string) error { return nil }
+
+func (d groupDirectory) Search(*ldap.SearchRequest) (*ldap.SearchResult, error) {
+	if d.err != nil {
+		return nil, d.err
+	}
+	return &ldap.SearchResult{Entries: d.entries}, nil
+}
+
+// TestFillGroups_AFailedGroupSearchIsNotNoGroups: a group search that fails marks the
+// lookup failed (the caller then leaves the user's roles alone); one that succeeded
+// with no entries is "no groups", and its entries are the groups.
+func TestFillGroups_AFailedGroupSearchIsNotNoGroups(t *testing.T) {
+	t.Parallel()
+	c := NewLDAPClient(LDAPConfig{GroupSearchBaseDN: "ou=groups,dc=example,dc=com", GroupFilter: "(member={{userDN}})"})
+	for _, tc := range []struct {
+		dir    groupDirectory
+		failed bool
+		groups int
+	}{
+		{groupDirectory{err: errors.New("time limit exceeded")}, true, 0},
+		{groupDirectory{}, false, 0},
+		{groupDirectory{entries: []*ldap.Entry{{DN: "cn=operators,ou=groups,dc=example,dc=com"}}}, false, 1},
+	} {
+		u := &LDAPUser{DN: "uid=carol,dc=example,dc=com"}
+		c.fillGroups(tc.dir, u, true)
+		if u.GroupLookupFailed != tc.failed || len(u.Groups) != tc.groups {
+			t.Errorf("search err %v, %d entries: failed %t, %d groups; want %t, %d", tc.dir.err, len(tc.dir.entries), u.GroupLookupFailed, len(u.Groups), tc.failed, tc.groups)
+		}
 	}
 }
