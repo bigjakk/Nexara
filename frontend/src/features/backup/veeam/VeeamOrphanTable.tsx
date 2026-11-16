@@ -20,6 +20,7 @@ import { ResetColumnsButton } from "@/components/ResetColumnsButton";
 import { DefGrid, Panel } from "@/components/page/Panel";
 import { StateText } from "../components/StateText";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VeeamOrphanedObject } from "../types/backup";
 import { DateTime } from "@/components/DateTime";
 
@@ -220,6 +221,7 @@ function OrphanDetail({
 }) {
   const [vmid, setVmid] = useState("");
   const mapObject = useMapVeeamBackupObject(serverId);
+  const settle = useSaveOutcome();
 
   const parsed = Number(vmid);
   const vmidValid =
@@ -287,11 +289,17 @@ function OrphanDetail({
             !vmidValid || mapObject.isPending || object.cluster_id === null
           }
           onClick={() => {
-            mapObject.mutate({
-              objectId: object.id,
-              clusterId: object.cluster_id,
-              vmid: parsed,
-            });
+            settle(
+              mapObject.mutateAsync({
+                objectId: object.id,
+                clusterId: object.cluster_id,
+                vmid: parsed,
+              }),
+              {
+                action: `Mapping ${object.name || "the backup object"} to guest ${String(parsed)}`,
+                onError: () => undefined, // shown below from the mutation's state
+              },
+            );
           }}
         >
           Map to this guest

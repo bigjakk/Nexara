@@ -53,7 +53,7 @@ export function VeeamPlatformMapping({
   });
   const mapPlatform = useMapVeeamPlatform(serverId);
   // Which row is in flight, so one pending mutation does not freeze the whole
-  // table and an error can name the platform it belongs to.
+  // table.
   const [pending, setPending] = useState<string | null>(null);
 
   const unmapped = platforms.filter((p) => p.cluster_id === null);
@@ -168,13 +168,6 @@ export function VeeamPlatformMapping({
           </TableBody>
         </Table>
       </Panel>
-
-      {mapPlatform.isError && (
-        <p className="text-sm text-destructive">
-          Could not change the mapping.{" "}
-          {mapPlatform.error instanceof Error ? mapPlatform.error.message : ""}
-        </p>
-      )}
 
       <VeeamOwnGuests infrastructure={infrastructure} />
     </div>

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { CopyableName } from "@/components/CopyableName";
 import { useDeletePBSServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { PBSServer } from "../types/backup";
 
 interface DeletePBSServerDialogProps {
@@ -26,12 +27,15 @@ export function DeletePBSServerDialog({
 }: DeletePBSServerDialogProps) {
   const [confirmName, setConfirmName] = useState("");
   const deleteMutation = useDeletePBSServer();
+  const settle = useSaveOutcome(open);
 
   function handleDelete() {
-    deleteMutation.mutate(server.id, {
+    settle(deleteMutation.mutateAsync(server.id), {
+      action: `Deleting PBS server ${server.name}`,
       onSuccess: () => {
         onOpenChange(false);
       },
+      onError: () => undefined, // shown below from the mutation's state
     });
   }
 

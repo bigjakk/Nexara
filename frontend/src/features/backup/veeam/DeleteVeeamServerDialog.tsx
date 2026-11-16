@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { CopyableName } from "@/components/CopyableName";
 import { useDeleteVeeamServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { VeeamServer } from "../types/backup";
 
 interface DeleteVeeamServerDialogProps {
@@ -33,13 +34,16 @@ export function DeleteVeeamServerDialog({
 }: DeleteVeeamServerDialogProps) {
   const [confirmName, setConfirmName] = useState("");
   const deleteMutation = useDeleteVeeamServer();
+  const settle = useSaveOutcome(open);
 
   function handleDelete() {
-    deleteMutation.mutate(server.id, {
+    settle(deleteMutation.mutateAsync(server.id), {
+      action: `Deleting Veeam server ${server.name}`,
       onSuccess: () => {
         onOpenChange(false);
         setConfirmName("");
       },
+      onError: () => undefined, // shown below from the mutation's state
     });
   }
 

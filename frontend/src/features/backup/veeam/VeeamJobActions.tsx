@@ -79,8 +79,6 @@ export function VeeamJobActions({ serverId, job }: VeeamJobActionsProps) {
   const disabled = job.status === DISABLED_STATUS;
   const busy = startJob.isPending || stopJob.isPending || setEnabled.isPending;
 
-  const error = startJob.error ?? stopJob.error ?? setEnabled.error;
-
   function runNow() {
     setNotice("");
     startJob.mutate(job.veeam_id, {
@@ -188,11 +186,6 @@ export function VeeamJobActions({ serverId, job }: VeeamJobActionsProps) {
 
       {notice !== "" && (
         <span className="max-w-xs text-xs text-muted-foreground">{notice}</span>
-      )}
-      {error != null && (
-        <span className="max-w-xs text-xs text-destructive">
-          {error instanceof Error ? error.message : "The action failed."}
-        </span>
       )}
 
       <AlertDialog

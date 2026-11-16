@@ -22,6 +22,7 @@ import {
   type PrivateAddressWarning as PrivateAddressDetails,
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface FingerprintResponse {
   fingerprint: string;
@@ -53,6 +54,7 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const createPBS = useCreatePBSServer();
+  const settle = useSaveOutcome(open);
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
 
@@ -118,8 +120,8 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
   }
 
   function handleCreate() {
-    createPBS.mutate(
-      {
+    settle(
+      createPBS.mutateAsync({
         name,
         api_url: apiUrl,
         token_id: tokenId,
@@ -127,12 +129,14 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
         tls_fingerprint: fingerprint?.fingerprint ?? "",
         cluster_id: clusterId || null,
         ...(allowPrivate ? { allow_private_address: true } : {}),
-      },
+      }),
       {
+        action: `Adding PBS server ${name}`,
         onSuccess: () => {
           setOpen(false);
           resetForm();
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

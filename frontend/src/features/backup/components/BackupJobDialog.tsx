@@ -27,6 +27,7 @@ import {
 import { useResourcePools } from "@/features/pools/api/pool-queries";
 import { formatBytes } from "@/lib/format";
 import { useCreateBackupJob, useUpdateBackupJob } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { BackupJob, BackupJobParams } from "../types/backup";
 import { GuestMultiSelect } from "./GuestMultiSelect";
 import { ScheduleBuilder } from "./ScheduleBuilder";
@@ -70,6 +71,8 @@ export function BackupJobDialog({
 
   const createMutation = useCreateBackupJob();
   const updateMutation = useUpdateBackupJob();
+  // The table opens this one dialog for each job's Edit.
+  const settle = useSaveOutcome(open ? (job?.id ?? "new") : null);
   const storageQuery = useClusterStorage(clusterId);
   const nodesQuery = useClusterNodes(clusterId);
   const poolsQuery = useResourcePools(clusterId);
@@ -184,23 +187,21 @@ export function BackupJobDialog({
     };
 
     if (job) {
-      updateMutation.mutate(
-        { clusterId, jobId: job.id, body },
-        {
-          onSuccess: () => {
-            onOpenChange(false);
-          },
+      settle(updateMutation.mutateAsync({ clusterId, jobId: job.id, body }), {
+        action: `Saving backup job ${job.id}`,
+        onSuccess: () => {
+          onOpenChange(false);
         },
-      );
+        onError: () => undefined, // shown below from the mutation's state
+      });
     } else {
-      createMutation.mutate(
-        { clusterId, body },
-        {
-          onSuccess: () => {
-            onOpenChange(false);
-          },
+      settle(createMutation.mutateAsync({ clusterId, body }), {
+        action: "Creating the backup job",
+        onSuccess: () => {
+          onOpenChange(false);
         },
-      );
+        onError: () => undefined, // shown below from the mutation's state
+      });
     }
   };
 

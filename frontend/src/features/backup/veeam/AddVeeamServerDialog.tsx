@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useCreateVeeamServer } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { VeeamRequirementsNote } from "./VeeamRequirementsNote";
 import { VeeamCertificateStep } from "./VeeamCertificateStep";
 import { useVeeamFingerprint } from "./useVeeamFingerprint";
@@ -39,6 +40,7 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
 
   const cert = useVeeamFingerprint();
   const createServer = useCreateVeeamServer();
+  const settle = useSaveOutcome(open);
 
   function resetForm() {
     setName("");
@@ -66,20 +68,22 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
   }
 
   function handleCreate() {
-    createServer.mutate(
-      {
+    settle(
+      createServer.mutateAsync({
         name,
         base_url: baseUrl,
         username,
         password,
         tls_fingerprint: cert.pinToStore(),
         ...(allowPrivate ? { allow_private_address: true } : {}),
-      },
+      }),
       {
+        action: `Adding Veeam server ${name}`,
         onSuccess: () => {
           setOpen(false);
           resetForm();
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   }

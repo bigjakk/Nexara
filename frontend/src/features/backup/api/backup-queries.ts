@@ -314,6 +314,7 @@ export function useCreatePBSServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (req: CreatePBSServerRequest) =>
       apiClient.post<PBSServer>(apiPath`/api/v1/pbs-servers`, req),
     onSuccess: () => {
@@ -326,6 +327,7 @@ export function useDeletePBSServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (pbsId: string) =>
       apiClient.delete<{ status: string }>(
         apiPath`/api/v1/pbs-servers/${pbsId}`,
@@ -374,6 +376,7 @@ export function useChangeBackupOwner() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       pbsId,
       store,
@@ -491,6 +494,7 @@ export function useCreateBackupJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       body,
@@ -514,6 +518,7 @@ export function useUpdateBackupJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       clusterId,
       jobId,
@@ -711,6 +716,7 @@ export function useCreateVeeamServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (req: CreateVeeamServerRequest) =>
       apiClient.post<VeeamServer>(apiPath`/api/v1/veeam-servers`, req),
     onSuccess: () => {
@@ -736,6 +742,7 @@ export function useDeleteVeeamServer() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.delete<never>(apiPath`/api/v1/veeam-servers/${id}`),
     onSuccess: () => {
@@ -937,6 +944,7 @@ export function useMapVeeamBackupObject(serverId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       objectId,
       clusterId,

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useChangeBackupOwner } from "../api/backup-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { PBSSnapshot } from "../types/backup";
 
 interface ChangeOwnerDialogProps {
@@ -47,6 +48,9 @@ export function ChangeOwnerDialog({
   onClose,
 }: ChangeOwnerDialogProps) {
   const changeMutation = useChangeBackupOwner();
+  const settle = useSaveOutcome(
+    `${snapshot.datastore}/${snapshot.backup_type}/${snapshot.backup_id}`,
+  );
   const [owner, setOwner] = useState(() =>
     serverToken !== undefined && serverToken !== snapshot.owner
       ? serverToken
@@ -66,8 +70,8 @@ export function ChangeOwnerDialog({
 
   const handleSubmit = () => {
     if (!ready) return;
-    changeMutation.mutate(
-      {
+    settle(
+      changeMutation.mutateAsync({
         pbsId,
         store: snapshot.datastore,
         body: {
@@ -75,8 +79,12 @@ export function ChangeOwnerDialog({
           backup_id: snapshot.backup_id,
           owner: trimmed,
         },
+      }),
+      {
+        action: `Changing the owner of ${group}`,
+        onSuccess: onClose,
+        onError: () => undefined, // shown below from the mutation's state
       },
-      { onSuccess: onClose },
     );
   };
 

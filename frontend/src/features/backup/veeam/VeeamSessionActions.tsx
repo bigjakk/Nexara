@@ -59,13 +59,6 @@ export function VeeamSessionActions({
         e.stopPropagation();
       }}
     >
-      {stopSession.error != null && (
-        <span className="max-w-xs text-xs text-destructive">
-          {stopSession.error instanceof Error
-            ? stopSession.error.message
-            : "Could not stop the run."}
-        </span>
-      )}
       <Button
         variant="ghost"
         size="sm"
