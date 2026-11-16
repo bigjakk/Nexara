@@ -1343,7 +1343,10 @@ describe("ClusterACMETab Order Certificate and Renew", () => {
       );
       expect(mock()).not.toHaveBeenCalled();
 
-      await user.click(within(dialog).getByRole("button", { name: button }));
+      // Both reload pveproxy, and Renew revokes the old certificate: red.
+      const confirm = within(dialog).getByRole("button", { name: button });
+      expect(confirm).toHaveClass("bg-destructive");
+      await user.click(confirm);
       await waitFor(() => {
         expect(mock()).toHaveBeenCalledTimes(1);
       });
