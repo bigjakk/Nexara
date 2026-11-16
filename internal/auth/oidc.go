@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -148,6 +149,13 @@ const OIDCStateTTL = 10 * time.Minute
 // the state, and the callback refuses a state the browser it comes back in cannot show
 // the secret of (login CSRF; see OIDCStateBindingDigest).
 func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string) (authURL, state string, err error) {
+	// The browser is sent to this URL (the SPA assigns it to window.location), and
+	// the discovery document names it: anything but an http(s) URL with a host —
+	// javascript:, data: — is refused.
+	if u, perr := url.Parse(p.oauth2Cfg.Endpoint.AuthURL); perr != nil || u.Host == "" ||
+		!strings.EqualFold(u.Scheme, "https") && !strings.EqualFold(u.Scheme, "http") {
+		return "", "", fmt.Errorf("%w: the authorization endpoint is not an http or https URL", ErrOIDCProviderInit)
+	}
 	state, err = generateRandomString(32)
 	if err != nil {
 		return "", "", fmt.Errorf("generate state: %w", err)

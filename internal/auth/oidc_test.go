@@ -120,3 +120,25 @@ func TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified(t *testing.T)
 		}
 	}
 }
+
+// TestGenerateAuthURL_RefusesAnAuthorizationEndpointThatIsNotHTTP: the URL the browser
+// is sent to comes from the discovery document; a javascript: one is refused before
+// any state is stored.
+func TestGenerateAuthURL_RefusesAnAuthorizationEndpointThatIsNotHTTP(t *testing.T) {
+	t.Parallel()
+	for endpoint, ok := range map[string]bool{
+		"https://idp.example.com/auth": true,
+		"javascript:alert(1)//x":       false,
+	} {
+		mr := miniredis.RunT(t)
+		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = rdb.Close() })
+		p := &OIDCProvider{oauth2Cfg: oauth2.Config{ClientID: "nexara", Endpoint: oauth2.Endpoint{AuthURL: endpoint}}, rdb: rdb}
+
+		authURL, _, err := p.GenerateAuthURL(t.Context(), "0:digest")
+
+		if (err == nil) != ok || ok != strings.HasPrefix(authURL, endpoint) || !ok && len(mr.Keys()) != 0 {
+			t.Errorf("%s: url %q, err %v, keys %v; want it refused only when not http(s)", endpoint, authURL, err, mr.Keys())
+		}
+	}
+}
