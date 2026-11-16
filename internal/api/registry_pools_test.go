@@ -10,6 +10,8 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // poolRouteCount is how many endpoints registerPoolEndpoints declares. The
@@ -326,3 +328,51 @@ func TestEveryPoolEndpointIsDocumented(t *testing.T) {
 	}
 }
 
+// TestPoolDeleteAnswersEverySpellingOfAPoolID drives DELETE .../pools/:pool_id through the server's
+// middleware, the real pool handler and Proxmox client, and records what each spelling of the id answers
+// and what reaches Proxmox, now that Fiber v3.6 normalizes the path before it routes. pveproxy takes "."
+// and ".." literally, so no dot segment may reach it. "%41" reaches it as the "A" it is equivalent to
+// (RFC 3986 §6.2.2): the normalization the operator accepted, not a new name.
+func TestPoolDeleteAnswersEverySpellingOfAPoolID(t *testing.T) {
+	for _, tt := range []struct {
+		segment string
+		status  int
+		refusal string // a prefix of the refusal's message
+		pve     string // what the stand-in Proxmox was sent; "" for nothing
+	}{
+		{"pool01", fiber.StatusOK, "", "DELETE /api2/json/pools/pool01"},
+		{"..", fiber.StatusBadRequest, trailingSlashRefusal, ""}, // the cluster's path, with its slash
+		{".", fiber.StatusBadRequest, trailingSlashRefusal, ""},  // the collection's path, ditto
+		{"%2e%2e", fiber.StatusBadRequest, trailingSlashRefusal, ""},
+		{"%2E%2E", fiber.StatusBadRequest, trailingSlashRefusal, ""},
+		{"%252e%252e", fiber.StatusBadRequest, "pool_id: ", ""}, // "%2e%2e" to the rule, which admits no "%"
+		{"a%2fb", fiber.StatusBadRequest, "pool_id: ", ""},      // kept encoded, as "a%2Fb"
+		{"%41", fiber.StatusOK, "", "DELETE /api2/json/pools/A"},
+		{"pool01.", fiber.StatusOK, "", "DELETE /api2/json/pools/pool01."},
+	} {
+		t.Run(tt.segment, func(t *testing.T) {
+			// The handler needs the stand-in database newClusterDeleteApp builds.
+			var pools *handlers.PoolHandler
+			pe := declaredEndpoint(t, fiber.MethodDelete, clusterScope+"/pools/:pool_id")
+			pe.Handler = func(c fiber.Ctx, p *apischema.Params) error { return pools.DeletePool(c, p) }
+			app, store, pve := newClusterDeleteApp(t, clusterDeleteFixture{name: "cluster01", extra: []Endpoint{pe}})
+			pools = handlers.NewPoolHandler(db.New(store), clusterDeleteEncKey, nil)
+
+			target := pathPrefix + "clusters/" + testClusterID + "/pools/" + tt.segment
+			req := authedRequest(http.MethodDelete, target)
+			if req.URL.EscapedPath() != target {
+				t.Fatalf("the request would go out as %q, not %q", req.URL.EscapedPath(), target)
+			}
+			status, env := send(t, app, req)
+			if deleted, _ := store.state(); deleted {
+				t.Fatal("the cluster was deleted")
+			}
+			if status != tt.status || !strings.HasPrefix(env.Message, tt.refusal) {
+				t.Errorf("status %d %q, want %d %q", status, env.Message, tt.status, tt.refusal)
+			}
+			if got := strings.Join(pve.lines(), ", "); got != tt.pve {
+				t.Errorf("Proxmox was sent %q, want %q", got, tt.pve)
+			}
+		})
+	}
+}
