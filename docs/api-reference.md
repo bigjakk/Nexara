@@ -1413,7 +1413,7 @@ against the generic settings endpoints, so it cannot be written unvalidated.
 | GET | `/clusters/:id/pools` | List resource pools |
 | POST | `/clusters/:id/pools` | Create pool |
 | GET | `/clusters/:id/pools/:pool_id` | Get pool details |
-| PUT | `/clusters/:id/pools/:pool_id` | Update pool |
+| PUT | `/clusters/:id/pools/:pool_id` | Update pool. Its audit row names the guests and storages it added or removed, and carries `comment_changed: true` when it set the comment, never the text |
 | DELETE | `/clusters/:id/pools/:pool_id` | Delete pool |
 
 Creating a pool whose id is exactly `.` or `..` is refused with `400`. That is

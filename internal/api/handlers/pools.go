@@ -21,7 +21,7 @@ import (
 // What stays here is the audit row and the cluster event each write emits, and
 // the mapping of Proxmox's own refusals onto a status code.
 
-// poolAuditTextMax bounds each free-text or list value a pool update records:
+// poolAuditTextMax bounds each list value a pool update records:
 // the schema allows far more, and an audit row is never trimmed.
 const poolAuditTextMax = 1024
 
@@ -114,7 +114,7 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 	// Proxmox reads it so. A pool's History is mostly its membership, and a bare
 	// "updated" says none of it; the observer takes the members a row lists to
 	// have joined without the flag and left with it, and no other member.
-	detailMap := map[string]string{"poolid": poolID}
+	detailMap := map[string]any{"poolid": poolID}
 	if req.VMs != "" {
 		detailMap["vms"] = auditTruncate(req.VMs, poolAuditTextMax)
 	}
@@ -125,7 +125,9 @@ func (h *PoolHandler) UpdatePool(c fiber.Ctx, p *apischema.Params) error {
 		detailMap["delete"] = "1"
 	}
 	if req.Comment != nil {
-		detailMap["comment"] = auditTruncate(*req.Comment, poolAuditTextMax)
+		// Whether the request set the comment ("" clears it), never its text:
+		// a Viewer reads this row.
+		detailMap["comment_changed"] = true
 	}
 	details, _ := json.Marshal(detailMap)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "pool", poolID, "updated", details)

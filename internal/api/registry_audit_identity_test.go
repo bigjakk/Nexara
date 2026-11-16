@@ -381,13 +381,13 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 			wantTask:    true,
 		},
 		{
-			name: "a pool update names the members it touched", method: fiber.MethodPut, path: clusterScope + "/pools/:pool_id",
-			target: "/pools/pool01", body: `{"vms":"100,101","delete":"1"}`,
+			name: "a pool update names the members it touched, and that it set the comment", method: fiber.MethodPut,
+			path: clusterScope + "/pools/:pool_id", target: "/pools/pool01", body: `{"vms":"100,101","delete":"1","comment":"web"}`,
 			bind: func(q *db.Queries) Handler {
 				return handlers.NewPoolHandler(q, haCreateEncKey, nil).UpdatePool
 			},
 			wantType: "pool", wantID: "pool01", wantAction: "updated",
-			wantDetails: map[string]any{"vms": "100,101", "delete": "1"},
+			wantDetails: map[string]any{"vms": "100,101", "delete": "1", "comment_changed": true}, wantAbsent: []string{"comment"},
 		},
 		{
 			// The audit table is never trimmed, so each list a pool update records is
