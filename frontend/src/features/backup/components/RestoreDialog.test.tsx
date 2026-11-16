@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { fill, setupUser } from "@/test/user";
@@ -72,6 +72,68 @@ describe("RestoreDialog — Start after restore", () => {
       expect(
         screen.queryByText(/needs the execute:vm permission/) === null,
       ).toBe(enabled);
+    } finally {
+      useAuthStore.setState({ permissions: [] });
+    }
+  });
+});
+
+// The server refuses a force restore to a caller without delete on the
+// archive's kind, so the dialog disables the tick and never sends force.
+describe("RestoreDialog — Overwrite existing VM", () => {
+  it("is disabled without delete:vm and the request carries no force", async () => {
+    vi.mocked(apiClient.list).mockImplementation((path: unknown) => {
+      const p = String(path);
+      if (p.endsWith("/clusters"))
+        return Promise.resolve([{ id: "c1", name: "cluster01" }]);
+      if (p.endsWith("/nodes"))
+        return Promise.resolve([
+          { id: "n1", name: "pve-01", status: "online" },
+        ]);
+      if (p.endsWith("/storage"))
+        return Promise.resolve([
+          {
+            storage: "store01",
+            type: "pbs",
+            content: "backup",
+            active: true,
+            enabled: true,
+          },
+        ]);
+      return Promise.resolve([]);
+    });
+    vi.mocked(apiClient.post).mockResolvedValue({
+      upid: "UPID:pve-01:1",
+      status: "restoring",
+    });
+    useAuthStore.setState({
+      permissions: ["manage:backup", "delete:container"],
+    });
+    try {
+      const user = setupUser();
+      renderWithProviders(<RestoreDialog snapshot={SNAPSHOT} pbsId="p1" />);
+      await user.click(screen.getByRole("button", { name: "Restore" }));
+      const overwrite = await screen.findByRole("checkbox", {
+        name: "Overwrite existing VM",
+      });
+      expect(overwrite).toBeDisabled();
+      expect(
+        screen.getByText(/needs the delete:vm permission/),
+      ).toBeInTheDocument();
+      await user.click(overwrite);
+      const restore = within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Restore",
+      });
+      await vi.waitFor(() => {
+        expect(restore).toBeEnabled();
+      });
+      await user.click(restore);
+      await vi.waitFor(() => {
+        expect(apiClient.post).toHaveBeenCalled();
+      });
+      expect(vi.mocked(apiClient.post).mock.calls[0]?.[1]).toMatchObject({
+        force: false,
+      });
     } finally {
       useAuthStore.setState({ permissions: [] });
     }

@@ -47,10 +47,14 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
   const [startAfter, setStartAfter] = useState(false);
   // The server holds a start after restore to what the guest's power route
   // needs (execute on its kind), so the tick is offered only to a holder.
-  const { canExecute } = usePermissions();
+  const { canExecute, canDelete } = usePermissions();
   const { t } = useTranslation("vms");
   const startKind = snapshot.backup_type === "ct" ? "container" : "vm";
   const canStart = canExecute(startKind);
+  // Overwriting a guest replaces it as deleting it would, so the server holds a
+  // force restore to delete on the archive's kind; the tick is offered only to a holder.
+  const canOverwrite = canDelete(startKind);
+  const overwrite = force && canOverwrite;
   const [error, setError] = useState<string | null>(null);
   const [restoreUpid, setRestoreUpid] = useState<string | null>(null);
 
@@ -114,10 +118,10 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
 
   // When force is checked and VM exists on a specific node, auto-select that node
   useEffect(() => {
-    if (force && existingVMNode) {
+    if (overwrite && existingVMNode) {
       setTargetNode(existingVMNode.name);
     }
-  }, [force, existingVMNode]);
+  }, [overwrite, existingVMNode]);
 
   const restoreMutation = useRestoreBackup();
   // The dialog shows a failure itself (the hook opts out of the app's toast),
@@ -143,7 +147,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
           target_node: targetNode,
           vmid: parsedVmid,
           ...(storage ? { storage } : {}),
-          force,
+          force: overwrite,
           unique,
           start_after_restore: startAfter && canStart,
         },
@@ -250,7 +254,9 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                   onChange={(e) => {
                     setTargetNode(e.target.value);
                   }}
-                  disabled={nodes.length === 0 || (force && !!existingVMNode)}
+                  disabled={
+                    nodes.length === 0 || (overwrite && !!existingVMNode)
+                  }
                 >
                   <option value="">Select node...</option>
                   {nodes.map((n) => (
@@ -259,7 +265,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                     </option>
                   ))}
                 </select>
-                {force && existingVMNode && (
+                {overwrite && existingVMNode && (
                   <p className="text-xs text-muted-foreground">
                     Auto-selected {existingVMNode.name}: VM {vmid} exists on
                     this node.
@@ -318,7 +324,8 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    checked={force}
+                    checked={overwrite}
+                    disabled={!canOverwrite}
                     onChange={(e) => {
                       setForce(e.target.checked);
                     }}
@@ -338,6 +345,13 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                   />
                   Start after restore
                 </label>
+                {!canOverwrite && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("overwriteNeedsDelete", {
+                      permission: `delete:${startKind}`,
+                    })}
+                  </p>
+                )}
                 {!canStart && (
                   <p className="text-xs text-muted-foreground">
                     {t("startNeedsExecute", {
@@ -347,7 +361,7 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
                 )}
               </div>
 
-              {force && (
+              {overwrite && (
                 <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
