@@ -502,7 +502,7 @@ func (q *Queries) SetVMOSType(ctx context.Context, arg SetVMOSTypeParams) error 
 
 const updateUnreportedVM = `-- name: UpdateUnreportedVM :exec
 UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7, run_state = $8,
-    uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
+    type = $9, uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
 WHERE id = $1
 `
 
@@ -515,6 +515,7 @@ type UpdateUnreportedVMParams struct {
 	Pool      string    `json:"pool"`
 	LockState string    `json:"lock_state"`
 	RunState  string    `json:"run_state"`
+	Type      string    `json:"type"`
 }
 
 // UpdateUnreportedVM is the fast sync's UpsertVM for a guest /cluster/resources
@@ -529,6 +530,8 @@ type UpdateUnreportedVMParams struct {
 // last_seen_at as UpsertVM does, and records the change in
 // guest_status_changes too, by trigger. The lock is written like the tags: it
 // comes from the guest's configuration, not from pvestatd.
+// type too: the listing names the kind even for a guest it cannot report, and a
+// VMID recreated as the other kind must not keep the old one.
 func (q *Queries) UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error {
 	_, err := q.db.Exec(ctx, updateUnreportedVM,
 		arg.ID,
@@ -539,6 +542,7 @@ func (q *Queries) UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVM
 		arg.Pool,
 		arg.LockState,
 		arg.RunState,
+		arg.Type,
 	)
 	return err
 }

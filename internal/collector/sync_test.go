@@ -370,6 +370,7 @@ func (m *mockQueries) UpdateUnreportedVM(_ context.Context, arg db.UpdateUnrepor
 	for k, vm := range m.vms {
 		if vm.ID == arg.ID {
 			vm.NodeID, vm.Status, vm.Tags, vm.HaState, vm.Pool, vm.LockState, vm.RunState = arg.NodeID, arg.Status, arg.Tags, arg.HaState, arg.Pool, arg.LockState, arg.RunState
+			vm.Type = arg.Type
 			if arg.Status == "unknown" {
 				vm.Uptime = 0
 			}

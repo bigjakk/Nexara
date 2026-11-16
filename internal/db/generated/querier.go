@@ -3507,6 +3507,8 @@ type Querier interface {
 	// last_seen_at as UpsertVM does, and records the change in
 	// guest_status_changes too, by trigger. The lock is written like the tags: it
 	// comes from the guest's configuration, not from pvestatd.
+	// type too: the listing names the kind even for a guest it cannot report, and a
+	// VMID recreated as the other kind must not keep the old one.
 	UpdateUnreportedVM(ctx context.Context, arg UpdateUnreportedVMParams) error
 	// A run's progress. Only an unfinished run moves, so neither a late answer nor
 	// the sweep below overwrites an outcome already recorded; an empty tracking id

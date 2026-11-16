@@ -252,6 +252,7 @@ func (s *Syncer) syncClusterResources(ctx context.Context, cluster db.Cluster) e
 				// slow pass's node list does.
 				LockState: r.Lock,
 				RunState:  runState,
+				Type:      r.Type,
 			})
 		} else {
 			_, writeErr = s.queries.UpsertVM(ctx, db.UpsertVMParams{

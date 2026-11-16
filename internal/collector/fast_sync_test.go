@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -139,12 +140,15 @@ func TestSyncClusterResources(t *testing.T) {
 			unknownFor time.Duration // already listed "unknown" for this long
 			writes     int           // the one write is the "unknown"
 			noRow      bool          // nothing to keep: inserted as listed
-		}{{"online", 0, 0, false}, {"unknown", 0, 0, false}, {"online", 2 * unknownStatusGrace, 1, false},
-			{"offline", 0, 1, false}, {"offline", 0, 1, true}} {
+			kind       string        // listed type; "" is the row's own, qemu
+		}{{"online", 0, 0, false, ""}, {"unknown", 0, 0, false, ""}, {"online", 2 * unknownStatusGrace, 1, false, ""},
+			{"offline", 0, 1, false, ""}, {"offline", 0, 1, true, ""},
+			{"offline", 0, 1, false, "lxc"}} { // the VMID recreated as a container: the kind is the listing's
 			node := nodeOnline
 			node.Status = tc.node
+			kind := cmp.Or(tc.kind, "qemu")
 			srv := newResourceServer(t, []proxmox.ClusterResource{node,
-				{Type: "qemu", VMID: 100, Node: "pve1", Status: "unknown", Pool: "pool01"}})
+				{Type: kind, VMID: 100, Node: "pve1", Status: "unknown", Pool: "pool01"}})
 			mq := newMockQueries()
 			s := newTestSyncer(mq)
 			cluster := makeCluster(t, srv.URL)
@@ -158,7 +162,7 @@ func TestSyncClusterResources(t *testing.T) {
 				want = db.Vm{ClusterID: cluster.ID, NodeID: nodeID, Vmid: 100, Type: "qemu"}
 			}
 			if tc.writes == 1 {
-				want.Status, want.Pool, want.Uptime = "unknown", "pool01", 0
+				want.Status, want.Pool, want.Uptime, want.Type = "unknown", "pool01", 0, kind
 			}
 			if tc.unknownFor > 0 {
 				s.resourceUnknownSince.Store(cluster.ID, map[int32]time.Time{100: time.Now().Add(-tc.unknownFor)})

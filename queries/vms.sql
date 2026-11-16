@@ -69,8 +69,10 @@ UPDATE vms SET status = $2, run_state = '', updated_at = now() WHERE id = $1;
 -- guest_status_changes too, by trigger. The lock is written like the tags: it
 -- comes from the guest's configuration, not from pvestatd.
 -- name: UpdateUnreportedVM :exec
+-- type too: the listing names the kind even for a guest it cannot report, and a
+-- VMID recreated as the other kind must not keep the old one.
 UPDATE vms SET node_id = $2, status = $3, tags = $4, ha_state = $5, pool = $6, lock_state = $7, run_state = $8,
-    uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
+    type = $9, uptime = CASE WHEN $3 = 'unknown' THEN 0 ELSE uptime END, last_seen_at = now()
 WHERE id = $1;
 
 -- name: SetVMOSType :exec
