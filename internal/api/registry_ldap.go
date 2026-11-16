@@ -117,11 +117,22 @@ func registerLDAPEndpoints(reg *Registry, h *handlers.LDAPHandler) {
 		Description: "Re-read every LDAP-sourced account from the directory: disable the ones a search " +
 			"found missing, re-enable the ones a sync had disabled that are back, refresh display names, " +
 			"and re-apply the group-to-role mapping. A failed search changes nothing. 409 while another " +
-			"sync of the config runs; 502 when the directory cannot be reached or bound to.",
+			"sync of the config runs; 502 when the directory cannot be reached or bound to. 422 " +
+			"ldap_sync_too_many_missing, changing nothing, when most of the accounts searched for are " +
+			"missing (details.users_missing); repeating it with acknowledge_missing at least that count " +
+			"deactivates them, and the audit row records the acknowledged count.",
 		Group:       "Authentication",
 		Permissions: globalCheck("manage", "user"),
-		Parameters:  apischema.Properties{"id": ldapConfigIDParam},
-		Handler:     h.Sync,
+		Parameters: apischema.Properties{
+			"id": ldapConfigIDParam,
+			"acknowledge_missing": {
+				Type: apischema.Integer, Optional: true, Minimum: apischema.Ptr(1.0),
+				Maximum: apischema.Ptr(2147483647.0), Typetext: "<integer>",
+				Description: "The number of missing accounts a confirm named, to deactivate them although the " +
+					"mass-miss rule stopped the sync. Accepted only while no more accounts than this are missing.",
+			},
+		},
+		Handler: h.Sync,
 	})
 }
 

@@ -565,7 +565,10 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get LDAP config")
 	}
 
-	res, err := h.syncConfig(c.Context(), id)
+	// The count a confirm named, to pass the mass-miss rule on purpose (0: not given).
+	// Bounded by the schema at math.MaxInt32 (registry_ldap.go).
+	ack, _ := p.OptInt("acknowledge_missing")
+	res, err := h.syncConfig(c.Context(), id, int(ack))
 	if errors.Is(err, errLDAPSyncRunning) {
 		// When the lease ends: a sync that stopped without releasing it holds it until then.
 		answer := fiber.Map{
@@ -597,8 +600,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
 			"error": "ldap_sync_too_many_missing",
 			"message": fmt.Sprintf("The directory found no entry for %d of the %d accounts it answered for, so the sync changed nothing. "+
-				"Check the user filter, the search base DN and the bind account's read access.", res.missing, res.answered),
-			"details": fiber.Map{"users_missing": res.missing, "users_skipped": res.skipped},
+				"Check the user filter, the search base DN and the bind account's read access. If these people have left, "+
+				"repeat the sync with acknowledge_missing set to %d to deactivate them.", res.missing, res.answered, res.missing),
+			"details": fiber.Map{"users_missing": res.missing, "users_skipped": res.skipped, "acknowledge_field": "acknowledge_missing"},
 		})
 	case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
 		return fiber.NewError(fiber.StatusBadGateway, "The directory could not be searched, so the sync stopped and nobody was deactivated by it. "+
@@ -647,6 +651,9 @@ type ldapSyncResult struct {
 	synced, disabled, reEnabled, skipped, missing int
 	answered                                      int // searches that answered: found or missing
 	notSignedIn                                   int // no stored sign-in name, and a filter that does not match the address
+	// acknowledged is the count a Sync Now confirmed to pass the mass-miss rule, when
+	// the rule would have stopped this sync and the count covered it; 0 otherwise.
+	acknowledged int
 	// followed are the accounts whose address moved with their entry's (or could not),
 	// one audit row each.
 	followed []addressFollowed
@@ -735,6 +742,10 @@ func tooManyMissing(missing, searched int) bool {
 func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
 	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped, "missing": r.missing,
 		"not_signed_in_since_upgrade": r.notSignedIn}
+	if r.acknowledged > 0 {
+		d["mass_miss_acknowledged"] = true
+		d["acknowledged_missing"] = r.acknowledged
+	}
 	if err != nil {
 		d["outcome"] = "failed"
 		d["reason"] = ldapFailureClass(err)
@@ -755,7 +766,11 @@ func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
 // deactivated is re-enabled by a sync that finds it again, after its old sessions are
 // ended (an account deactivated by hand stays inactive: deactivated_by_directory). It
 // stops between accounts when ctx ends, which is how it stops with the process.
-func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyncResult, err error) {
+//
+// ackMissing is the count a Sync Now's confirm named: when the mass-miss rule would
+// stop the sync and no more accounts are missing than that, the sync goes on. The
+// scheduled sync passes 0 and never does.
+func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID, ackMissing int) (res ldapSyncResult, err error) {
 	token := uuid.New()
 	cfg, err := h.queries.ClaimLDAPSyncLease(ctx, db.ClaimLDAPSyncLeaseParams{
 		ID: id, Token: token, LeaseSeconds: ldapSyncLease.Seconds(),
@@ -863,7 +878,10 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 	}
 	res.missing, res.answered = missing, len(results)
 	if tooManyMissing(missing, len(results)) {
-		return res, errLDAPSyncTooManyMissing
+		if ackMissing <= 0 || missing > ackMissing {
+			return res, errLDAPSyncTooManyMissing
+		}
+		res.acknowledged = ackMissing
 	}
 
 	for _, r := range results {
@@ -1173,7 +1191,7 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 		return
 	}
 
-	res, err := h.syncConfig(ctx, cfg.ID)
+	res, err := h.syncConfig(ctx, cfg.ID, 0) // the schedule never passes the mass-miss rule
 	if !res.ran {
 		if !errors.Is(err, errLDAPSyncRunning) {
 			slog.Warn("LDAP sync: the scheduled sync could not start", "config_id", cfg.ID, "error", err)

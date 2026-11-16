@@ -104,13 +104,24 @@ export function useTestLDAPConnection() {
   });
 }
 
+/**
+ * Sync Now. acknowledge_missing repeats a sync the mass-miss rule stopped,
+ * with the count of missing accounts the operator confirmed.
+ */
 export function useSyncLDAP() {
   const qc = useQueryClient();
   return useMutation({
     ...errorsHandledLocally,
-    mutationFn: (id: string) =>
+    mutationFn: ({
+      id,
+      acknowledge_missing,
+    }: {
+      id: string;
+      acknowledge_missing?: number | undefined;
+    }) =>
       apiClient.post<LDAPSyncResponse>(
         apiPath`/api/v1/ldap/configs/${id}/sync`,
+        acknowledge_missing != null ? { acknowledge_missing } : undefined,
       ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["ldap", "configs"] });

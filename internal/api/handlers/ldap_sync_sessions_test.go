@@ -41,11 +41,20 @@ func ldapSyncApp(t *testing.T, store *epochStore, dir *fakeDirectory) (*epochApp
 	}
 	a := newEpochApp(t, store, epochOptions{})
 	h := &LDAPHandler{queries: a.users.queries, directory: func(auth.LDAPConfig) ldapDirectory { return *dir }}
-	params, err := apischema.Properties{"id": {Type: apischema.String}}.Validate(map[string]any{"id": store.ldapConfig.ID.String()})
-	if err != nil {
-		t.Fatalf("params: %v", err)
+	// ?ack=N is the acknowledge_missing of a Sync Now that repeats a confirmed one.
+	a.probe = func(c fiber.Ctx) error {
+		raw := map[string]any{"id": store.ldapConfig.ID.String()}
+		if ack := fiber.Query[int](c, "ack"); ack > 0 {
+			raw["acknowledge_missing"] = float64(ack)
+		}
+		params, err := apischema.Properties{"id": {Type: apischema.String},
+			"acknowledge_missing": {Type: apischema.Integer, Optional: true}}.Validate(raw)
+		if err != nil {
+			t.Errorf("params: %v", err)
+			return err
+		}
+		return h.Sync(c, params)
 	}
-	a.probe = func(c fiber.Ctx) error { return h.Sync(c, params) }
 	return a, h, func() int {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, "/probe", nil)
@@ -266,17 +275,21 @@ func TestLDAPSync_SearchesWithTheNameThePersonSignsInWith(t *testing.T) {
 
 // TestLDAPSync_AMassMissDeactivatesNobody: when most of the accounts searched for are
 // missing (at least three), the sync changes nothing, answers 422 and is audited as
-// failed; a minority missing is still deactivated.
+// failed; a minority missing is still deactivated. A Sync Now repeated with an
+// acknowledgement that covers the count passes the rule, and its audit row says so.
 func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		users, present int
+		ack            int // acknowledge_missing; 0 is none
 		status         int
 		disabled       int
 	}{
-		{4, 0, http.StatusUnprocessableEntity, 0},
-		{4, 3, http.StatusOK, 1},
-		{1, 0, http.StatusUnprocessableEntity, 0}, // the last account it can see
+		{4, 0, 0, http.StatusUnprocessableEntity, 0},
+		{4, 3, 0, http.StatusOK, 1},
+		{1, 0, 0, http.StatusUnprocessableEntity, 0}, // the last account it can see
+		{4, 0, 4, http.StatusOK, 4},
+		{4, 0, 3, http.StatusUnprocessableEntity, 0}, // more are missing than were confirmed
 	} {
 		entries := map[string]auth.LDAPUser{}
 		users := make([]db.User, 0, tc.users)
@@ -288,8 +301,9 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 			users = append(users, u)
 		}
 		store := newEpochStore(users...)
-		a, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: entries})
-		status := sync()
+		a, _, _ := ldapSyncApp(t, store, &fakeDirectory{entries: entries})
+		resp := a.send(t, http.MethodGet, fmt.Sprintf("/probe?ack=%d", tc.ack), "", map[string]string{"X-Test-Acting-User": uuid.NewString()}, 30*time.Second)
+		status := resp.StatusCode
 		disabled := 0
 		for _, u := range users {
 			if !store.user(u.ID).IsActive {
@@ -300,8 +314,11 @@ func TestLDAPSync_AMassMissDeactivatesNobody(t *testing.T) {
 		if status != tc.status || disabled != tc.disabled || len(details) != 1 {
 			t.Errorf("%d of %d present: status %d, %d disabled, audit %v; want %d, %d, one row", tc.present, tc.users, status, disabled, details, tc.status, tc.disabled)
 		}
-		if tc.present == 0 && (len(details) != 1 || !strings.Contains(details[0], `"reason":"too_many_missing"`)) {
+		if tc.status != http.StatusOK && (len(details) != 1 || !strings.Contains(details[0], `"reason":"too_many_missing"`)) {
 			t.Errorf("the mass miss is not audited as too_many_missing: %v", details)
+		}
+		if acked := tc.ack > 0 && tc.status == http.StatusOK; len(details) == 1 && strings.Contains(details[0], `"mass_miss_acknowledged":true`) != acked {
+			t.Errorf("ack %d: audit %v; want mass_miss_acknowledged %t", tc.ack, details, acked)
 		}
 	}
 }

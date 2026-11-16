@@ -429,3 +429,42 @@ describe("an LDAP configuration save that settles", () => {
     },
   );
 });
+
+describe("a Sync Now the mass-miss rule stopped", () => {
+  // The rule's 422 becomes a confirm naming the count, and only the confirm
+  // repeats the sync, carrying that count as its acknowledgement.
+  it("confirms the count and repeats the sync with it", async () => {
+    const user = userEvent.setup();
+    mockedPost.mockRejectedValueOnce(
+      new ApiClientError(422, {
+        error: "ldap_sync_too_many_missing",
+        message: "The directory found no entry for 4 of the 4 accounts.",
+        details: { users_missing: 4, users_skipped: 0 },
+      }),
+    );
+    renderPage();
+    await openEdit(user);
+
+    await user.click(screen.getByRole("button", { name: "Sync now" }));
+    const prompt = await screen.findByTestId("confirm-required-warning");
+    expect(within(prompt).getByText("Deactivate 4 accounts?")).toBeVisible();
+    expect(mockedPost).toHaveBeenCalledTimes(1);
+    expect(mockedPost.mock.calls[0]?.[1]).toBeUndefined();
+
+    mockedPost.mockResolvedValueOnce({
+      message: "Sync complete",
+      users_synced: 0,
+      users_disabled: 4,
+      users_re_enabled: 0,
+    });
+    await user.click(
+      within(prompt).getByRole("button", { name: "Deactivate 4 accounts" }),
+    );
+    await waitFor(() => {
+      expect(mockedPost).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedPost.mock.calls[1]?.[1]).toEqual({ acknowledge_missing: 4 });
+    expect(await screen.findByText(/4 disabled/)).toBeVisible();
+    expect(mockedToastError).not.toHaveBeenCalled();
+  });
+});

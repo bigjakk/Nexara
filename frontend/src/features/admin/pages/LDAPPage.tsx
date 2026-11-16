@@ -57,6 +57,9 @@ import { DateTime } from "@/components/DateTime";
 /** The backend's code for an LDAP transport downgrade (ldap.go). */
 const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
 
+/** The backend's code for a sync the mass-miss rule stopped (ldap.go). */
+const SYNC_TOO_MANY_MISSING = "ldap_sync_too_many_missing";
+
 type DirectoryType = "openldap" | "ad";
 
 /**
@@ -125,6 +128,16 @@ function detectDirectoryType(cfg: LDAPConfigRequest): DirectoryType {
   return "openldap";
 }
 
+/** The number of missing accounts a stopped sync reports. */
+function missingCount(stopped: ConfirmRequired): number {
+  const n = stopped.details["users_missing"];
+  return typeof n === "number" ? n : 0;
+}
+
+function accountsLabel(n: number): string {
+  return `${String(n)} account${n === 1 ? "" : "s"}`;
+}
+
 function configToForm(cfg: LDAPConfig): LDAPConfigRequest {
   return {
     name: cfg.name,
@@ -167,6 +180,8 @@ export function LDAPPage() {
     message: string;
   } | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  // A sync the mass-miss rule stopped, which the operator can repeat on purpose.
+  const [syncWarning, setSyncWarning] = useState<ConfirmRequired | null>(null);
 
   // Group mapping rows for editor
   const [mappingRows, setMappingRows] = useState<
@@ -222,6 +237,7 @@ export function LDAPPage() {
   const clearFeedback = () => {
     setTestResult(null);
     setSyncResult(null);
+    setSyncWarning(null);
     setTransportWarning(null);
     setSaveError(null);
   };
@@ -359,26 +375,47 @@ export function LDAPPage() {
     });
   };
 
-  const handleSync = () => {
+  const handleSync = (acknowledgeMissing?: number) => {
     if (!editingId) return;
+    const target = editingId;
     setSyncResult(null);
-    settle(syncLDAP.mutateAsync(editingId), {
-      action: `Syncing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
-      onSuccess: (result) => {
-        const parts = [`${String(result.users_synced)} synced`];
-        if (result.users_disabled > 0) {
-          parts.push(`${String(result.users_disabled)} disabled`);
-        }
-        if (result.users_re_enabled > 0) {
-          parts.push(`${String(result.users_re_enabled)} re-enabled`);
-        }
-        setSyncResult(`${result.message} (${parts.join(", ")})`);
+    if (acknowledgeMissing == null) {
+      setSyncWarning(null);
+    }
+    settle(
+      syncLDAP.mutateAsync({
+        id: target,
+        acknowledge_missing: acknowledgeMissing,
+      }),
+      {
+        action: `Syncing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
+        onSuccess: (result) => {
+          const parts = [`${String(result.users_synced)} synced`];
+          if (result.users_disabled > 0) {
+            parts.push(`${String(result.users_disabled)} disabled`);
+          }
+          if (result.users_re_enabled > 0) {
+            parts.push(`${String(result.users_re_enabled)} re-enabled`);
+          }
+          setSyncResult(`${result.message} (${parts.join(", ")})`);
+          setSyncWarning(null);
+        },
+        onError: (err) => {
+          const stopped = confirmRequiredFromError(
+            err,
+            [SYNC_TOO_MANY_MISSING],
+            target,
+          );
+          if (stopped != null && missingCount(stopped) > 0) {
+            setSyncWarning(stopped);
+            return;
+          }
+          setSyncWarning(null);
+          const reason = describeError(err);
+          setSyncResult(reason ? `Sync failed: ${reason}` : "Sync failed");
+        },
       },
-      onError: (err) => {
-        const reason = describeError(err);
-        setSyncResult(reason ? `Sync failed: ${reason}` : "Sync failed");
-      },
-    });
+    );
   };
 
   const showForm = isNew || editingId;
@@ -942,7 +979,9 @@ export function LDAPPage() {
                 >
                   <Button
                     variant="outline"
-                    onClick={handleSync}
+                    onClick={() => {
+                      handleSync();
+                    }}
                     disabled={syncLDAP.isPending}
                   >
                     {syncLDAP.isPending ? (
@@ -953,6 +992,22 @@ export function LDAPPage() {
                     Sync now
                   </Button>
                 </SettingRow>
+              )}
+              {syncWarning != null && syncWarning.target === editingId && (
+                <div className="pb-3.5">
+                  <ConfirmRequiredWarning
+                    title={`Deactivate ${accountsLabel(missingCount(syncWarning))}?`}
+                    message={`The directory found no entry for ${accountsLabel(missingCount(syncWarning))}, so the sync changed nothing. This usually means the user filter, the search base DN or the bind account's access is wrong. Deactivate them only if these people have left; their sessions end.`}
+                    confirmLabel={`Deactivate ${accountsLabel(missingCount(syncWarning))}`}
+                    onConfirm={() => {
+                      handleSync(missingCount(syncWarning));
+                    }}
+                    onCancel={() => {
+                      setSyncWarning(null);
+                    }}
+                    pending={syncLDAP.isPending}
+                  />
+                </div>
               )}
             </SettingsSection>
 
