@@ -672,6 +672,13 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
 	hostname := p.String("hostname")
+	// Proxmox starts the guest at the end of the create when asked to, which
+	// takes what the power route takes.
+	if p.Bool("start") {
+		if err := requireGuestPowerPerm(c, "container", clusterID, "Starting the container once it is created"); err != nil {
+			return err
+		}
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

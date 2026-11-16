@@ -488,6 +488,14 @@ func (h *VMImportHandler) StartVMImport(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusBadRequest, "vmid must be between 100 and 999999999")
 	}
 
+	// Starting the VM after the import, or running it while it imports, powers it
+	// on, which takes what the power route takes.
+	if req.StartAfter || req.LiveImport {
+		if err := requireGuestPowerPerm(c, "vm", clusterID, "Starting the imported VM"); err != nil {
+			return err
+		}
+	}
+
 	userID, _ := c.Locals("user_id").(uuid.UUID)
 
 	node, cluster, pxClient, err := h.resolveNode(c, clusterID, req.TargetNode)

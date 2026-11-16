@@ -1374,6 +1374,13 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
 	name := p.String("name")
+	// Proxmox starts the guest at the end of the create when asked to, which
+	// takes what the power route takes.
+	if p.Bool("start") {
+		if err := requireGuestPowerPerm(c, "vm", clusterID, "Starting the VM once it is created"); err != nil {
+			return err
+		}
+	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {

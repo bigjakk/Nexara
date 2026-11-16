@@ -392,8 +392,8 @@ func startImportParams() apischema.Properties {
 		},
 		"name":        optString(255, "<string>", "Name for the new guest. Omitted keeps the one the source metadata carries."),
 		"disk_format": imageFormatParam("Format to write the imported disks in. Omitted lets the target storage decide."),
-		"start_after": optFlag("Start the guest once the import finishes."),
-		"live_import": optFlag("Start the guest while its disks are still converting, which Proxmox supports for some sources."),
+		"start_after": optFlag("Start the guest once the import finishes. Requires execute:vm as well."),
+		"live_import": optFlag("Start the guest while its disks are still converting, which Proxmox supports for some sources. Requires execute:vm as well."),
 
 		// ── Guest-config overrides ────────────────────────────────────
 		"cores":       optCount(1024, "Cores per socket. 0 or omitted keeps the source-derived value."),

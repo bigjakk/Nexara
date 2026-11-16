@@ -1190,6 +1190,15 @@ A node's firewall rule routes are listed with the other rule sets under [Firewal
 
 ### Virtual Machines
 
+**Powering a guest on needs `execute` on its kind.** Anything that starts or
+stops a guest needs what its power route (`POST …/vms/:vm_id/status`,
+`POST …/containers/:ct_id/status`) needs: `execute:vm` for a VM,
+`execute:container` for a container, on the cluster. That covers `start` on a
+VM or container create, `start_after` and `live_import` on a VM import,
+`start_after_restore` on a restore, and a `force` restore over a guest that is
+not stopped. Without it the answer is `403` naming the permission, and nothing is
+asked of Proxmox.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/vms` | List VMs in a cluster |

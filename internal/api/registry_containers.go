@@ -377,7 +377,7 @@ func createCTParams() apischema.Properties {
 
 		"unprivileged": optFlag("Create an unprivileged container, which maps root inside the container to " +
 			"an unprivileged uid on the host."),
-		"start": optFlag("Start the container once it is created."),
+		"start": optFlag("Start the container once it is created. Requires execute:container as well."),
 
 		// Metadata.
 		"description":  optString(8192, "<string>", "Free-text note stored on the container."),

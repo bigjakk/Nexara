@@ -1172,7 +1172,7 @@ func createVMParams() apischema.Properties {
 		"hotplug": optString(256, "<features>", "Hot-pluggable device classes, e.g. \"network,disk,usb\"."),
 		"onboot":  optTristateBool("Start the VM when its node boots."),
 		"tablet":  optTristateBool("Attach a USB tablet pointer."),
-		"start":   optFlag("Start the VM once it is created."),
+		"start":   optFlag("Start the VM once it is created. Requires execute:vm as well."),
 
 		// Cloud-init.
 		"ciuser":       optString(255, "<user>", "Cloud-init user to create."),
