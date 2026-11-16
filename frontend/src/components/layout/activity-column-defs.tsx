@@ -13,7 +13,6 @@ import { PVESourceBadge } from "@/components/PVESourceBadge";
 import { TaskProgressCell } from "@/components/TaskProgressCell";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
-import { formatRelativeTime } from "@/lib/format";
 import {
   activityLabel,
   SEVERITY_LABELS,
@@ -24,6 +23,7 @@ import {
   type Severity,
 } from "./activity-columns";
 import { STATUS_LABEL, type DerivedTaskStatus } from "./task-status";
+import { DateTime } from "@/components/DateTime";
 
 /**
  * A row's state as a dot: a running task blue, a failed one red, a finished
@@ -186,7 +186,7 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     align: "right",
     cell: (row) => (
       <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-        {formatRelativeTime(row.entry.created_at)}
+        <DateTime value={row.entry.created_at} />
       </span>
     ),
   },

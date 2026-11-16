@@ -17,7 +17,6 @@ import { TaskProgressCell } from "@/components/TaskProgressCell";
 import { Segmented, type SegmentedOption } from "@/components/ui/segmented";
 import { useDataTable } from "@/hooks/useDataTable";
 import type { ColumnLayout } from "@/hooks/useColumnLayout";
-import { formatDateTime, formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_ACTIVITY_SORT,
@@ -38,6 +37,7 @@ import {
   ACTIVITY_COLUMN_DEFS,
   type ActivityCellCtx,
 } from "./activity-column-defs";
+import { DateTime, useDateText } from "@/components/DateTime";
 
 // A removed cluster's entry keeps its id, but nothing can be asked of that
 // cluster any more, so it is treated as having none.
@@ -175,7 +175,7 @@ function ActivityRow({
                 )}
                 <DetailField label="User">{row.actorLabel || "—"}</DetailField>
                 <DetailField label="Time">
-                  {formatDateTime(entry.created_at)}
+                  <DateTime value={entry.created_at} />
                 </DetailField>
                 {isFailed && row.exitStatusText !== "" && (
                   <div className="col-span-full">
@@ -280,6 +280,7 @@ function ActivityFilterControl({
 function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
   const { t } = useTranslation("common");
   const { featured, latest } = summary;
+  const when = useDateText(latest?.entry.created_at);
   if (featured) {
     return (
       <span className="hidden min-w-0 items-center gap-2.5 text-[12.5px] sm:flex">
@@ -295,7 +296,7 @@ function ActivitySummaryLine({ summary }: { summary: ActivitySummary }) {
     <span className="hidden min-w-0 truncate text-[12.5px] text-muted-foreground sm:inline">
       {t("activityLast", {
         label: activityLabel(latest),
-        when: formatRelativeTime(latest.entry.created_at),
+        when,
       })}
     </span>
   );
