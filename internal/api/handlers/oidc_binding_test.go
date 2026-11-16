@@ -231,6 +231,24 @@ func TestOIDCBrowserBindings_AreHostPrefixedWhenSecure(t *testing.T) {
 			t.Errorf("matches with %q = %s, want %s", cookie, body, want)
 		}
 	}
+
+	// Spending clears the cookie that was set: the __Host- one at / for a Secure
+	// record, the unprefixed one at its route otherwise.
+	for secure, path := range map[bool]string{true: "/", false: oidcCallbackPath} {
+		app := fiber.New()
+		app.Get("/spend", func(c fiber.Ctx) error {
+			oidcStateBinding.spend(c, "value", bindingRecord(secure, "secret"))
+			return c.SendStatus(http.StatusNoContent)
+		})
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/spend", nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := cookiesNamed(resp, oidcStateBinding.cookieName(secure, "value"))
+		if len(got) != 1 || got[0].Path != path || got[0].Secure != secure || got[0].MaxAge >= 0 {
+			t.Errorf("spend, Secure %v: Set-Cookie %+v, want one at %s, Secure %v, a negative Max-Age", secure, got, path, secure)
+		}
+	}
 }
 
 // TestOIDCBindingSecure_IsTheRedirectURIsUnderAuto: under SECURE_COOKIES=auto the
