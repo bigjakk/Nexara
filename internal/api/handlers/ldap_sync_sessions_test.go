@@ -75,9 +75,13 @@ type fakeDirectory struct {
 	found *auth.LDAPUser
 	err   error
 	names map[string]bool
+	panic bool
 }
 
 func (d fakeDirectory) SearchUser(name string) (*auth.LDAPUser, error) {
+	if d.panic {
+		panic("search panicked")
+	}
 	switch {
 	case d.names != nil && !d.names[name]:
 	case d.found != nil:
@@ -285,5 +289,18 @@ func TestLDAP_AFailedGroupSearchChangesNoRole(t *testing.T) {
 	})
 	if !ok || len(store.named("RevokeAllUserRoles"))+len(store.named("AssignUserRole")) != 0 {
 		t.Errorf("sign-in: signed in %t, roles touched %d times; want signed in, none", ok, len(store.named("RevokeAllUserRoles"))+len(store.named("AssignUserRole")))
+	}
+}
+
+// TestLDAPSync_APanicInTheScheduledSyncIsRecovered: a panic in the sync (here the
+// directory's) must not take the process down, and leaves the lease released.
+func TestLDAPSync_APanicInTheScheduledSyncIsRecovered(t *testing.T) {
+	t.Parallel()
+	store := newEpochStore(db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap"})
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60}
+	_, h, _ := ldapSyncApp(t, store, &fakeDirectory{panic: true})
+	h.RunScheduledSync(context.Background())
+	if store.syncLeased {
+		t.Error("the lease is still held after the panic")
 	}
 }

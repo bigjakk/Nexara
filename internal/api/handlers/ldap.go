@@ -794,6 +794,14 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 // scheduler ticks it every minute on the leader replica. It is audited as the system
 // account, the way internal/scheduler writes its own rows.
 func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
+	// A panic here, or in go-ldap, must not take the process down; the lease is released
+	// by syncConfig's own defer. Only the panic's type is logged: its value can carry a
+	// search filter, and with it what someone typed.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("LDAP sync: the scheduled sync panicked", "panic_type", fmt.Sprintf("%T", r))
+		}
+	}()
 	cfg, err := h.queries.GetEnabledLDAPConfig(ctx)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
