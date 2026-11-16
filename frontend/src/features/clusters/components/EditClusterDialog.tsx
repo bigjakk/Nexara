@@ -332,8 +332,9 @@ export function EditClusterDialog({
                   <p className="text-sm text-muted-foreground">
                     Node addresses are learned from this API, so the stored SSH
                     credential and every pinned host key were entrusted to
-                    machines this cluster is leaving. Saving clears both. Re-enter the credential and
-                    re-pin each node before the next rolling update.
+                    machines this cluster is leaving. Saving clears both.
+                    Re-enter the credential and re-pin each node before the next
+                    rolling update.
                   </p>
                 </div>
               </div>

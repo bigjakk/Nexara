@@ -199,7 +199,7 @@ describe("EditClusterDialog stored credentials", () => {
       expect(mockedPut).toHaveBeenCalledTimes(1);
     });
     const body = mockedPut.mock.calls[0]?.[1] as Record<string, unknown>;
-    expect(body.name).toBe("cluster01");
+    expect(body["name"]).toBe("cluster01");
     expect(body).not.toHaveProperty("token_secret");
   });
 });
