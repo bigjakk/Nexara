@@ -254,8 +254,13 @@ const (
 	signInMethod        = "password"
 )
 
-func unknownSignInKey(ip string) string      { return "login:unknown:" + ip }
-func unknownSignInCarryKey(ip string) string { return "login:unknown:last:" + ip }
+// The bound is per sign-in method as well as per address, so that each method's row
+// is labelled with its own failures: one SSO failure must not take a minute of
+// password failures' row.
+func unknownSignInKey(method, ip string) string { return "login:unknown:" + method + ":" + ip }
+func unknownSignInCarryKey(method, ip string) string {
+	return "login:unknown:last:" + method + ":" + ip
+}
 
 // countUnknownSignIn counts one failure of an identifier that names no account
 // against its source address. KEYS: this window's counter, the carry of the last
@@ -309,7 +314,7 @@ func unknownSignInDetails(c fiber.Ctx, rdb *redis.Client, method, reason string)
 	ip := c.IP()
 	ctx, cancel := context.WithTimeout(c.Context(), loginLockoutWait)
 	vals, err := boundedByContext(ctx, func(ctx context.Context) ([]int64, error) {
-		return countUnknownSignIn.Run(ctx, rdb, []string{unknownSignInKey(ip), unknownSignInCarryKey(ip)},
+		return countUnknownSignIn.Run(ctx, rdb, []string{unknownSignInKey(method, ip), unknownSignInCarryKey(method, ip)},
 			unknownSignInWindow.Milliseconds(), unknownSignInCarry.Milliseconds()).Int64Slice()
 	})
 	cancel()

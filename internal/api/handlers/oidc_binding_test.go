@@ -343,3 +343,25 @@ func TestOIDCCallback_AnUnverifiedEmailIsAFailedSignIn(t *testing.T) {
 		})
 	}
 }
+
+// TestUnknownSignInDetails_EachMethodHasItsOwnBound: a password failure and an SSO
+// failure from one address in one minute each get their own row, labelled with their
+// own method, so one method cannot take the other's row.
+func TestUnknownSignInDetails_EachMethodHasItsOwnBound(t *testing.T) {
+	t.Parallel()
+	a := newEpochApp(t, newEpochStore(), epochOptions{})
+	var got []string
+	a.probe = func(c fiber.Ctx) error {
+		for _, method := range []string{"oidc", "password", "oidc"} {
+			if details, audit := unknownSignInDetails(c, a.rdb, method, "unknown_account"); audit {
+				got = append(got, string(details))
+			}
+		}
+		return c.SendStatus(http.StatusNoContent)
+	}
+	a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
+
+	if len(got) != 2 || !strings.Contains(got[0], `"method":"oidc"`) || !strings.Contains(got[1], `"method":"password"`) {
+		t.Errorf("rows %v, want one for oidc and one for password", got)
+	}
+}
