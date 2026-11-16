@@ -105,3 +105,31 @@ func TestLogout_HasNoPerAddressLimit(t *testing.T) {
 		t.Errorf("the owner's sign-out after 300 others from the same address = %d, want 200", code)
 	}
 }
+
+// The console-token mint is capped at 60 a minute per address, and the router's
+// other spellings of its path spend the same budget: 61 mints, the last two in
+// upper case and escaped, and only the last is refused.
+func TestConsoleTokenMintsAreCapped(t *testing.T) {
+	s := newTestServer(t)
+	var got []int
+	for i := 0; i < 61; i++ {
+		target := "/api/v1/auth/console-token"
+		switch i {
+		case 59:
+			target = "/API/v1/auth/console-token"
+		case 60:
+			target = "/api/v1/auth/%63onsole-token"
+		}
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.URL = &url.URL{Opaque: target}
+		resp, err := s.app.Test(req)
+		if err != nil {
+			t.Fatalf("Test: %v", err)
+		}
+		got = append(got, resp.StatusCode)
+		_ = resp.Body.Close()
+	}
+	if got[59] == fiber.StatusTooManyRequests || got[60] != fiber.StatusTooManyRequests {
+		t.Errorf("the 60th and 61st mints answered %d and %d; want the 61st alone refused 429", got[59], got[60])
+	}
+}
