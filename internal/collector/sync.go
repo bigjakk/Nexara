@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -335,6 +336,7 @@ type Syncer struct {
 	encryptionKey        string
 	clientFactory        ClientFactory
 	pbsClientFactory     PBSClientFactory
+	pbsServerTimeout     time.Duration        // one PBS server's turn in SyncAllPBS; 0 is pbsServerSyncTimeout
 	cache                *proxmox.ClientCache // nil-safe; tests may leave unset
 	healthMonitor        *HealthMonitor
 	eventPub             eventPublisher
@@ -1472,6 +1474,11 @@ func appendOSDSnapshots(dst []cephOSDMetricSnapshot, clusterID uuid.UUID, node *
 	return dst
 }
 
+// pbsServerSyncTimeout bounds one PBS server's turn in SyncAllPBS, as
+// clusterSyncTimeout's floor bounds a cluster's: generous for a large datastore's
+// snapshot listing, but finite.
+const pbsServerSyncTimeout = 2 * time.Minute
+
 // SyncAllPBS syncs all active PBS servers and returns collected metric results.
 func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 	servers, err := s.queries.ListActivePBSServers(ctx)
@@ -1480,10 +1487,16 @@ func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
 		return nil
 	}
 
+	timeout := cmp.Or(s.pbsServerTimeout, pbsServerSyncTimeout)
 	var results []*PBSMetricResult
 	for _, server := range servers {
 		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
-		result, err := s.syncPBSServer(ctx, server)
+		// Each server under its own deadline: one that does not answer would
+		// otherwise hold every server after it, and the pass, for as long as
+		// its connection stays open.
+		serverCtx, cancel := context.WithTimeout(ctx, timeout)
+		result, err := s.syncPBSServer(serverCtx, server)
+		cancel()
 		if err != nil {
 			s.logger.Error("failed to sync PBS server",
 				"pbs_id", server.ID,

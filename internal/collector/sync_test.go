@@ -43,6 +43,7 @@ type mockQueries struct {
 	upsertVMCalls                 []db.UpsertVMParams
 	upsertVMFailures              int // UpsertVM fails this many more calls, then succeeds
 	unreportedVMCalls             []db.UpdateUnreportedVMParams
+	pbsServers                    []db.PbsServer // ListActivePBSServers' answer
 	upsertStorageCalls            []db.UpsertStoragePoolParams
 	replicationUpserts            []db.UpsertReplicationJobParams
 	replicationUpsertErr          error
@@ -514,7 +515,7 @@ func (m *mockQueries) DeleteStaleReplicationJobs(_ context.Context, _ uuid.UUID)
 
 // PBS mock methods (no-op stubs for interface compliance).
 func (m *mockQueries) ListActivePBSServers(_ context.Context) ([]db.PbsServer, error) {
-	return nil, nil
+	return m.pbsServers, nil
 }
 
 func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, arg db.UpsertPBSSnapshotParams) (db.PbsSnapshot, error) {

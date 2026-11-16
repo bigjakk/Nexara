@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -20,9 +22,14 @@ type pbsFakeClient struct {
 	PBSProxmoxClient
 	datastoresErr, syncErr, verifyErr error
 	snapshotsErrFor                   string // the datastore whose snapshots cannot be listed
+	hang                              bool   // the first read answers only when its context ends
 }
 
-func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatastoreStatus, error) {
+func (c *pbsFakeClient) GetDatastoreStatus(ctx context.Context) ([]proxmox.PBSDatastoreStatus, error) {
+	if c.hang {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return nil, nil
 }
 
@@ -123,5 +130,41 @@ func TestSyncAllPBSClassifiesGlobalChanges(t *testing.T) {
 	(&Syncer{queries: mq, logger: testLogger()}).SyncAllPBS(context.Background())
 	if mq.classifyGlobalObs != 1 {
 		t.Fatalf("classified %d times, want once", mq.classifyGlobalObs)
+	}
+}
+
+// One PBS server that does not answer holds the pass only for its own turn:
+// the server after it is still synced. Without a deadline per server the pass
+// would wait on the first for as long as its connection stays open.
+func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
+	t.Parallel()
+	secret, err := crypto.Encrypt("secret-token-value", testEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hung := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.20:8007", TokenSecretEncrypted: secret}
+	next := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.21:8007", TokenSecretEncrypted: secret}
+	s := &Syncer{
+		queries:          &mockQueries{pbsServers: []db.PbsServer{hung, next}},
+		encryptionKey:    testEncryptionKey,
+		pbsServerTimeout: 50 * time.Millisecond,
+		pbsClientFactory: func(url, _, _, _ string) (PBSProxmoxClient, error) {
+			return &pbsFakeClient{hang: url == hung.ApiUrl}, nil
+		},
+		logger: testLogger(),
+	}
+	done := make(chan []*PBSMetricResult, 1)
+	go func() { done <- s.SyncAllPBS(context.Background()) }()
+	select {
+	case results := <-done:
+		var synced []uuid.UUID
+		for _, r := range results {
+			synced = append(synced, r.PBSServerID)
+		}
+		if !slices.Contains(synced, next.ID) {
+			t.Errorf("synced %v, want the server after the hung one among them", synced)
+		}
+	case <-time.After(30 * time.Second): // 600x the turn: only a pass with no deadline gets here
+		t.Fatal("the pass never got past a server that did not answer")
 	}
 }
