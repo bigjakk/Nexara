@@ -85,7 +85,7 @@ function persistedCopyIsAtDefaults(): boolean {
       .getOptions()
       .storage?.getItem(PERSIST_KEY);
     if (stored === undefined || stored === null) return true;
-    if (stored instanceof Promise) return false;
+    if ("then" in stored) return false;
     const { tabs, activeTabId, windowMode } = stored.state;
     return tabs.length === 0 && activeTabId === null && windowMode === "hidden";
   } catch {
