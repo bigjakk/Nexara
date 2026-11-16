@@ -648,6 +648,16 @@ describe("HardwarePanel dirty check", () => {
     ]);
   });
 
+  // No memory line runs at $memory_fmt's default of 512 MiB (Memory.pm), so
+  // that is what the field shows, and the panel opens clean on it.
+  it("shows an absent memory as Proxmox's default of 512", async () => {
+    const config = nicVM();
+    delete config["memory"];
+    const save = await renderPanel(config);
+    expect(control(document.body, "Memory (MiB)")).toHaveValue(512);
+    expect(save).toBeDisabled();
+  });
+
   // The "(current)" option comes from the STORED value, which stands here for
   // one newer than the lists (Proxmox's own enums today). It shows as the
   // value, so the panel opens clean, and picking another does not take it out

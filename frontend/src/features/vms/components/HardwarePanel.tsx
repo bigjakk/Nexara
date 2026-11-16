@@ -160,6 +160,13 @@ const BOOT_DISK_KEY_RE = /^(scsi|ide|sata|virtio)\d+$/;
 const DEFAULT_CPU_TYPE = "x86-64-v2-AES";
 
 /**
+ * The memory a config without a memory line runs with: $memory_fmt's
+ * `current` default of 512 MiB, which parse_memory returns for an undefined
+ * value (src/PVE/QemuServer/Memory.pm).
+ */
+const DEFAULT_MEMORY = 512;
+
+/**
  * The machine a config naming no machine type runs as: qemu-server's default
  * for x86_64 (default_machine_for_arch, src/PVE/QemuServer/Machine.pm).
  */
@@ -529,7 +536,7 @@ export function HardwarePanel({
   const [cpuunits, setCpuunits] = useState("");
 
   // --- Memory ---
-  const [memory, setMemory] = useState("2048");
+  const [memory, setMemory] = useState(String(DEFAULT_MEMORY));
   // memory is a $memory_fmt property string whose `current` is required, so
   // qemu-server refuses "" (and the whole Save with it); deleted, it reads as
   // the format's default of 512 MiB (Memory.pm parse_memory). Neither is what
@@ -828,7 +835,7 @@ export function HardwarePanel({
     setCpuunits(config["cpuunits"] != null ? str(config["cpuunits"]) : "");
 
     // Memory
-    setMemory(str(config["memory"] ?? 2048));
+    setMemory(str(config["memory"] ?? DEFAULT_MEMORY));
     setBalloon(config["balloon"] != null ? str(config["balloon"]) : "");
     setShares(config["shares"] != null ? str(config["shares"]) : "");
     setAllowKsm(
@@ -1102,7 +1109,8 @@ export function HardwarePanel({
     }
 
     // Memory
-    if (memory !== str(original["memory"] ?? 2048)) fields["memory"] = memory;
+    if (memory !== str(original["memory"] ?? DEFAULT_MEMORY))
+      fields["memory"] = memory;
     const origBalloon =
       original["balloon"] != null ? str(original["balloon"]) : "";
     if (balloon !== origBalloon) fields["balloon"] = balloon || "0";
@@ -1503,7 +1511,7 @@ export function HardwarePanel({
       (original["cpuunits"] != null ? str(original["cpuunits"]) : "")
     )
       return true;
-    if (memory !== str(original["memory"] ?? 2048)) return true;
+    if (memory !== str(original["memory"] ?? DEFAULT_MEMORY)) return true;
     if (
       balloon !== (original["balloon"] != null ? str(original["balloon"]) : "")
     )
