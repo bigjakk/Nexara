@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/auth"
@@ -196,5 +198,34 @@ func requireMismatchAudited(t *testing.T, store *epochStore, id uuid.UUID) {
 	if !strings.Contains(details[0], `"reason":"identity_mismatch"`) || strings.Contains(details[0], epochSubject) ||
 		strings.Contains(details[0], epochIssuer) {
 		t.Errorf("audit details %s: want the fixed reason and no asserted subject or issuer", details[0])
+	}
+}
+
+// TestIsDuplicateKeyError: a unique violation is told by its SQLSTATE, not by text — a
+// server whose lc_messages is not English words it differently, and an error that is not
+// the database's can say "duplicate key" — and, when the caller names a key, by that key.
+func TestIsDuplicateKeyError(t *testing.T) {
+	t.Parallel()
+	unique := func(constraint string) error {
+		return &pgconn.PgError{Code: "23505", ConstraintName: constraint,
+			Message: `doppelter Schlüsselwert verletzt Unique-Constraint »` + constraint + `«`}
+	}
+	for _, tc := range []struct {
+		name        string
+		err         error
+		constraints []string
+		want        bool
+	}{
+		{name: "a unique violation in another language", err: unique("users_email_key"), want: true},
+		{name: "wrapped", err: fmt.Errorf("create user: %w", unique("users_email_key")), want: true},
+		{name: "text that is not the database's", err: errors.New(`duplicate key value violates unique constraint "x"`)},
+		{name: "another SQLSTATE", err: &pgconn.PgError{Code: "23503", Message: "duplicate key"}},
+		{name: "the named key", err: unique(usersOIDCIdentityKey), constraints: []string{usersOIDCIdentityKey}, want: true},
+		{name: "another key than the named one", err: unique("users_email_key"), constraints: []string{usersOIDCIdentityKey}},
+		{name: "nil", err: nil},
+	} {
+		if got := isDuplicateKeyError(tc.err, tc.constraints...); got != tc.want {
+			t.Errorf("%s: isDuplicateKeyError = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

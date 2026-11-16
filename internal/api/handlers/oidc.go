@@ -9,13 +9,16 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
@@ -1387,10 +1390,26 @@ func (h *OIDCHandler) linkOIDCAccount(c fiber.Ctx, user db.User, info *auth.OIDC
 		AuditLogAs(c, h.queries, h.eventPub, linked.ID, pgtype.UUID{}, "auth", linked.ID.String(), "oidc_identity_linked", details)
 		return linked, nil
 	}
-	if !errors.Is(err, pgx.ErrNoRows) && !isDuplicateKeyError(err) {
+	if !errors.Is(err, pgx.ErrNoRows) && !isDuplicateKeyError(err, usersOIDCIdentityKey) {
 		return db.User{}, fmt.Errorf("link the account: %w", err)
 	}
 	return h.boundAccountAfterRace(c, info)
+}
+
+// usersOIDCIdentityKey is the unique index on users (oidc_issuer, oidc_subject)
+// (migration 000149): a link refused by it is an identity another account holds.
+const usersOIDCIdentityKey = "users_oidc_identity_key"
+
+// isDuplicateKeyError reports a unique violation (SQLSTATE 23505), read from the code
+// and not from the message, which the server's lc_messages may translate and which
+// any other error could happen to contain. With constraints, only a violation of one
+// of those counts: for a caller whose answer depends on which key was hit.
+func isDuplicateKeyError(err error, constraints ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgerrcode.UniqueViolation {
+		return false
+	}
+	return len(constraints) == 0 || slices.Contains(constraints, pgErr.ConstraintName)
 }
 
 // boundAccountAfterRace settles a link or a creation that lost a race with another

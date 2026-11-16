@@ -3146,12 +3146,3 @@ func passwordCommitUnconfirmed(userID uuid.UUID, err error) error {
 		"user_id", userID, "error", err)
 	return fiber.NewError(fiber.StatusInternalServerError, passwordChangeUnconfirmedMessage)
 }
-
-// isDuplicateKeyError checks if a pgx error is a unique constraint violation.
-func isDuplicateKeyError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint")
-}
