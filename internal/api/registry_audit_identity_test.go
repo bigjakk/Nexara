@@ -455,7 +455,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				`[{"sid":"vm:109","state":"started","max_restart":1}]`,
 				`[{"sid":"vm:109","state":"started","max_restart":1,"comment":"web"}]`}},
 			wantType: "ha_resource", wantID: "vm:109", wantAction: "updated",
-			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"state", "max_restart", "fields_unverified"},
+			wantDetails: map[string]any{"comment_changed": true}, wantAbsent: []string{"comment", "state", "max_restart", "fields_unverified"},
 		},
 		{
 			name: "an HA group update records only what it moved", method: fiber.MethodPut, path: haScope + "/groups/:group",
@@ -465,7 +465,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				`[{"group":"group01","nodes":"pve-01,pve-02","type":"group"}]`,
 				`[{"group":"group01","nodes":"pve-02,pve-01","comment":"web","type":"group"}]`}},
 			wantType: "ha_group", wantID: "group01", wantAction: "updated",
-			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"nodes", "fields_unverified"},
+			wantDetails: map[string]any{"comment_changed": true}, wantAbsent: []string{"comment", "nodes", "fields_unverified"},
 		},
 		{
 			name: "an HA rule update records only what it moved", method: fiber.MethodPut, path: haScope + "/rules/:rule",
@@ -475,7 +475,7 @@ func TestClusterObjectAuditRowsFileUnderOneKey(t *testing.T) {
 				`[{"rule":"rule01","type":"node-affinity","resources":"vm:101,vm:100","order":1}]`,
 				`[{"rule":"rule01","type":"node-affinity","resources":"vm:100,vm:101","comment":"web","order":2}]`}},
 			wantType: "ha_rule", wantID: "rule01", wantAction: "updated",
-			wantDetails: map[string]any{"comment": "web"}, wantAbsent: []string{"resources", "resource_names", "fields_unverified"},
+			wantDetails: map[string]any{"comment_changed": true}, wantAbsent: []string{"comment", "resources", "resource_names", "fields_unverified"},
 		},
 		{
 			// A node's firewall rules file under the node's rule set, as the cluster's and a

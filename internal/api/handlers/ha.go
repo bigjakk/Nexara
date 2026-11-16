@@ -352,9 +352,8 @@ func (h *HAHandler) CreateResource(c fiber.Ctx, p *apischema.Params) error {
 	if req.MaxRelocate != nil {
 		detailMap["max_relocate"] = *req.MaxRelocate
 	}
-	if req.Comment != "" {
-		detailMap["comment"] = req.Comment
-	}
+	// That a comment was given, never its text: a Viewer reads this row.
+	detailMap["comment_set"] = req.Comment != ""
 	if req.Failback != nil {
 		detailMap["failback"] = *req.Failback
 	}
@@ -498,7 +497,7 @@ func (h *HAHandler) DeleteResource(c fiber.Ctx, p *apischema.Params) error {
 			detailMap["group"] = snapshot.Group
 		}
 		if snapshot.Comment != "" {
-			detailMap["comment"] = snapshot.Comment
+			detailMap["comment_set"] = true // never its text: a Viewer reads this row
 		}
 		// Recorded exactly when the resource stored a value, 0 included: an
 		// explicit 0 is a policy (no restarts, no relocation, no failback),
@@ -583,9 +582,8 @@ func (h *HAHandler) CreateGroup(c fiber.Ctx, p *apischema.Params) error {
 	if req.NoFailback != 0 {
 		detailMap["nofailback"] = req.NoFailback
 	}
-	if req.Comment != "" {
-		detailMap["comment"] = req.Comment
-	}
+	// That a comment was given, never its text: a Viewer reads this row.
+	detailMap["comment_set"] = req.Comment != ""
 	details, _ := json.Marshal(detailMap)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_group", req.Group, "created", details)
 	h.publishHA(c, clusterID, req.Group, "group_created")
@@ -784,9 +782,8 @@ func (h *HAHandler) CreateRule(c fiber.Ctx, p *apischema.Params) error {
 	if req.Affinity != "" {
 		detailMap["affinity"] = req.Affinity
 	}
-	if req.Comment != "" {
-		detailMap["comment"] = req.Comment
-	}
+	// That a comment was given, never its text: a Viewer reads this row.
+	detailMap["comment_set"] = req.Comment != ""
 	details, _ := json.Marshal(detailMap)
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "ha_rule", req.Rule, "created", details)
 	h.publishHA(c, clusterID, req.Rule, "rule_created")
@@ -949,7 +946,7 @@ func haRuleDeleteDetails(ctx context.Context, queries *db.Queries, clusterID uui
 			detailMap["affinity"] = snapshot.Affinity
 		}
 		if snapshot.Comment != "" {
-			detailMap["comment"] = snapshot.Comment
+			detailMap["comment_set"] = true // never its text: a Viewer reads this row
 		}
 		if snapshot.Disable != 0 {
 			// UpdateRule records this, so a delete that omitted it made a

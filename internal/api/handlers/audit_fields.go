@@ -228,10 +228,16 @@ func movedFields(before, after map[string]json.RawMessage, kind pvefield.Kind) (
 // with the value sent, or with all of them and fields_unverified when that
 // cannot be told (movedFields): the row of an update whose details are the
 // fields it set as keys (an HA object's, the cluster firewall's options), so
-// the observer's keys rule names only what the write moved.
+// the observer's keys rule names only what the write moved. A comment is free
+// text a Viewer may not read: it is kept as comment_changed: true, which the
+// keys rule reads as the comment.
 func keepMoved(details, set map[string]any, moved []string, ok bool) map[string]any {
 	for name, v := range set {
 		if !ok || slices.Contains(moved, name) {
+			if name == "comment" {
+				details["comment_changed"] = true
+				continue
+			}
 			details[name] = v
 		}
 	}

@@ -67,3 +67,25 @@ func TestAuditSentChanged(t *testing.T) {
 		t.Errorf("a field always sent: %v, want autostart 0 beside type", got)
 	}
 }
+
+// An update's comment is recorded as changed, never as its text, whether the
+// write was seen to move it or could not be checked.
+func TestKeepMoved_RecordsACommentAsChanged(t *testing.T) {
+	t.Parallel()
+	set := map[string]any{"comment": "free text", "nodes": "pve-01"}
+	for _, tc := range []struct {
+		name  string
+		moved []string
+		ok    bool
+		want  string
+	}{
+		{"moved", []string{"comment"}, true, `{"comment_changed":true,"rule":"r1"}`},
+		{"not moved", []string{"nodes"}, true, `{"nodes":"pve-01","rule":"r1"}`},
+		{"not checked", nil, false, `{"comment_changed":true,"fields_unverified":true,"nodes":"pve-01","rule":"r1"}`},
+	} {
+		got, _ := json.Marshal(keepMoved(map[string]any{"rule": "r1"}, set, tc.moved, tc.ok))
+		if string(got) != tc.want {
+			t.Errorf("%s: %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}

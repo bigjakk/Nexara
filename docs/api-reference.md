@@ -1682,6 +1682,11 @@ Rules are addressed by position, so every rule listing returns a `digest` on eac
 | POST | `/clusters/:id/ha/arm` | Re-arm HA cluster-wide (PVE 9.2+) |
 | POST | `/clusters/:id/ha/disarm` | Disarm HA cluster-wide, freezing or ignoring resources (PVE 9.2+) |
 
+The audit row of an HA resource, group or rule create carries `comment_set`,
+whether a non-empty comment was given; an update's carries `comment_changed:
+true` when it changed the comment; a resource or rule delete's `comment_set:
+true` when the deleted one had a comment — never the comment's text.
+
 ### Replication
 
 | Method | Path | Description |

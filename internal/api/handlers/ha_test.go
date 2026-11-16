@@ -190,13 +190,16 @@ func TestHARuleDeleteDetails(t *testing.T) {
 			"resources": "vm:abc",
 			"nodes":     "pve-01,pve-02",
 			"strict":    float64(1),
-			"affinity":  "negative",
-			"comment":   "spread the pair",
-			"disable":   float64(1),
+			"affinity":    "negative",
+			"comment_set": true, // never its text: a Viewer reads the row
+			"disable":     float64(1),
 		} {
 			if got[key] != want {
 				t.Errorf("details[%q] = %v, want %v", key, got[key], want)
 			}
+		}
+		if _, ok := got["comment"]; ok {
+			t.Errorf("details carry the comment's text: %v", got)
 		}
 		if _, ok := got["prior_state_unknown"]; ok {
 			t.Error("prior_state_unknown is set on a row whose snapshot was read fine")

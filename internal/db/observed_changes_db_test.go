@@ -278,9 +278,9 @@ func TestObservedChanges(t *testing.T) {
 		audit(observedCluster, in, "vm", uuid.NewString(), vmid, "config_update", details)
 	}
 	haKeysSet := seed(observedCluster, "ha_rule", "rule01", 0, "changed", "", []string{"comment"}, at)
-	audit(observedCluster, in, "ha_rule", "rule01", 0, "updated", map[string]any{"rule": "rule01", "comment": "x"})
+	audit(observedCluster, in, "ha_rule", "rule01", 0, "updated", map[string]any{"rule": "rule01", "comment_changed": true})
 	haKeysOther := seed(observedCluster, "ha_rule", "rule02", 0, "changed", "", []string{"comment", "nodes"}, at)
-	audit(observedCluster, in, "ha_rule", "rule02", 0, "updated", map[string]any{"rule": "rule02", "comment": "x"})
+	audit(observedCluster, in, "ha_rule", "rule02", 0, "updated", map[string]any{"rule": "rule02", "comment_changed": true})
 	optionsSet := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"crs"}, at)
 	optionsOther := seed(observedCluster, "cluster_options", observedCluster.String(), 0, "changed", "", []string{"migration"}, at)
 	audit(observedCluster, in, "cluster_options", observedCluster.String(), 0, "updated",

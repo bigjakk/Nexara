@@ -347,8 +347,11 @@ WITH rules AS MATERIALIZED (
                        UNION
                        SELECT f FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'cleared') = 'array'
                                                                     THEN k.details->'cleared' ELSE '[]' END) AS f)
+                   -- A free-text field is recorded as <f>_changed (a comment
+                   -- a Viewer may not read), which names <f>.
                    WHEN k.fields_from = 'keys' THEN ARRAY(
-                       SELECT jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END))
+                       SELECT regexp_replace(f, '_changed$', '')
+                       FROM jsonb_object_keys(CASE WHEN jsonb_typeof(k.details) = 'object' THEN k.details ELSE '{}' END) AS f)
                    WHEN k.fields_from = 'fields' THEN ARRAY(
                        SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.details->'fields') = 'array'
                                                              THEN k.details->'fields' ELSE '[]' END))
