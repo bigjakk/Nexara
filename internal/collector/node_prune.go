@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -262,7 +263,7 @@ func (s *Syncer) auditNodeRemoved(ctx context.Context, cluster db.Cluster, node 
 		"alerts_resolved": alertsResolved,
 	})
 
-	_ = s.queries.InsertAuditLog(ctx, db.InsertAuditLogParams{
+	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
 		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
 		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
 		ResourceType: "node",
@@ -270,8 +271,4 @@ func (s *Syncer) auditNodeRemoved(ctx context.Context, cluster db.Cluster, node 
 		Action:       "node_removed",
 		Details:      details,
 	})
-
-	if s.eventPub != nil {
-		s.eventPub.ClusterEvent(ctx, cluster.ID.String(), events.KindAuditEntry, "node", node.Name, "node_removed")
-	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit/audittest"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -168,7 +170,8 @@ func (r *recordingNotifier) NotifyResolved(_ context.Context, a db.AlertHistory)
 // TestSyncCluster_RemovesANodeTheClusterStopsListing wires the plan into the
 // pass: the second pass without pve-02 deletes its row, turns off its node
 // rules, resolves its active alerts (and only its), audits it as a system
-// action with those counts, and publishes the inventory change.
+// action with those counts (row, audit_entry and syslog record), and publishes
+// the inventory change.
 func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	t.Parallel()
 
@@ -179,8 +182,9 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 
 	mq := newMockQueries()
 	pub := &mockEventPub{}
+	collector, next := audittest.Collector(t)
 	syncer := newTestSyncer(mq)
-	syncer.SetEventPublisher(pub)
+	syncer.SetEventPublisher(forwardingEventPub{pub, collector.SyslogForwarder()})
 	cluster := makeCluster(t, srv.URL)
 	seedNodes(mq, cluster.ID, "pve-01", "pve-02")
 	goneID, keptID := mq.nodes[cluster.ID.String()+":pve-02"].ID, mq.nodes[cluster.ID.String()+":pve-01"].ID
@@ -229,6 +233,12 @@ func TestSyncCluster_RemovesANodeTheClusterStopsListing(t *testing.T) {
 	}
 	if mq.enabledNodeRules[keptID] != 1 {
 		t.Errorf("pve-01's rules were turned off")
+	}
+	if n := pub.countKind(events.KindAuditEntry); n != 1 {
+		t.Errorf("audit_entry events = %d, want 1", n)
+	}
+	if line := next(5 * time.Second); !strings.Contains(line, `action="node_removed"`) || !strings.Contains(line, `resource_id="pve-02"`) {
+		t.Errorf("collector received %q, want the node_removed entry", line)
 	}
 	if pub.countKind(events.KindAlertStateChange) != 2 {
 		t.Errorf("alert_state_change events = %d, want 2", pub.countKind(events.KindAlertStateChange))
