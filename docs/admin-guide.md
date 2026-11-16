@@ -752,7 +752,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 An SSO account is bound to one identity at the provider: the ID token's issuer (`iss`) and subject (`sub`), stored on the account when it is created or first linked. At every sign-in:
 
 - the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token;
-- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in;
+- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication, or a deactivated one, is not linked by the sign-in (a check after the provider could still refuse it): it signs in by its address, as before, and stays **Not linked yet**;
 - otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
 - an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
 
