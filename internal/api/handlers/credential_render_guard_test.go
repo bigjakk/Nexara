@@ -92,6 +92,23 @@ var credentialRenderers = map[string]credentialRendererNote{
 		reason: "redacts; APIToken is dropped by all four renderings and the real property string " +
 			"lives on PropertyString — see TestGuard_TargetEndpointNeverPrintsItsToken",
 	},
+	"internal/proxmox.AccessUser": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts keys in fmt and slog; no MarshalJSON on purpose, the user responses embed it and withhold keys " +
+			"themselves (accessUsersForRead) — see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.AccessUserDetail": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason:     "as AccessUser (accessUserDetailForRead) — see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.AccessTokenCreated": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Value in fmt and slog; no MarshalJSON on purpose, the token routes return the secret once, as JSON, " +
+			"to the operator who minted it — see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
 	"internal/ssh.Config": {
 		redacts:    true,
 		renderings: []string{"GoString", "LogValue", "MarshalJSON", "String"},

@@ -2956,6 +2956,47 @@ type AccessUserDetail struct {
 	Keys      string   `json:"keys"`
 }
 
+// The renderings below keep a user's keys out of logs and error text. keys is the
+// user's two-factor field (YubiKey ids, or on a realm with legacy OATH the TOTP
+// shared secrets themselves; pve-access-control API2/TFA.pm). String, GoString and
+// LogValue cover fmt's %v/%s/%+v/%#v and slog; there is deliberately no MarshalJSON,
+// because the access handlers embed these types in their response bodies (which
+// withhold keys themselves) and a promoted MarshalJSON would replace those bodies.
+// Value receivers, so a value held in a struct or slice is covered too.
+
+func (u AccessUser) String() string {
+	return "AccessUser{userid:" + u.UserID + " keys:" + redactedIfSet(u.Keys) + "}"
+}
+
+func (u AccessUser) GoString() string {
+	return `proxmox.AccessUser{UserID:"` + u.UserID + `", Keys:"` + redactedIfSet(u.Keys) + `"}`
+}
+
+func (u AccessUser) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("userid", u.UserID), slog.String("realm_type", u.RealmType))
+}
+
+func (u AccessUserDetail) String() string {
+	return "AccessUserDetail{userid:" + u.UserID + " keys:" + redactedIfSet(u.Keys) + "}"
+}
+
+func (u AccessUserDetail) GoString() string {
+	return `proxmox.AccessUserDetail{UserID:"` + u.UserID + `", Keys:"` + redactedIfSet(u.Keys) + `"}`
+}
+
+func (u AccessUserDetail) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("userid", u.UserID))
+}
+
+// redactedIfSet is what a rendering shows for a secret field: that it is set, never
+// its value.
+func redactedIfSet(v string) string {
+	if v == "" {
+		return ""
+	}
+	return "REDACTED"
+}
+
 // AccessUserFields are the mutable user attributes shared by create and update.
 // Pointers are tri-state: nil leaves the field untouched, a set pointer writes
 // it, and a set pointer to the zero value clears it.
@@ -3013,6 +3054,21 @@ type AccessTokenCreated struct {
 	FullTokenID string          `json:"full-tokenid"`
 	Value       string          `json:"value"`
 	Info        AccessTokenInfo `json:"info"`
+}
+
+// String, GoString and LogValue keep the secret out of logs and error text, as
+// AccessUser's do; there is no MarshalJSON, because CreateToken and UpdateToken
+// return this value to the operator who asked for it, as JSON.
+func (t AccessTokenCreated) String() string {
+	return "AccessTokenCreated{full-tokenid:" + t.FullTokenID + " value:" + redactedIfSet(t.Value) + "}"
+}
+
+func (t AccessTokenCreated) GoString() string {
+	return `proxmox.AccessTokenCreated{FullTokenID:"` + t.FullTokenID + `", Value:"` + redactedIfSet(t.Value) + `"}`
+}
+
+func (t AccessTokenCreated) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("full_tokenid", t.FullTokenID))
 }
 
 // AccessGroup is a PVE group as returned by /access/groups.
