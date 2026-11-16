@@ -50,6 +50,7 @@ import { SyslogConfigCard } from "./SyslogConfigCard";
 import { detailPairs } from "../lib/audit-details";
 import { resourceTypeLabel, resourceTypes } from "../lib/resource-types";
 import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
+import { DateTime } from "@/components/DateTime";
 
 const PAGE_SIZE = 25;
 
@@ -237,7 +238,7 @@ function EventRow({
                 !expanded && "-rotate-90",
               )}
             />
-            {new Date(entry.created_at).toLocaleString()}
+            <DateTime value={entry.created_at} />
           </div>
         </TableCell>
         <TableCell>
@@ -289,7 +290,7 @@ function EventRow({
           >
             <DefGrid className="grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))]">
               <DetailField label="Timestamp">
-                {new Date(entry.created_at).toLocaleString()}
+                <DateTime value={entry.created_at} exact />
               </DetailField>
               <DetailField label="Severity">
                 <SeverityMark severity={severity} />
