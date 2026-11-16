@@ -17,9 +17,10 @@ const haScope = clusterScope + "/ha"
 // haSIDParam is a Proxmox HA resource id — "vm:109" — as a PATH parameter.
 //
 // The pattern accepts BOTH spellings of the separator, and that is
-// load-bearing rather than defensive. Fiber does not decode a path
-// parameter, and the frontend percent-encodes the SID, so what arrives
-// here is "vm%3A109"; the handler runs url.PathUnescape on it before
+// load-bearing rather than defensive. Fiber (v3.6) decodes only the escapes
+// of unreserved characters in a path and resolves its dot segments before
+// routing; a ":" stays encoded, and the frontend percent-encodes the SID, so
+// what arrives here is "vm%3A109"; the handler runs url.PathUnescape on it before
 // handing it to the client, which needs the literal colon because Proxmox
 // rejects a percent-encoded one in an HA SID path. A pattern written
 // against either spelling alone would reject every real request from one

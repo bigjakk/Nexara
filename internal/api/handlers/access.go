@@ -434,8 +434,9 @@ func accessTokenUpdateDetails(userid, tokenid string, force bool, req proxmox.Up
 // accessParam percent-decodes an /access/* path parameter that the caller has
 // already read with a Params accessor.
 //
-// Fiber v3 does NOT decode path params, and the registry hands the handler what
-// Fiber matched — the raw segment. That matters more here than for most
+// Fiber v3.6 decodes only the escapes of unreserved characters in a path and
+// resolves its dot segments before routing; every other escape stays encoded,
+// and the registry hands the handler that segment. That matters more here than for most
 // resources because these identifiers legally contain characters a correct
 // client must encode: a PVE user id is "name@realm", so encodeURIComponent sends
 // "nexara%40pve". Without decoding, every user, token, group, role and realm
@@ -443,7 +444,7 @@ func accessTokenUpdateDetails(userid, tokenid string, force bool, req proxmox.Up
 // exactly the right thing.
 //
 // Decoding here is safe because validation happens AFTERWARDS, in the proxmox
-// client: "%2e%2e" becomes ".." and is then rejected outright by
+// client: "..%2F" (a bare "%2e%2e" is resolved away by the router) becomes "../" and is then rejected outright by
 // validateUserID and friends, and the outbound path is re-escaped with
 // url.PathEscape. Decoding without that ordering would reintroduce the
 // traversal the validators exist to stop. The declarations additionally refuse a

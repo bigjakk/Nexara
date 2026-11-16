@@ -23,9 +23,9 @@ import (
 
 // decodeParamValue returns a path parameter URL-decoded, falling back to the
 // raw text if the input is malformed. Audit logs and Proxmox SID paths both
-// want the literal value (e.g. "vm:109"), not "vm%3A109" — Fiber does not
-// decode a path parameter, and Proxmox rejects a percent-encoded colon in an
-// HA SID path.
+// want the literal value (e.g. "vm:109"), not "vm%3A109" — Fiber (v3.6)
+// decodes only unreserved escapes in a path, so the colon stays encoded, and
+// Proxmox rejects a percent-encoded colon in an HA SID path.
 //
 // It takes the value the handler has already read with p.String rather than
 // the context and a key: registry_paramkey_guard_test.go walks each handler

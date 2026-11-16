@@ -88,9 +88,9 @@ func TestWSConfigWithSubprotocol_OriginsPropagation(t *testing.T) {
 // is refused with 403. Every dial carries a valid token, so the auth gate in
 // front of the upgrade passes and the refusal is the origin check's.
 //
-// The contrib websocket middleware (v1.2.6) runs fasthttp/websocket's
+// The contrib websocket middleware (v1.2.9) runs fasthttp/websocket's
 // Upgrader with CheckOrigin built from the allow-list; a failed check comes
-// back to Fiber as a 403 *fiber.Error, which the error handler answers.
+// back to Fiber as a 403 *fiber.Error (rejectHandshake), which the error handler answers.
 func TestIntegrationOriginRejection(t *testing.T) {
 	logger := testLogger()
 	hub := NewHub(logger, 0)

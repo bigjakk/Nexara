@@ -135,7 +135,8 @@ func pbsIDFromParams(p *apischema.Params) (uuid.UUID, error) {
 // construction — "UPID:<node>:<pid>:…:<user>@<realm>:" — and neither a colon nor
 // an "@" is something a correct client may leave raw in a path segment, so the
 // SPA always sends "UPID%3A…". Fiber runs with UnescapePath at its default of
-// false and returns the raw segment, and PBSClient.GetTaskLog then
+// false and decodes only unreserved escapes (v3.6), so the "%3A" arrives as
+// sent, and PBSClient.GetTaskLog then
 // url.PathEscape-s it into the outbound path, escaping the "%" a second time.
 // PBS was being asked for a task named "UPID%3A…" and answering that no such
 // task exists — on every task, on every server, for as long as the routes have

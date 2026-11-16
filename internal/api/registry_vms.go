@@ -1004,7 +1004,8 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 // upidParam is a Proxmox task id as it arrives in a URL.
 //
 // It carries no pattern on purpose: the frontend percent-encodes the
-// UPID's colons, Fiber does not decode path parameters, and a pattern
+// UPID's colons, Fiber decodes only unreserved escapes in a path (v3.6), so
+// they arrive as "%3A", and a pattern
 // written against the decoded form would reject every real request while
 // one written against the encoded form would depend on which client did
 // the encoding. On the two /clusters/:cluster_id/tasks/:upid routes the

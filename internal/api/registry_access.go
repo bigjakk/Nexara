@@ -51,8 +51,9 @@ func accessManage() Permissions { return clusterCheck("manage", handlers.AccessR
 // identifier.
 //
 // What is DIFFERENT here, and is the reason these are not simply
-// pveObjectNameParam, is that the value arrives PERCENT-ENCODED. Fiber v3 does
-// not decode path parameters, and a PVE user id is "name@realm", so a correct
+// pveObjectNameParam, is that the value arrives PERCENT-ENCODED. Fiber v3.6
+// decodes only the escapes of unreserved characters (and resolves dot segments)
+// before routing, so an "@" stays "%40", and a PVE user id is "name@realm", so a correct
 // client sends "nexara%40pve" — see accessParam's own doc comment in
 // handlers/access.go. The pattern therefore describes the value as it arrives on
 // the wire, not as the handler will read it.
@@ -60,8 +61,9 @@ func accessManage() Permissions { return clusterCheck("manage", handlers.AccessR
 // The client-side validators stay exactly where they are. validateUserID,
 // validateTokenID, validateGroupID, validateRoleID and validateRealm run on the
 // DECODED value inside internal/proxmox, which is the only place that can see
-// it: "%2e%2e" satisfies any pattern over the encoded form and becomes ".." only
-// after url.PathUnescape. Those validators refuse "." and ".." by name, and they
+// it: a bare "%2e%2e" is resolved away by the router now, but "..%2F" or
+// "%2e%2e%40x" inside one segment arrives with dots and an escape, satisfies a
+// pattern over the encoded form, and is a traversal only after url.PathUnescape. Those validators refuse "." and ".." by name, and they
 // own the identifier vocabulary (the name@realm shape, the realm's leading
 // letter). Nothing here replaces them; this is the same refusal made one layer
 // earlier, with a message that names the parameter.

@@ -568,8 +568,8 @@ func (h *VMHandler) DestroyVM(c fiber.Ctx, p *apischema.Params) error {
 // the request unless that node is one of the cluster's.
 //
 // The schema deliberately puts no pattern on it: the frontend
-// percent-encodes the UPID's colons and Fiber does not decode path
-// parameters, so a pattern would have to guess which of the two forms
+// percent-encodes the UPID's colons and Fiber decodes only unreserved
+// escapes in a path (v3.6), so a pattern would have to guess which of the two forms
 // arrived. What this adds is that a node name falls out of the decoded form.
 // The traversal guard for the UPID as a whole is not here: the decoded UPID
 // goes through the proxmox client's validateTaskUPID (client_tasks.go), and the

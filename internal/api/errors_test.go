@@ -95,7 +95,7 @@ var statusNamesTheAPISends = map[string]int{
 }
 
 // statusesFiberSendsThroughErrorHandler are the error statuses Fiber hands errorHandler on its own,
-// which no Nexara source names, read off Fiber v3.5.0 (the router in router.go, App.next, and
+// which no Nexara source names, read off Fiber v3.6.1 (the router in router.go, App.next, and
 // serverErrorHandler in app.go, which turns a request fasthttp could not read into a *fiber.Error).
 // TestFiberSentErrorStatusesCarryTheirSlug sends each one it can for real. One of serverErrorHandler's is
 // left out because this server cannot send it: the 413 it makes of fasthttp.ErrBodyTooLarge never comes,

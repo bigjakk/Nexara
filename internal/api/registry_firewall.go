@@ -221,8 +221,9 @@ func firewallOptionsParams() apischema.Properties {
 //
 // It carries a PATTERN rather than the cidr format, and the reason is what
 // actually arrives: Fiber runs with UnescapePath at its default of false, so
-// c.Params hands back the RAW segment — the client percent-encodes the
-// slash, and the handler sees "192.0.2.0%2F24" rather than "192.0.2.0/24".
+// c.Params decodes only the escapes of unreserved characters (v3.6) — the
+// client percent-encodes the slash, which stays encoded, and the handler sees
+// "192.0.2.0%2F24" rather than "192.0.2.0/24".
 // The cidr format would reject that outright and turn a call that reaches
 // Proxmox today into a 400.
 //
@@ -233,10 +234,11 @@ func firewallOptionsParams() apischema.Properties {
 // bare addresses worked.)
 //
 // The leading character class excludes "." so that a bare "." or ".." is
-// refused as it ARRIVES — but that is all the pattern can see. The handler
-// decodes the segment after the schema has run, so "%2E" and "%2E%2E" match
-// the pattern (they start with "%") and decode to "." and "..". What refuses
-// those is proxmox.DeleteFirewallIPSetEntry's guard,
+// refused as it ARRIVES — but that is all the pattern can see. A bare "%2E" or
+// "%2E%2E" no longer arrives at all (Fiber v3.6 decodes it and resolves the dot
+// segment before routing), but the handler decodes the segment after the schema
+// has run, so "%2E%2E%2F%2E%2E" arrives as "..%2F.." — it matches the pattern
+// and decodes to "../..". What refuses that is proxmox.DeleteFirewallIPSetEntry's guard,
 // validatePathSegmentAllowingSlash — the slash-tolerant member of the family,
 // because a decoded CIDR entry id legitimately contains one. It matters behind
 // a normalising proxy in front of pveproxy (pveproxy itself would read the dot

@@ -193,7 +193,8 @@ func registerTaskEndpoints(reg *Registry, h *handlers.TaskHandler) {
 			// COMMENT BEFORE TOUCHING EITHER. The two carry the same kind
 			// of value and cannot carry the same declaration, because
 			// upidParam is a PATH parameter: the frontend percent-encodes
-			// the UPID's colons, Fiber does not decode path parameters, and
+			// the UPID's colons, Fiber decodes only unreserved escapes in a
+			// path (v3.6) so those stay "%3A", and
 			// a pattern written against the decoded form would reject every
 			// real request while one written against the encoded form would
 			// depend on which client did the encoding. Here the UPID is a

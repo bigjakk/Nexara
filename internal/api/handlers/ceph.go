@@ -415,8 +415,8 @@ func (h *CephHandler) DeletePool(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	// Fiber does not decode a path parameter, so what arrives is the client's
-	// encodeURIComponent output: a pool named "a#b" reaches us as "a%23b".
+	// Fiber decodes only unreserved escapes in a path (v3.6), so what arrives
+	// is the client's encodeURIComponent output: "a#b" reaches us as "a%23b".
 	// Decode before DeleteCephPool escapes it again, or Proxmox is asked to
 	// destroy a pool literally named "a%23b" — and DeleteCephPool's traversal
 	// guard would be inspecting the encoded text rather than the name the
