@@ -408,9 +408,13 @@ func TestMappingIDParam(t *testing.T) {
 			for _, id := range []string{"1" + k.word, "-" + k.word, k.word + ".dev", "%2e%2e", k.word + "%2Fdev", strings.Repeat(l, 129)} {
 				t.Run(k.name+" "+r.method+" refuses "+id[:min(len(id), 16)], func(t *testing.T) {
 					cap.called = false
+					want := fiber.StatusBadRequest
+					if id == "%2e%2e" {
+						want = fiber.StatusNotFound // a dot segment the router removes (Fiber v3.6)
+					}
 					status, env := send(t, app, jsonRequest(r.method, mappingTarget(r.path, id), r.body))
-					if status != fiber.StatusBadRequest || cap.called {
-						t.Errorf("status = %d (%q), handler reached = %v, want a 400 before it", status, env.Message, cap.called)
+					if status != want || cap.called {
+						t.Errorf("status = %d (%q), handler reached = %v, want a %d before it", status, env.Message, cap.called, want)
 					}
 				})
 			}

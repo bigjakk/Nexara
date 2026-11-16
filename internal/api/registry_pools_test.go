@@ -125,15 +125,12 @@ func TestPoolIDIsLooserThanConfigID(t *testing.T) {
 	}
 }
 
-// TestPoolTraversalIsRefusedAtTheRoute proves the dot carve-out bites on a real request, and (what
-// TestPoolIDIsLooserThanConfigID does not assert) that the refusal happens BEFORE the handler runs: a 400
-// after the handler had sent the request, which a normalising proxy would land on the pool COLLECTION,
-// would be the bug. Both spellings are refused by the parameter rule, not the router, measured: Fiber
-// does not strip "." or ".." here, so the raw value reaches the declaration as "%2e%2e" does. Neither is
-// redundant: widen the rule to the plain [A-Za-z0-9._-]+ charset and the two RAW rows answer 204 with the
-// handler running while the escaped rows still answer 400 ("%" is outside it either way), so the escaped
-// rows would stay green through the very regression this exists to catch. proxmox.validatePathSegment
-// refuses the same pair at the choke point; this asserts the OTHER layer.
+// TestPoolTraversalIsRefusedAtTheRoute proves no "." or ".." pool id, raw or escaped, reaches the pool
+// handler on a real request. Since v3.6 Fiber removes the dot segment before it routes, so none of them
+// is a pool id at all: the path is the pool collection's or the cluster's, with a trailing slash, which
+// this one-route app answers 404 and the assembled server's trailing-slash refusal answers 400 for a write
+// (TestAnUnresolvedDotSegmentNeverReachesThePoolOrTheCluster). The pool_id rule that refuses the pair stays
+// a second layer, as proxmox.validatePathSegment is a third.
 func TestPoolTraversalIsRefusedAtTheRoute(t *testing.T) {
 	const path = clusterScope + "/pools/:pool_id"
 
@@ -146,8 +143,8 @@ func TestPoolTraversalIsRefusedAtTheRoute(t *testing.T) {
 
 		target := pathPrefix + "clusters/" + testClusterID + "/pools/" + id
 		status, env := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
-		if status != fiber.StatusBadRequest {
-			t.Errorf("pool id %q: status = %d (%q), want 400 from the parameter rule", id, status, env.Message)
+		if status != fiber.StatusNotFound {
+			t.Errorf("pool id %q: status = %d (%q), want 404: the router removes the segment", id, status, env.Message)
 		}
 		if cap.called {
 			t.Errorf("pool id %q: the handler ran for a relative segment", id)
@@ -328,3 +325,4 @@ func TestEveryPoolEndpointIsDocumented(t *testing.T) {
 		}
 	}
 }
+

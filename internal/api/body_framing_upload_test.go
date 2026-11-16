@@ -99,7 +99,7 @@ func (r failedRow) Scan(...any) error { return r.err }
 // connection, and the request hidden past the part fasthttp read ahead must not be served. A later change
 // that released the stream on the way out would break this without failing anything else (a released stream
 // reads as a body read to its end). The precondition is the same app without closeConnectionsLeftMidBody,
-// where the hidden request is served. Authentication is a stand-in that leaves in c.Locals a user and a
+// where fasthttp reads the rest of the body itself and keeps the connection (bareDrained). Authentication is a stand-in that leaves in c.Locals a user and a
 // permission engine, the three rows UploadFile looks up come from a stand-in database, and the rest is
 // production code; the 403 comes before any call to Proxmox.
 func TestRefusedUploadClosesItsConnectionMidStream(t *testing.T) {
@@ -153,11 +153,7 @@ func TestRefusedUploadClosesItsConnectionMidStream(t *testing.T) {
 	addr, hits := serve(t, false)
 	ans := exchange(t, addr, raw)
 	refused(t, ans)
-	if ans.next == nil || ans.next.StatusCode != fiber.StatusNoContent || hits.Load() != 1 {
-		t.Fatalf("precondition: without closeConnectionsLeftMidBody the request hidden in the refused upload "+
-			"should have been served (next answer %v, closed %v, probe reached %d time(s))", ans.next, ans.closed,
-			hits.Load())
-	}
+	checkBare(t, ans, hits.Load(), bareDrained)
 
 	addr, hits = serve(t, true)
 	ans = exchange(t, addr, raw)

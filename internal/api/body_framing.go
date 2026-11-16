@@ -12,9 +12,9 @@ import (
 )
 
 // The fasthttp and Fiber internals this file names are those of the versions
-// go.mod pins, read from their source: fasthttp v1.74.0 (http.go,
-// streaming.go, server.go, header.go, headerscanner.go) and Fiber v3.5.0
-// (router.go, router_skip.go, ctx.go). The tests in body_framing_test.go
+// go.mod pins, read from their source: fasthttp v1.76.0 (http.go,
+// streaming.go, server.go, header.go, headerscanner.go) and Fiber v3.6.1
+// (router.go, router_skip.go, ctx.go, path.go, app.go). The tests in body_framing_test.go
 // exercise that behaviour over real connections; SkipUnmatchedRoutes, which is
 // off, is the one thing named here that none of them turns on.
 
@@ -29,16 +29,19 @@ import (
 // Under StreamRequestBody (buildFiberConfig) fasthttp reads at most the first
 // 8 KiB of a body with a Content-Length before any handler runs, and none of a
 // chunked one (Request.ContinueReadBodyStream, readBodyWithStreaming). It hands
-// the handler the rest as a stream over the connection's own reader, and
-// nothing drains that stream when the handler returns: Server.serveConn only
-// releases it (releaseRequestStream resets it and reads nothing) and, on a
-// kept-alive connection, goes on to parse whatever follows as the next
-// request. So when a request is answered without its body being read — a 401,
-// 404, 405, 413, 415 or 429, the 411 below, a CORS preflight, the SPA shell —
-// the rest of that body would be served as a request of its own: one the
-// client, or the reverse proxy in front of it, sent as body bytes. A proxy
-// that reuses the connection for another client would then pair that answer
-// with the wrong request.
+// the handler the rest as a stream over the connection's own reader. Up to
+// v1.74 nothing drained that stream when the handler returned, and on a
+// kept-alive connection whatever followed was parsed as the next request. Since
+// v1.75 Server.serveConn drains it itself: it discards up to
+// maxUnreadStreamBodySize (256 KiB) of what the handler left unread and keeps
+// the connection, and closes it when more is left or a read of the stream
+// failed (requestStream.failed). So when a request is answered without its
+// body being read — a 401, 404, 405, 413, 415 or 429, the 411 below, a CORS
+// preflight, the SPA shell — this close no longer stands alone between the
+// rest of the body and the next request; it saves reading up to 256 KiB a
+// client chose not to have read, and it is still the only close where the head
+// frames the body ambiguously (below), because there fasthttp's own framing is
+// the one a proxy may not share.
 //
 // It closes the connection after a request whose head frames its body
 // ambiguously as well (ambiguousFramingRefusal). refuseAmbiguousFraming
@@ -120,8 +123,7 @@ func closeConnectionsLeftMidBody(app *fiber.App, bodyTimeout time.Duration) {
 		framing := ctx.Request.Header.ContentLength()
 		ambiguous := ambiguousFramingRefusal(&ctx.Request.Header) != ""
 		var bodyDeadline time.Time
-		if !isStreamedUpload(string(ctx.Method()), string(ctx.URI().PathOriginal()),
-			string(ctx.Request.Header.ContentType())) {
+		if !isStreamedUploadAsRouted(app, ctx) {
 			bodyDeadline = time.Now().Add(bodyTimeout)
 		}
 		if conn := ctx.Conn(); conn != nil {
@@ -326,7 +328,7 @@ func refuseChunkedRequestBodies(c fiber.Ctx) error {
 }
 
 // isStreamedUpload reports whether a request with this method, path — the path
-// as it arrived, undecoded — and Content-Type is a streamed multipart body for
+// the router matches, c.Path() — and Content-Type is a streamed multipart body for
 // the storage upload route (isStreamedMultipart), which three bounds on a
 // request body exempt: the 10 MiB body-size guard, refuseChunkedRequestBodies,
 // and closeConnectionsLeftMidBody's body deadline. It is the one predicate for
@@ -345,18 +347,22 @@ func refuseChunkedRequestBodies(c fiber.Ctx) error {
 // segment must be spelled as declared, each parameter must be a non-empty
 // segment, and there is no trailing slash.
 //
-// The path is the one the router starts from, before that folding.
-// closeConnectionsLeftMidBody, which runs before Fiber has a Ctx, passes the
-// request's URI().PathOriginal(); isStreamedUploadRequest passes c.Path(),
-// which is the same bytes: DefaultCtx.Reset takes the context's path from
-// URI().PathOriginal(), and configDependentPaths decodes it only when
-// UnescapePath is on (it is off). TestStreamedUploadPredicateSeesThePathTheRouterSees
-// holds the two to each other, and TestStreamedUploadExemptionIsNoLooserThanItsRoute
+// The path is the one the router matches, before that folding: c.Path(),
+// which since Fiber v3.6 is the request path normalized as RFC 3986 §6.2.2
+// says (DefaultCtx.configDependentPaths, normalizeRequestPath): escapes of
+// unreserved characters decoded, every other escape kept, "." and ".."
+// segments removed. So "…/uplo%61d" and "…/<id>/../<id>/upload" are the
+// upload to the router, and to this. Both callers pass it:
+// isStreamedUploadRequest from inside the chain, and closeConnectionsLeftMidBody,
+// which runs before Fiber has a Ctx, through isStreamedUploadAsRouted.
+// TestStreamedUploadPredicateSeesThePathTheRouterSees holds the two to each
+// other, TestServerConfigKeepsTheBodyFramingInvariants holds the wrapper's
+// deadline to it over the wire, and TestStreamedUploadExemptionIsNoLooserThanItsRoute
 // holds the predicate against the assembled route table. The Content-Type is
-// the same bytes both ways too: the wrapper reads RequestHeader.ContentType,
-// and c.Get — what isStreamedUploadRequest and UploadFile call — peeks the
-// header, which answers a Content-Type key with ContentType as well. And none
-// of the three may change after the wrapper asked:
+// the same bytes both ways too: c.Get — what isStreamedUploadRequest and
+// UploadFile call — peeks the header, which answers a Content-Type key with
+// RequestHeader.ContentType. And none of the three may change after the
+// wrapper asked:
 // TestGuard_NothingDetachesAnUnreadRequestBody refuses code in this module
 // that rewrites a request's path, method or Content-Type.
 func isStreamedUpload(method, path, contentType string) bool {
@@ -392,6 +398,19 @@ func isStreamedMultipart(contentType string) bool {
 // middleware chain.
 func isStreamedUploadRequest(c fiber.Ctx) bool {
 	return isStreamedUpload(c.Method(), c.Path(), c.Get(fiber.HeaderContentType))
+}
+
+// isStreamedUploadAsRouted is isStreamedUploadRequest for a request Fiber has
+// not taken up yet. It asks a Ctx of the app's own for the path, because the
+// router matches the normalized path, not fasthttp's PathOriginal: asked of
+// the raw path, a POST to "/api/v1/clusters/../storage/<id>/upload" — a 404 to
+// the router — was exempt from the body deadline, and the upload spelled
+// "…/uplo%61d" was not. AcquireCtx only resets the Ctx onto the request
+// (DefaultCtx.Reset): it reads the request line and nothing of the body.
+func isStreamedUploadAsRouted(app *fiber.App, fctx *fasthttp.RequestCtx) bool {
+	c := app.AcquireCtx(fctx)
+	defer app.ReleaseCtx(c)
+	return isStreamedUploadRequest(c)
 }
 
 // matchesDeclaredPath reports whether path has exactly the segments of the

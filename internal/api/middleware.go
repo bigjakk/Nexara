@@ -147,11 +147,11 @@ func (s *Server) setupMiddleware() {
 	// When it runs, fasthttp has copied at most the first 8 KiB of the body
 	// into the request (readBodyWithStreaming, under StreamRequestBody),
 	// undecoded; its read buffer (ReadBufferSize, 16 KiB) may already hold
-	// more, and the rest is still on the socket. fasthttp does not drain what
-	// a handler leaves unread — on a kept-alive connection it parses the
-	// remainder as the next request — so the connection is closed after the
-	// refusal, by closeConnectionsLeftMidBody (body_framing.go), which does
-	// that after every answer that leaves a body unread.
+	// more, and the rest is still on the socket. Unless the connection closes,
+	// fasthttp then reads up to 256 KiB of what a handler leaves unread to
+	// keep it alive, so the connection is closed after the refusal, by
+	// closeConnectionsLeftMidBody (body_framing.go), which does that after
+	// every answer that leaves a body unread.
 	// TestContentCodingRefusalClosesTheConnection pins it for this one.
 	//
 	// Its position is what makes it cover every route, and it is the only
@@ -491,11 +491,11 @@ const contentCodingRefusal = "request body must be sent uncompressed: no Content
 func refuseContentCodedRequests(c fiber.Ctx) error {
 	if hasContentCoding(c) {
 		c.Set(fiber.HeaderAcceptEncoding, "identity")
-		// The body is left unread on purpose, and fasthttp does not drain what
-		// a handler leaves: on a kept-alive connection it parses whatever is
-		// left of this body as the next request. closeConnectionsLeftMidBody
-		// closes the connection after this answer, as it does after every
-		// answer that leaves a body unread. There is deliberately no close of
+		// The body is left unread on purpose, and nothing here should read it:
+		// fasthttp reads up to 256 KiB of what a handler leaves to keep the
+		// connection alive, unless the connection closes. closeConnectionsLeftMidBody
+		// closes it after this answer, as it does after every answer that
+		// leaves a body unread. There is deliberately no close of
 		// its own here: two copies of that decision would each hide the other
 		// from every test, and TestContentCodingRefusalClosesTheConnection's
 		// precondition fails if one comes back.
@@ -517,15 +517,17 @@ const trailingSlashRefusal = `only GET, HEAD and OPTIONS requests may end their 
 // A browser resolves a "." or ".." path segment before a request leaves it:
 // the WHATWG URL parser every browser shares drops a "." segment, drops a
 // ".." segment together with the segment before it, and counts "%2e" in
-// either case as a dot while doing so. When the dot segment is the LAST
-// one, what goes out ends in a slash: ".../pools/." is sent as ".../pools/"
-// and ".../pools/.." as "/api/v1/clusters/<id>/", which is how the SPA's
-// DELETE of a pool named ".." reached the server. Fiber ignores a trailing
-// slash when it routes (StrictRouting is off in buildFiberConfig), so that
-// request matched the CLUSTER delete route and removed the cluster. A final
-// dot segment always leaves such a slash behind, so refusing it here closes
-// that case for every route at once, whatever the id, the object or the
-// caller. No caller needs one: the SPA sends every write without it. That
+// either case as a dot while doing so. Since v3.6 Fiber does the same to a
+// request that arrives with one (curl --path-as-is, a client that does not
+// resolve them): it removes dot segments, "%2e" included, before it routes
+// (normalizeRequestPath). When the dot segment is the LAST one, what is left
+// ends in a slash: ".../pools/." is ".../pools/" and ".../pools/.." is
+// "/api/v1/clusters/<id>/", which is how the SPA's DELETE of a pool named
+// ".." reached the server. Fiber ignores a trailing slash when it routes
+// (StrictRouting is off in buildFiberConfig), so that request matched the
+// CLUSTER delete route and removed the cluster. A final dot segment always
+// leaves such a slash behind, so refusing it here closes that case for every
+// route at once, whatever the id, the object or the caller. No caller needs one: the SPA sends every write without it. That
 // includes the two write routes router.go registers on a group root, which
 // the route table lists as POST /api/v1/alert-rules/ and POST
 // /api/v1/firewall-templates/ but which Fiber matches without the slash.
@@ -533,21 +535,24 @@ const trailingSlashRefusal = `only GET, HEAD and OPTIONS requests may end their 
 // A dot segment in the MIDDLE of a path leaves no such mark. "." there
 // just disappears and ".." takes the segment before it with it, so what is
 // sent is an ordinary path — ".../pools/../members" goes out as
-// "/api/v1/clusters/<id>/members" — which may be a real route. Only the
-// SPA's refusal to put a "." or ".." into a path at all covers that case
+// "/api/v1/clusters/<id>/members" — which may be a real route, and Fiber
+// routes it there too when the client sends the dot segment unresolved. Only
+// the SPA's refusal to put a "." or ".." into a path at all covers that case
 // (apiPath, frontend/src/lib/api-path.ts); this gate does not.
 //
 // # What it reads
 //
 // c.Path(), which is the request path exactly as the router sees it before
-// its own trailing-slash strip: configDependentPaths copies fasthttp's
-// PathOriginal — the raw path, not percent-decoded, not dot-resolved, the
-// query excluded — and with UnescapePath off (buildFiberConfig does not set
-// it) Path returns those bytes unchanged. The router then trims every
-// trailing "/" from the same bytes when the path is longer than one
-// character, and this gate uses the same length test, so "/" alone is the
-// root rather than a trailing slash and "//" at the end is refused like "/".
-// "/x%2F" does not end in "/" to either of them.
+// its own case fold and trailing-slash strip: configDependentPaths takes
+// fasthttp's PathOriginal — the query excluded — and normalizes it as RFC
+// 3986 §6.2.2 says (normalizeRequestPath, Fiber v3.6): escapes of unreserved
+// characters decoded, every other escape kept with upper-case hex, "." and
+// ".." segments removed, empty segments kept. UnescapePath is off
+// (buildFiberConfig does not set it), so nothing else is decoded. The router
+// then trims every trailing "/" from the same bytes when the path is longer
+// than one character, and this gate uses the same length test, so "/" alone
+// is the root rather than a trailing slash and "//" at the end is refused like
+// "/". "/x%2F" does not end in "/" to either of them.
 //
 // # Which methods
 //

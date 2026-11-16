@@ -506,13 +506,12 @@ func serveOnLoopback(t *testing.T, s *Server) string {
 }
 
 // TestContentCodingRefusalClosesTheConnection holds the 415 to closing the connection it answers on, over
-// real TCP. The gate leaves the body unread, and fasthttp does not drain what a handler leaves: it copies
-// the first 8 KiB of a Content-Length body into the request (readBodyWithStreaming) and parses what
-// follows as the next request on a kept-alive connection; the fixture hides a request at that offset
-// (paddedRequest). The gate does not close the connection itself; closeConnectionsLeftMidBody does,
-// after every answer that leaves a body unread. So the precondition sends the same request without it,
-// where the hidden request must be served after the 415, which shows the fixture reaches fasthttp's
-// parser and fails if the gate ever closes the connection itself again (a second copy of the decision).
+// real TCP. The gate leaves the body unread, past the 8 KiB fasthttp copies into the request
+// (readBodyWithStreaming), with a request hidden at that offset (paddedRequest). The gate does not close
+// the connection itself; closeConnectionsLeftMidBody does, after every answer that leaves a body unread.
+// So the precondition sends the same request without it, where fasthttp drains the rest and keeps the
+// connection (bareDrained), which fails if the gate ever closes the connection itself again (a second
+// copy of the decision).
 func TestContentCodingRefusalClosesTheConnection(t *testing.T) {
 	unreadBodyCase{
 		raw: paddedRequest(fiber.MethodPost, "/api/v1/auth/login", 0,

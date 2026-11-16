@@ -1331,16 +1331,18 @@ func TestSnapshotNameParamRefusesTraversal(t *testing.T) {
 		want  int
 		why   string
 	}{
-		// NOT because Fiber decodes it — Fiber's UnescapePath is false and
-		// validation runs on the RAW segment. The declaration refuses this
-		// on the leading "%": pve-configid-existing is
+		// Fiber decodes the escaped dots (unreserved) and keeps "%2F", so the
+		// segment arrives as "..%2F" and the declaration refuses it on the
+		// "%": pve-configid-existing is
 		// ^[A-Za-z][A-Za-z0-9_-]*$, which admits no percent at all. That is
 		// why the snapshot routes need no handler-side decode to be safe,
 		// and it is a different mechanism from the ceph pool route, whose
 		// rule DOES admit "%" and which relies on the client guard instead.
 		{"%2e%2e%2f", fiber.StatusBadRequest, "a raw percent, which the Pattern admits nowhere"},
 		{"..%2fetc", fiber.StatusBadRequest, "half-encoded traversal"},
-		{"..", fiber.StatusBadRequest, "the bare parent-directory segment"},
+		// Fiber v3.6 removes a dot segment before it routes, so this one
+		// never reaches the route as a snap_name at all.
+		{"..", fiber.StatusNotFound, "the bare parent-directory segment, which the router removes"},
 		{`a\b`, fiber.StatusBadRequest, "a Windows-style separator"},
 		{"a%00", fiber.StatusBadRequest, "a NUL escape"},
 		// The one case the ROUTER handles: a literal slash makes the URL

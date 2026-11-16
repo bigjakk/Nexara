@@ -90,7 +90,8 @@ func serveAppOnLoopback(t *testing.T, app *fiber.App) string {
 // client sends next, as the body bytes it still owed, is never read as a request (what it sends IS a
 // request). The precondition twin is the same server with the deadline armed and no close on expiry, the
 // unread-body rule alone: the cut read released the stream as a read to the end would, so that rule keeps
-// the connection and the next request is served. ReadTimeout is shortened below the body timeout: left
+// the connection, and since fasthttp v1.75 fasthttp closes it instead, on the failed read
+// (requestStream.failed); the close on expiry is the second of two. ReadTimeout is shortened below the body timeout: left
 // armed through the handler it would cut sooner, which the lower bound catches; the upper bound shows
 // the deadline did the cutting, since nothing else ends the read before the test stops waiting.
 func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
@@ -134,10 +135,7 @@ func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
 			guarded := newProbedServer(t, true, rewrapped(readTimeout, withBodyTimeout(bodyTimeout)))
 			t.Parallel()
 			ans := send(t, twin)
-			if ans.next == nil || ans.next.StatusCode != fiber.StatusNoContent || twin.hits.Load() != 1 {
-				t.Fatalf("precondition: without the close on expiry the request sent after the cut should have been "+
-					"served (next answer %v, closed %v, probe reached %d time(s))", ans.next, ans.closed, twin.hits.Load())
-			}
+			checkBare(t, ans, twin.hits.Load(), bareClosed)
 
 			ans = send(t, guarded)
 			if !ans.connClose {
@@ -269,18 +267,15 @@ func TestStreamedUploadBodyIsNotCutByTheBodyDeadline(t *testing.T) {
 }
 
 // TestStreamedUploadPredicateSeesThePathTheRouterSees holds what lets isStreamedUpload be one predicate
-// for the wrapper and the middleware: closeConnectionsLeftMidBody asks it of the method, URI().PathOriginal()
-// and ContentType before Fiber has a Ctx, isStreamedUploadRequest of c.Method(), c.Path() and
-// c.Get("Content-Type"), and on every request here those are the same strings. Each request is parsed from
-// its head as the server parses it, two Content-Type lines included. c.Path() is PathOriginal only while
-// UnescapePath is off; the twin shows that on it is not, so the check would notice the day it is turned on.
-// The content-type rows give the answers the predicate must: a body UploadFile streams
-// (handlers.ParseMultipartContentType), and that bodyValues does not read first, as it does a +json type.
+// for the wrapper and the middleware: closeConnectionsLeftMidBody asks it before Fiber has a Ctx
+// (isStreamedUploadAsRouted), isStreamedUploadRequest from inside the chain, and on every request here
+// the two answer alike, of the path the router matches — normalized since Fiber v3.6, so "uplo%61d" and a
+// ".." segment are the upload to both. Each request is parsed from its head as the server parses it, two
+// Content-Type lines included. The content-type rows give the answers the predicate must: a body
+// UploadFile streams (handlers.ParseMultipartContentType), and that bodyValues does not read first, as it
+// does a +json type.
 func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 	s := newAssembledServer(t)
-	if s.app.Config().UnescapePath {
-		t.Fatal("UnescapePath is on: c.Path() is then decoded, and no longer the path closeConnectionsLeftMidBody reads")
-	}
 	// ask parses raw, asks the predicate both ways, fails the test where they
 	// differ, and returns the answer.
 	ask := func(t *testing.T, raw string) bool {
@@ -289,16 +284,15 @@ func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 		if err := fctx.Request.Header.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
 			t.Fatalf("parsing %q: %v", raw, err)
 		}
+		beforeIt := isStreamedUploadAsRouted(s.app, fctx)
 		c := s.app.AcquireCtx(fctx)
 		defer s.app.ReleaseCtx(c)
-		original, contentType := string(fctx.URI().PathOriginal()), string(fctx.Request.Header.ContentType())
-		if c.Path() != original || c.Method() != string(fctx.Method()) || c.Get(fiber.HeaderContentType) != contentType {
-			t.Errorf("%q: c.Path() %q, c.Method() %q, c.Get(Content-Type) %q; PathOriginal %q, method %q, "+
-				"ContentType %q", raw, c.Path(), c.Method(), c.Get(fiber.HeaderContentType), original, fctx.Method(),
-				contentType)
+		if c.Method() != string(fctx.Method()) || c.Get(fiber.HeaderContentType) != string(fctx.Request.Header.ContentType()) {
+			t.Errorf("%q: c.Method() %q, c.Get(Content-Type) %q; method %q, ContentType %q", raw, c.Method(),
+				c.Get(fiber.HeaderContentType), fctx.Method(), fctx.Request.Header.ContentType())
 		}
 		inChain := isStreamedUploadRequest(c)
-		if beforeIt := isStreamedUpload(string(fctx.Method()), original, contentType); inChain != beforeIt {
+		if inChain != beforeIt {
 			t.Errorf("%q: exempt %v in the chain and %v before it", raw, inChain, beforeIt)
 		}
 		return inChain
@@ -325,9 +319,9 @@ func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 			}
 		}
 	}
-	if accepted != 4 {
-		t.Errorf("%d method and spelling pairs exempt, want 4: POST to the upload as declared, with a query, in "+
-			"absolute form and with an encoded slash in a parameter", accepted)
+	if accepted != 6 {
+		t.Errorf("%d method and spelling pairs exempt, want 6: POST to the upload as declared, with a query, in "+
+			"absolute form, with an encoded slash in a parameter, and the two the router normalizes to it", accepted)
 	}
 
 	for _, tt := range []struct {
@@ -359,17 +353,6 @@ func TestStreamedUploadPredicateSeesThePathTheRouterSees(t *testing.T) {
 		if got := ask(t, requestHead(fiber.MethodPost, uploadTarget, tt.lines...)+"\r\n"); got != tt.exempt {
 			t.Errorf("POST %s with %q: exempt %v, want %v", uploadTarget, tt.lines, got, tt.exempt)
 		}
-	}
-
-	unescaping := fiber.New(fiber.Config{UnescapePath: true})
-	fctx := &fasthttp.RequestCtx{}
-	fctx.Request.Header.SetMethod(fiber.MethodPost)
-	fctx.Request.SetRequestURI(prefix + "/uplo%61d")
-	c := unescaping.AcquireCtx(fctx)
-	defer unescaping.ReleaseCtx(c)
-	if c.Path() == string(fctx.URI().PathOriginal()) {
-		t.Errorf("precondition: with UnescapePath on, c.Path() %q is still PathOriginal; the check above could not "+
-			"tell the setting apart", c.Path())
 	}
 }
 

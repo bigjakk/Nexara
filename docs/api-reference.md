@@ -555,8 +555,17 @@ leave, so `DELETE /api/v1/clusters/:id/pools/..` sent through it arrives as
 `DELETE /api/v1/clusters/:id` — the cluster — with no slash to refuse. That
 request is refused all the same, because a cluster delete must carry
 `confirm` set to the cluster's name (below), and no request rewritten from
-another route carries it. Sent to Nexara unresolved, the same path reaches
-the pool route, whose `pool_id` rule refuses `.` and `..`.
+another route carries it. Sent to Nexara unresolved (`curl --path-as-is`),
+the path is resolved by Nexara itself, the way RFC 3986 and a browser
+resolve it and with the slash a final dot segment leaves, so the same
+request meets the trailing-slash refusal (`400`). A dot segment in the middle
+of a path is resolved too: `.../pools/../members` is answered as
+`/api/v1/clusters/:id/members`.
+
+Nexara also decodes a percent-encoded unreserved character (a letter, a
+digit, `-`, `.`, `_` or `~`) in the path before it routes, so `%41` is `A`
+and `%2E%2E` is `..`. Every other escape keeps its meaning: `%2F` is part of
+a segment, never a separator.
 
 ## Request Bodies and Connections
 

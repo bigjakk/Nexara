@@ -253,7 +253,7 @@ func New(a *nexapp.App) *Server {
 // Three minutes outlasts the longest. A proxy configured to keep them longer
 // than this should be lowered below it.
 //
-// What it bounds, read off fasthttp v1.74.0's Server.serveConn, is the wait for
+// What it bounds, read off fasthttp v1.76.0's Server.serveConn, is the wait for
 // the first byte of a connection's second and later requests, and nothing
 // else: serveConn arms it just before that wait, replaces it with ReadTimeout
 // (headReadTimeout) the moment a byte arrives, and when it expires closes the
@@ -285,7 +285,7 @@ const keepAliveIdleTimeout = 3 * time.Minute
 // before it starts the hijack handler (c.SetDeadline(zeroTime)); the websocket
 // middleware then sets a read deadline already past only to drain what
 // fasthttp read ahead of the socket, and clears it (coalescingConn.attach,
-// contrib websocket v1.2.6 coalesce.go).
+// contrib websocket v1.2.9 coalesce.go).
 const headReadTimeout = 60 * time.Second
 
 // bodyReadTimeout is how long a handler may spend reading a request's body,

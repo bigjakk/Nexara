@@ -244,6 +244,55 @@ func whatFollows(t *testing.T, conn net.Conn, br *bufio.Reader) (next *http.Resp
 	}
 }
 
+// bareOutcome is what a connection does after an answer on the server without
+// closeConnectionsLeftMidBody. Since v1.75 fasthttp's Server.serveConn reads
+// up to maxUnreadStreamBodySize (256 KiB) of a body a handler left unread and
+// keeps the connection, and closes it when more is left or a read of the
+// stream failed; so the hidden request is served only where fasthttp framed
+// the body differently from the client.
+type bareOutcome int
+
+const (
+	// bareDrained: kept open, the hidden request read as body and never
+	// served. The close on the server as New builds it is the wrapper's alone.
+	bareDrained bareOutcome = iota
+	// bareClosed: fasthttp or Fiber closed the connection itself — too much
+	// left unread, a failed read of the stream, or a head with both a
+	// Content-Length and a Transfer-Encoding (App.hookHeaderReceived).
+	bareClosed
+	// bareServed: the hidden request was served, because to fasthttp it was
+	// not body at all (obs-fold, Transfer-Encoding: identity). Only the
+	// wrapper's close stands between it and the next request.
+	bareServed
+)
+
+func (o bareOutcome) String() string {
+	return [...]string{"kept open with the hidden request unserved", "closed", "served the hidden request"}[o]
+}
+
+// checkBare fails the test unless the answer, read on the server without
+// closeConnectionsLeftMidBody, ended as want. It is each case's precondition:
+// a row that says bareDrained or bareServed is one where removing the wrapper
+// changes what the client sees, so the assertions on the guarded server can
+// fail.
+func checkBare(t *testing.T, ans wireAnswer, hits int32, want bareOutcome) {
+	t.Helper()
+	got := bareOutcome(-1)
+	switch {
+	case ans.next != nil && ans.next.StatusCode == fiber.StatusNoContent && hits == 1:
+		got = bareServed
+	case ans.next == nil && hits == 0 && ans.closed:
+		got = bareClosed
+	case ans.next == nil && hits == 0:
+		got = bareDrained
+	}
+	if got != want {
+		t.Fatalf("precondition: without closeConnectionsLeftMidBody the connection should have %s (next answer %v, "+
+			"closed %v, probe reached %d time(s)); fasthttp no longer treats this fixture as the case says",
+			want, ans.next, ans.closed, hits)
+	}
+}
+
 // unreadBodyCase is one way the server answers a request without reading its
 // body.
 type unreadBodyCase struct {
@@ -265,13 +314,15 @@ type unreadBodyCase struct {
 	// beforeChain marks an answer Fiber gives without running its middleware
 	// chain, which therefore lacks the security headers.
 	beforeChain bool
+	// bare is what the connection does without closeConnectionsLeftMidBody.
+	bare bareOutcome
 }
 
 // run sends the case's request to the server without
-// closeConnectionsLeftMidBody, where the request hidden in the unread body has
-// to be served — the precondition, which shows the fixture is one fasthttp
-// really parses — and then to the server as New builds it, where the answer
-// has to close the connection with the hidden request unserved.
+// closeConnectionsLeftMidBody, where the connection has to end as tc.bare says
+// (checkBare, the precondition), and then to the server as New builds it,
+// where the answer has to close the connection with the hidden request
+// unserved.
 //
 // Both servers are built before t.Parallel: New writes the handlers package's
 // cookie mode, which a handler in another test may be reading.
@@ -306,11 +357,7 @@ func (tc unreadBodyCase) run(t *testing.T) {
 	}
 	ans := exchange(t, twin.addr, tc.raw)
 	check(t, ans)
-	if ans.next == nil || ans.next.StatusCode != fiber.StatusNoContent || twin.hits.Load() != 1 {
-		t.Fatalf("precondition: without closeConnectionsLeftMidBody the request hidden in the unread body should "+
-			"have been served (next answer %v, closed %v, probe reached %d time(s)); a fixture fasthttp does not "+
-			"parse cannot show the close preventing anything", ans.next, ans.closed, twin.hits.Load())
-	}
+	checkBare(t, ans, twin.hits.Load(), tc.bare)
 
 	if tc.prime != nil {
 		tc.prime(t, guarded.addr)
@@ -356,8 +403,8 @@ var uploadTarget = strings.NewReplacer(":cluster_id", testClusterID, ":storage_i
 // TestUnreadBodyClosesTheConnection sends, for each way the server answers a request without reading
 // its body, one kept-alive connection a request whose body hides a second request past the part
 // fasthttp reads ahead, and holds the answer to closing the connection with the hidden request unserved.
-// Every case first shows, against the same server without closeConnectionsLeftMidBody, that the hidden
-// request IS served there. The 501s are the cases no middleware in Fiber's chain could cover (Fiber
+// Every case first shows what the same server without closeConnectionsLeftMidBody does (bareOutcome):
+// fasthttp drains most such bodies itself now, and closes on the rest. The 501s are the cases no middleware in Fiber's chain could cover (Fiber
 // answers an unknown method before the chain runs, which the missing security headers show). The
 // trailing-slash rows are refuseTrailingSlashWrites' 400, which reads no body. The obs-fold and
 // Transfer-Encoding: identity rows frame the body so fasthttp reads none of it (the hidden request is
@@ -373,12 +420,12 @@ func TestUnreadBodyClosesTheConnection(t *testing.T) {
 		{name: "405 for a method the route does not take", raw: paddedRequest(fiber.MethodPut, "/api/v1/version", 0, jsonType),
 			status: fiber.StatusMethodNotAllowed},
 		{name: "413 from the body-size guard", raw: paddedRequest(fiber.MethodPost, "/api/v1/auth/login", 10<<20+1, jsonType),
-			status: fiber.StatusRequestEntityTooLarge},
+			status: fiber.StatusRequestEntityTooLarge, bare: bareClosed},
 		{name: "411 from the chunked-body refusal", raw: chunkedRequest(fiber.MethodPost, "/api/v1/auth/login", jsonType),
-			status: fiber.StatusLengthRequired, slug: "length_required", message: chunkedBodyRefusal},
+			status: fiber.StatusLengthRequired, slug: "length_required", message: chunkedBodyRefusal, bare: bareClosed},
 		{name: "the upload route's own 401, for a chunked body the refusal lets through",
 			raw:    chunkedRequest(fiber.MethodPost, uploadTarget, "Content-Type: multipart/form-data; boundary=x"),
-			status: fiber.StatusUnauthorized, slug: "unauthorized", message: "Missing authorization token"},
+			status: fiber.StatusUnauthorized, slug: "unauthorized", message: "Missing authorization token", bare: bareClosed},
 		{name: "429 from a rate limiter", raw: paddedRequest(fiber.MethodPost, "/api/v1/auth/login", 0, jsonType),
 			status: fiber.StatusTooManyRequests, prime: exhaustLoginLimiter},
 		{name: "a CORS preflight", raw: paddedRequest(fiber.MethodOptions, "/api/v1/auth/login", 0,
@@ -398,21 +445,21 @@ func TestUnreadBodyClosesTheConnection(t *testing.T) {
 			status: fiber.StatusUnauthorized, slug: "unauthorized", message: "Missing authorization token"},
 		{name: "400 for a Content-Length folded into another field (obs-fold)",
 			raw:    obsFoldRequest(fiber.MethodPost, "/api/v1/auth/login"),
-			status: fiber.StatusBadRequest, slug: "bad_request", message: obsFoldRefusal},
+			status: fiber.StatusBadRequest, slug: "bad_request", message: obsFoldRefusal, bare: bareServed},
 		{name: "400 for a Content-Length folded in with a tab",
 			raw:    strings.Replace(obsFoldRequest(fiber.MethodPost, "/api/v1/auth/login"), "\r\n Content-Length", "\r\n\tContent-Length", 1),
-			status: fiber.StatusBadRequest, slug: "bad_request", message: obsFoldRefusal},
+			status: fiber.StatusBadRequest, slug: "bad_request", message: obsFoldRefusal, bare: bareServed},
 		{name: "501 for an obs-fold head under a method Fiber answers before its middleware runs",
 			raw:    obsFoldRequest("FOO", "/api/v1/version"),
-			status: fiber.StatusNotImplemented, beforeChain: true},
+			status: fiber.StatusNotImplemented, beforeChain: true, bare: bareServed},
 		{name: "400 for Transfer-Encoding: identity",
 			raw: requestHead(fiber.MethodPost, "/api/v1/auth/login", jsonType, "Transfer-Encoding: identity") +
 				"\r\n" + hiddenRequest,
-			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal},
+			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal, bare: bareServed},
 		{name: "400 for Transfer-Encoding: identity beside a Content-Length",
 			raw: requestHead(fiber.MethodPost, "/api/v1/auth/login", jsonType, "Transfer-Encoding: identity",
 				"Content-Length: 2") + "\r\n{}" + hiddenRequest,
-			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal},
+			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal, bare: bareClosed},
 		{name: "400 from the trailing-slash refusal, for a POST to a collection",
 			raw:    paddedRequest(fiber.MethodPost, "/api/v1/clusters/"+testClusterID+"/pools/", 0, jsonType),
 			status: fiber.StatusBadRequest, slug: "bad_request", message: trailingSlashRefusal},
@@ -437,13 +484,13 @@ func TestUnreadBodyClosesTheConnection(t *testing.T) {
 	} {
 		t.Run("400 for Transfer-Encoding: identity with "+spelling.name, unreadBodyCase{
 			raw:    requestHead(fiber.MethodPost, "/api/v1/auth/login", jsonType, spelling.line) + "\r\n" + hiddenRequest,
-			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal,
+			status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal, bare: bareServed,
 		}.run)
 	}
 	t.Run("400 for Transfer-Encoding: identity on a line ended by a bare LF", unreadBodyCase{
 		raw: strings.Replace(requestHead(fiber.MethodPost, "/api/v1/auth/login", "Transfer-Encoding: identity", jsonType),
 			"identity\r\n", "identity\n", 1) + "\r\n" + hiddenRequest,
-		status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal,
+		status: fiber.StatusBadRequest, slug: "bad_request", message: identityCodingRefusal, bare: bareServed,
 	}.run)
 }
 
@@ -821,7 +868,8 @@ func TestStreamedUploadExemptionIsNoLooserThanItsRoute(t *testing.T) {
 // fail (readHexInt consumes the byte it rejects) and c.Body() then releases the stream as at the last
 // chunk, with the rest of the body still on the connection; the precondition twin, an app without
 // closeConnectionsLeftMidBody, shows the stream is no longer attached once the handler has read (a check
-// of the stream alone would have kept the connection) and the request behind the bad chunk is served. It
+// of the stream alone would have kept the connection). Since fasthttp v1.75 the twin closes as well, on
+// the failed read (requestStream.failed), so the wrapper's close here is the second of two. It
 // runs on a bare app with the server's Fiber config: on the assembled server a chunked body reaches only
 // the storage upload, whose handler reads the stream itself and never calls c.Body().
 func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
@@ -859,10 +907,7 @@ func TestChunkedBodyClosesTheConnectionAfterItsStreamIsReleased(t *testing.T) {
 		t.Fatalf("precondition: status %d, stream released %v; want the handler to have read the body and "+
 			"fasthttp to have let go of its stream", ans.status, released.Load())
 	}
-	if ans.next == nil || ans.next.StatusCode != fiber.StatusNoContent || hits.Load() != 1 {
-		t.Fatalf("precondition: without closeConnectionsLeftMidBody the request behind the bad chunk should have "+
-			"been served (next answer %v, closed %v, probe reached %d time(s))", ans.next, ans.closed, hits.Load())
-	}
+	checkBare(t, ans, hits.Load(), bareClosed)
 
 	addr, hits, _ = serve(t, true)
 	ans = exchange(t, addr, raw)
@@ -907,9 +952,6 @@ func TestServerConfigKeepsTheBodyFramingInvariants(t *testing.T) {
 		{"ContinueHandler is nil", srv.ContinueHandler == nil,
 			"a request it turns down is answered 417 without the handler running — closeConnectionsLeftMidBody " +
 				"included — on a connection kept alive, with the body the client may already be sending unread"},
-		{"HeaderReceived is nil", srv.HeaderReceived == nil,
-			"it can arm a read deadline of its own and change the body-size limit per request, after the head, " +
-				"which is not what headReadTimeout's bound on the read-ahead or the read-ahead fixtures are written for"},
 		{"DisablePreParseMultipartForm is set", srv.DisablePreParseMultipartForm,
 			"otherwise fasthttp reads every multipart body — an ISO upload included — into memory and temporary " +
 				"files before any handler runs"},
@@ -956,6 +998,13 @@ func TestServerConfigKeepsTheBodyFramingInvariants(t *testing.T) {
 			"Content-Type: multipart/form-data; boundary=x") + "Content-Length: 0\r\n\r\n", fiber.StatusUnauthorized, true},
 		{"a JSON request for the storage upload", requestHead(fiber.MethodPost, uploadTarget,
 			"Content-Type: application/json") + "Content-Length: 0\r\n\r\n", fiber.StatusUnauthorized, false},
+		// The wrapper asks of the path the router matches, not of the raw one.
+		{"the storage upload with an escaped letter", requestHead(fiber.MethodPost,
+			strings.TrimSuffix(uploadTarget, "upload")+"uplo%61d",
+			"Content-Type: multipart/form-data; boundary=x") + "Content-Length: 0\r\n\r\n", fiber.StatusUnauthorized, true},
+		{"the upload's raw shape with dot segments, routed nowhere", requestHead(fiber.MethodPost,
+			"/api/v1/clusters/../storage/"+testClusterID+"/upload",
+			"Content-Type: multipart/form-data; boundary=x") + "Content-Length: 0\r\n\r\n", fiber.StatusNotFound, false},
 	} {
 		before := time.Now()
 		conn, br := dialAndSend(t, ln.Addr().String(), tt.raw)
@@ -974,6 +1023,19 @@ func TestServerConfigKeepsTheBodyFramingInvariants(t *testing.T) {
 			t.Errorf("%s: the body deadline is %v after the request went out, want bodyReadTimeout (%v) from when "+
 				"the handler started", tt.name, set[0].Sub(before), bodyReadTimeout)
 		}
+	}
+
+	// Listen installs Fiber's own HeaderReceived (App.hookHeaderReceived), read here after ln.take()
+	// saw a request served. It may close a connection, but a RequestConfig it returned would arm a read
+	// deadline or a body-size limit of its own after the head, which headReadTimeout's bound on the
+	// read-ahead and the read-ahead fixtures are not written for.
+	var head fasthttp.RequestHeader
+	head.SetMethod(fiber.MethodPost)
+	head.SetRequestURI(uploadTarget)
+	head.SetContentLength(1)
+	if hook := srv.HeaderReceived; hook != nil && hook(&head) != (fasthttp.RequestConfig{}) {
+		t.Errorf("HeaderReceived returns %+v, want the zero RequestConfig: the server's own limits and timeouts",
+			hook(&head))
 	}
 }
 

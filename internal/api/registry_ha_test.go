@@ -192,7 +192,8 @@ func TestHASIDAcceptsBothSpellingsOfTheColon(t *testing.T) {
 		// will not take it escaped.
 		{sid: "vm%3Aabc", want: fiber.StatusBadRequest},
 		{sid: "VM%3A109", want: fiber.StatusBadRequest},
-		{sid: "%2e%2e", want: fiber.StatusBadRequest},
+		// A dot segment the router removes (Fiber v3.6) before the route sees it.
+		{sid: "%2e%2e", want: fiber.StatusNotFound},
 		{sid: "vm%3A109%2F..", want: fiber.StatusBadRequest},
 	} {
 		t.Run(tt.sid, func(t *testing.T) {

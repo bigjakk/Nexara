@@ -28,9 +28,9 @@ import (
 // from the browser to Proxmox, and for two routes it used to cross one too many.
 //
 // The chain is: the SPA percent-encodes the value (encodeURIComponent); Fiber
-// routes and hands it back UNCHANGED, because UnescapePath is at its default of
-// false; the handler reads it; the proxmox client percent-escapes it into the
-// outbound path. Without a decode in the middle, the client takes the encoded
+// routes and hands it back with only the escapes of unreserved characters
+// decoded (v3.6), because UnescapePath is at its default of false; the handler
+// reads it; the proxmox client percent-escapes it into the outbound path. Without a decode in the middle, the client takes the encoded
 // TEXT for the name and escapes it again. A pool the operator named "a#b"
 // arrives as "a%23b" and goes out as "a%2523b", so Proxmox resolves a pool
 // named "a%23b" — which does not exist. An IP set entry "192.0.2.0/24" arrives
@@ -412,12 +412,12 @@ func TestIPSetEntryDeleteReachesProxmoxAsTheEntryTheCallerMeant(t *testing.T) {
 // client's escape.
 //
 // Decoding moves the traversal guards onto the string the client will actually
-// put in the path. Before it, "%2E%2E" was a pool literally named "%2E%2E" and
-// the guard never saw a dot; after it, the same request really does mean "..",
-// a dot segment on the wire, and validatePathSegment is what refuses it. A
-// malformed escape is refused too: the contract is that a path parameter is
-// percent-encoded, so "%zz" is a bad request rather than a pool name to be
-// guessed at.
+// put in the path: "..%2F.." means "../..", and validatePathSegment is what
+// refuses it. A bare "%2E%2E" no longer gets that far: since v3.6 Fiber decodes
+// it and removes the dot segment before it routes, so the route does not match
+// (404). A malformed escape is refused too: the contract is that a path
+// parameter is percent-encoded, so "%zz" is a bad request rather than a pool
+// name to be guessed at.
 //
 // Nothing may reach Proxmox in any of these cases.
 func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
@@ -439,25 +439,28 @@ func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 		// wire.
 		segment string
 		suffix  func(clusterID, segment string) string
+		// unrouted marks a value the router, not a guard, refuses.
+		unrouted bool
 	}{
-		{"ceph pool, encoded traversal", ceph, "%2E%2E", cephPoolTarget},
-		{"ceph pool, encoded slash", ceph, "a%2Fb", cephPoolTarget},
-		{"ceph pool, malformed escape", ceph, "a%zzb", cephPoolTarget},
+		{"ceph pool, encoded traversal", ceph, "%2E%2E", cephPoolTarget, true},
+		{"ceph pool, traversal through an encoded slash", ceph, "%2E%2E%2F%2E%2E", cephPoolTarget, false},
+		{"ceph pool, encoded slash", ceph, "a%2Fb", cephPoolTarget, false},
+		{"ceph pool, malformed escape", ceph, "a%zzb", cephPoolTarget, false},
 		// A control byte no catalogued pattern can see: the rule matches the
 		// value as it ARRIVES, where "%0A" is three ordinary characters. Once
 		// decoded it is a newline, and the same string is written into the
 		// TrackTask description and the audit row that every Viewer can read.
-		{"ceph pool, encoded newline", ceph, "a%0Ab", cephPoolTarget},
-		{"ceph pool, encoded NUL", ceph, "a%00b", cephPoolTarget},
-		{"ip set entry, encoded traversal", ipset, "%2E%2E", ipSetEntryTarget},
-		{"ip set entry, traversal through the slash it now allows", ipset, "%2E%2E%2F%2E%2E", ipSetEntryTarget},
-		{"ip set entry, malformed escape", ipset, "a%zzb", ipSetEntryTarget},
-		{"ip set entry, encoded newline", ipset, "a%0Ab", ipSetEntryTarget},
+		{"ceph pool, encoded newline", ceph, "a%0Ab", cephPoolTarget, false},
+		{"ceph pool, encoded NUL", ceph, "a%00b", cephPoolTarget, false},
+		{"ip set entry, encoded traversal", ipset, "%2E%2E", ipSetEntryTarget, true},
+		{"ip set entry, traversal through the slash it now allows", ipset, "%2E%2E%2F%2E%2E", ipSetEntryTarget, false},
+		{"ip set entry, malformed escape", ipset, "a%zzb", ipSetEntryTarget, false},
+		{"ip set entry, encoded newline", ipset, "a%0Ab", ipSetEntryTarget, false},
 		// "Descent" names the shape, not a route: pveproxy joins everything
 		// after the set name back into the one cidr value, so it would not go
 		// deeper (see proxmox.validatePathSegmentAllowingSlash). The client's
 		// one-slash rule is what refuses it.
-		{"ip set entry, descent through the slash it now allows", ipset, "a%2Fb%2Fc", ipSetEntryTarget},
+		{"ip set entry, descent through the slash it now allows", ipset, "a%2Fb%2Fc", ipSetEntryTarget, false},
 	}
 
 	for _, tt := range tests {
@@ -470,11 +473,15 @@ func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 			}
 			defer func() { _ = resp.Body.Close() }()
 			// 400 specifically, not "any error": a 404 would mean the route
-			// stopped matching, which would refuse every case here for a
-			// reason that has nothing to do with the guard under test.
-			if resp.StatusCode != fiber.StatusBadRequest {
-				t.Errorf("status = %d, want 400 — the value must be refused by a guard, not by the router",
-					resp.StatusCode)
+			// stopped matching, which would refuse a case for a reason that
+			// has nothing to do with the guard under test — except where the
+			// case says the router removes the segment.
+			want := fiber.StatusBadRequest
+			if tt.unrouted {
+				want = fiber.StatusNotFound
+			}
+			if resp.StatusCode != want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, want)
 			}
 			if sent := tt.h.capture.seen(); len(sent) != 0 {
 				t.Errorf("the request reached Proxmox as %q; it must be refused before it is sent", sent)

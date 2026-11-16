@@ -253,14 +253,15 @@ func TestACMEPathSegmentsAreAnchored(t *testing.T) {
 		})
 	}
 
-	// And end to end, on the escaped spelling that reaches routing intact.
+	// And end to end: since v3.6 Fiber decodes and removes the escaped
+	// spelling before it routes, so it never reaches the route (404).
 	cap := &capture{}
 	app := newRegistryApp(t, noAuth(),
 		probeACMEEndpoint(t, fiber.MethodDelete, acmeScope+"/accounts/:name", cap))
 	target := pathPrefix + "clusters/" + testClusterID + "/acme/accounts/%2e%2e"
 	status, env := send(t, app, httptest.NewRequest(http.MethodDelete, target, nil))
-	if status != fiber.StatusBadRequest {
-		t.Errorf("status = %d (%q), want 400 for an escaped traversal segment", status, env.Message)
+	if status != fiber.StatusNotFound {
+		t.Errorf("status = %d (%q), want 404 for an escaped traversal segment", status, env.Message)
 	}
 	if cap.called {
 		t.Error("the handler ran for an escaped traversal segment")

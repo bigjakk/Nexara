@@ -1160,8 +1160,8 @@ func TestGuard_NothingDetachesAnUnreadRequestBody_ClassifiesEveryMethod(t *testi
 
 	rules := prog.rules
 	overrides := slices.Collect(maps.Values(rules.overrides))
-	for _, name := range []string{"(fiber.Ctx).Path", "(fiber.Ctx).Method", "(fiber.Req).Method",
-		"(*fiber.DefaultCtx).Path", "(*fiber.DefaultReq).Method"} {
+	for _, name := range []string{"(fiber.Ctx).Path", "(fiber.Ctx).Method", "(fiber.Req).Path", "(fiber.Req).Method",
+		"(*fiber.DefaultReq).Path", "(*fiber.DefaultReq).Method"} {
 		if !slices.Contains(overrides, name) {
 			t.Errorf("%s is not among the overrides the guard refuses (%v)", name, overrides)
 		}
@@ -1455,8 +1455,8 @@ func refused(c fiber.Ctx, ctx *fasthttp.RequestCtx, req *fasthttp.Request, h *fa
 		2*len(serverHandlerFields) + len(importsRefused) + len(uriMethodsRefused) + 2*overridden +
 		len(fasthttpServeFuncs)
 	if overridden < 6 {
-		t.Fatalf("precondition: %d Fiber overrides written; Ctx's Path and Method, Req's Method, DefaultCtx's Path "+
-			"and Method, and DefaultReq's Method are six", overridden)
+		t.Fatalf("precondition: %d Fiber overrides written; the Path and Method of Ctx, Req and DefaultReq "+
+			"(which DefaultCtx embeds) are six", overridden)
 	}
 	if want < minimum {
 		t.Fatalf("precondition: %d lines marked want; one for each entry of every list is %d", want, minimum)

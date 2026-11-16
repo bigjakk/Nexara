@@ -371,15 +371,16 @@ func TestClusterDeleteDoesNotTellAGuessRightFromWrong(t *testing.T) {
 	}
 }
 
-// TestAnUnresolvedDotSegmentReachesThePoolRoute is what lets the README say
-// Nexara does not rely on Traefik's sanitizePath. With it off, Traefik
-// forwards a dot segment unresolved (it still decodes %2E, so the segment
-// arrives as the dots themselves), and nothing here resolves it either:
-// Fiber routes the path as it arrives, so the request reaches the POOL
-// route, whose pool_id rule refuses the name — never the cluster delete.
-// The ordinary pool id is the precondition that the pool route is mounted
-// and reachable, so the refusals come from its rule and not from a 404.
-func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
+// TestAnUnresolvedDotSegmentNeverReachesThePoolOrTheCluster is what lets the
+// README say Nexara does not rely on Traefik's sanitizePath. With it off,
+// Traefik forwards a dot segment unresolved (it still decodes %2E, so the
+// segment arrives as the dots themselves). Since v3.6 Fiber resolves it as a
+// browser does, keeping the slash a final dot segment leaves, so
+// ".../pools/.." is "/api/v1/clusters/<id>/" and ".../pools/." is
+// ".../pools/": the trailing-slash refusal answers both, and neither the pool
+// route nor the cluster delete runs. The ordinary pool id is the precondition
+// that the pool route is mounted and reachable.
+func TestAnUnresolvedDotSegmentNeverReachesThePoolOrTheCluster(t *testing.T) {
 	for _, tt := range []struct {
 		id      string
 		reaches bool
@@ -387,6 +388,7 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 		{"pool01", true},
 		{"..", false},
 		{".", false},
+		{"%2E%2E", false},
 	} {
 		t.Run(tt.id, func(t *testing.T) {
 			pool := &capture{}
@@ -407,8 +409,8 @@ func TestAnUnresolvedDotSegmentReachesThePoolRoute(t *testing.T) {
 				}
 				return
 			}
-			if status != fiber.StatusBadRequest || !strings.HasPrefix(env.Message, "pool_id: ") || pool.called {
-				t.Errorf("DELETE %s answered %d %+v (pool handler ran: %v), want the pool_id rule's 400",
+			if status != fiber.StatusBadRequest || env.Message != trailingSlashRefusal || pool.called {
+				t.Errorf("DELETE %s answered %d %+v (pool handler ran: %v), want the trailing-slash refusal",
 					target, status, env, pool.called)
 			}
 		})

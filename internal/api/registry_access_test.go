@@ -382,9 +382,11 @@ func TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend(t *testing.T) {
 	walk("", 3)
 }
 
-// TestAccessTraversalIsRefusedAtTheRoute proves the anchor bites on a real
-// request rather than only in a schema unit test, and that it does so BEFORE
-// the handler runs.
+// TestAccessTraversalIsRefusedAtTheRoute proves a traversal segment never
+// reaches the handler on a real request. Since v3.6 Fiber removes it, raw or
+// escaped, before it routes, so the route is never matched (404 in this
+// one-route app); the pattern TestAccessPatternsAreNoNarrowerThanWhatACallerCanSend
+// holds stays the second layer.
 func TestAccessTraversalIsRefusedAtTheRoute(t *testing.T) {
 	cap := &capture{}
 	app := newRegistryApp(t, noAuth(),
@@ -392,23 +394,19 @@ func TestAccessTraversalIsRefusedAtTheRoute(t *testing.T) {
 
 	target := pathPrefix + "clusters/" + testClusterID + "/access/groups/.."
 	status, _ := send(t, app, httptest.NewRequest(http.MethodGet, target, nil))
-	// 400 alone, not "400 or 404": Fiber does not normalise "/groups/.." away (measured), and
-	// 404 is what a normalising Fiber would answer, so a tolerance would stay green whichever
-	// fact held. 400 pins the pattern as the thing refusing this.
-	if status != fiber.StatusBadRequest {
-		t.Errorf("status = %d, want 400 from the pattern for a traversal segment", status)
+	if status != fiber.StatusNotFound {
+		t.Errorf("status = %d, want 404: the router removes a traversal segment", status)
 	}
 	if cap.called {
 		t.Error("the handler ran for a traversal segment")
 	}
 
-	// The escaped spelling reaches routing intact and must be refused by the
-	// pattern rather than by Fiber.
+	// The escaped spelling is decoded and removed the same way.
 	cap.called = false
 	escaped := pathPrefix + "clusters/" + testClusterID + "/access/groups/%2e%2e"
 	status, env := send(t, app, httptest.NewRequest(http.MethodGet, escaped, nil))
-	if status != fiber.StatusBadRequest {
-		t.Errorf("status = %d (%q), want 400 for an escaped traversal segment", status, env.Message)
+	if status != fiber.StatusNotFound {
+		t.Errorf("status = %d (%q), want 404 for an escaped traversal segment", status, env.Message)
 	}
 	if cap.called {
 		t.Error("the handler ran for an escaped traversal segment")

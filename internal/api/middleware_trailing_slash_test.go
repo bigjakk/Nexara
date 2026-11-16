@@ -354,18 +354,20 @@ func TestTrailingSlashRefusalIsAccessLogged(t *testing.T) {
 
 // TestTrailingSlashGateReadsThePathTheRouterStrips measures what c.Path()
 // hands the gate, which middleware.go states and the gate relies on: the
-// raw request path, the query left out, nothing decoded and nothing
-// resolved. An encoded slash is therefore NOT a trailing slash to the gate —
-// nor to the router, which strips only the bytes this returns.
+// request path as the router matches it, the query left out, normalized
+// (Fiber v3.6): a final dot segment, raw or escaped, is removed and leaves
+// its slash, while an encoded slash is kept encoded and is NOT a trailing
+// slash to the gate, nor to the router, which strips only these bytes.
 func TestTrailingSlashGateReadsThePathTheRouterStrips(t *testing.T) {
 	s := newAssembledServer(t)
 	cluster := pathPrefix + "clusters/" + testClusterID
 
 	for _, tt := range []struct{ target, path string }{
 		{cluster + "/?revoke_pve_credentials=1", cluster + "/"},
-		{cluster + "%2F", cluster + "%2F"},
-		{cluster + "/pools/%2e%2e", cluster + "/pools/%2e%2e"},
-		{cluster + "/pools/../", cluster + "/pools/../"},
+		{cluster + "%2f", cluster + "%2F"},
+		{cluster + "/pools/%2e%2e", cluster + "/"},
+		{cluster + "/pools/../", cluster + "/"},
+		{cluster + "/pools/.", cluster + "/pools/"},
 	} {
 		fctx, _ := wireRequest{method: fiber.MethodDelete, target: tt.target}.build(t)
 		c := s.app.AcquireCtx(fctx)
