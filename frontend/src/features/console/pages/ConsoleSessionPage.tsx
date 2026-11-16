@@ -24,7 +24,6 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useLiveUpdates } from "@/hooks/useLiveUpdates";
 import { useLoadBranding } from "@/hooks/useLoadBranding";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useSignOutFromOtherTabs } from "@/hooks/useSignOutFromOtherTabs";
 import { ApiClientError } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/auth-store";
@@ -55,9 +54,9 @@ export function ConsoleSessionPage() {
   const [params] = useSearchParams();
   const target = useMemo(() => parseConsoleSessionTarget(params), [params]);
   const { canConsole } = usePermissions();
-  useSignOutFromOtherTabs();
-  // Only a sign-out this tab is following raises it here (there is no Sign
-  // out on this page): the console goes at once, not when the revoke answers.
+  // Only a sign-out this tab is following (ProtectedRoute, which this route is
+  // under, follows the other tabs) raises it here (there is no Sign out on this
+  // page): the console goes at once, not when the revoke answers.
   const signingOut = useAuthStore((s) => s.isLoggingOut);
 
   let body: ReactNode;

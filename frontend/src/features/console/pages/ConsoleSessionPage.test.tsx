@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { ApiClientError, apiClient, USER_KEY } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useConsoleStore, useConsoleStoreApi } from "@/stores/console-store";
 import { ADMIN, VIEWER } from "@/test/fake-server";
 import { renderWithProviders } from "@/test/test-utils";
@@ -381,10 +382,18 @@ describe("ConsoleSessionPage", () => {
     expect(shown).toHaveAttribute("data-visible", "true");
   });
 
+  // Followed by ProtectedRoute, which the console's route sits under (App.tsx).
   it("ends its session when another tab signs someone else in", async () => {
     const clearAuth = vi.fn();
-    useAuthStore.setState({ clearAuth });
-    renderAt(launched(VNC_LINK));
+    useAuthStore.setState({ clearAuth, isInitialized: true });
+    renderWithProviders(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="*" element={<ConsoleSessionPage />} />
+        </Route>
+      </Routes>,
+      { router: { initialEntries: [launched(VNC_LINK)] } },
+    );
     await screen.findByTestId("viewer");
 
     act(() => {
