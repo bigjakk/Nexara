@@ -756,7 +756,7 @@ An SSO account is bound to one identity at the provider: the ID token's issuer (
 - otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
 - an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
 
-For an account with two-factor authentication, bound or not, the sign-in's audit entry (`oidc_callback`, then `oidc_login`) appears only once the code has passed and the session exists; a sign-in that stops at the code prompt leaves none.
+For an account with two-factor authentication, bound or not, the sign-in's audit entry (`oidc_login` and `oidc_callback`) appears only once the code has passed and the session exists; a sign-in that stops at the code prompt leaves none.
 
 The unverified-address and allowed-domain refusals above happen before any of this, so neither can link an account. A local or LDAP account is never linked.
 
