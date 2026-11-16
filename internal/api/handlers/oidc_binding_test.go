@@ -86,6 +86,20 @@ func TestOIDCCallback_RefusesASignInThisBrowserDidNotStart(t *testing.T) {
 	}
 }
 
+// TestOIDCCallback_RedisDownIsNotAnotherBrowser: a state that could not be read is
+// answered "try again", not blamed on the browser.
+func TestOIDCCallback_RedisDownIsNotAnotherBrowser(t *testing.T) {
+	t.Parallel()
+	a := newEpochApp(t, newEpochStore(), epochOptions{})
+	a.redis.Close()
+
+	resp := a.send(t, http.MethodGet, "/auth/oidc/callback?code=idp-code&state=some-state", "", nil, 10*time.Second)
+
+	if got := resp.Header.Get("Location"); got != "/login?error="+url.QueryEscape(oidcCouldNotCompleteMessage) {
+		t.Errorf("redirected to %q, want the could-not-complete refusal", got)
+	}
+}
+
 // TestOIDCExchange_RefusesACodeThisBrowserWasNotGiven: the exchange code the callback
 // stores comes with its binding, a secret the code's data holds only the digest of, and
 // the exchange refuses — before it spends the code — one the browser trading it was not

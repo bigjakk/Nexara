@@ -577,6 +577,10 @@ func (h *OIDCHandler) Authorize(c fiber.Ctx, _ *apischema.Params) error {
 const oidcNotThisBrowserMessage = "The single sign-on could not be finished: it was not started in this browser, it took " +
 	"too long, or it was started at a different address than this one. Start it again from the sign-in page."
 
+// oidcCouldNotCompleteMessage answers a callback Nexara could not finish for a reason of
+// its own, such as Redis not answering.
+const oidcCouldNotCompleteMessage = "The single sign-on could not be completed. Try again."
+
 // Callback handles GET /api/v1/auth/oidc/callback.
 // Called by the IdP after authentication; exchanges code, provisions user,
 // stores short-lived exchange code in Redis, and redirects to frontend.
@@ -594,7 +598,11 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
-	binding := auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)
+	binding, err := auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)
+	if err != nil {
+		slog.Error("oidc callback: could not read the sign-in's state", "error", err)
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcCouldNotCompleteMessage))
+	}
 	if !oidcStateBinding.matches(c, state, binding) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))

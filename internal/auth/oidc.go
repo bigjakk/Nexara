@@ -301,18 +301,22 @@ func oidcStateKey(state string) string { return "oidc:state:" + state }
 // OIDCStateBindingDigest is the browser binding's record (the digest of its secret, and
 // whether its cookie is Secure; opaque here) stored with state by
 // GenerateAuthURL, without spending the state; "" when there is none — an unknown or
-// expired state, Redis not answering, or state data written before the binding was
-// stored (a sign-in in flight across that upgrade), which the callback refuses.
-func OIDCStateBindingDigest(ctx context.Context, rdb *redis.Client, state string) string {
+// expired state, or state data written before the binding was stored (a sign-in in
+// flight across that upgrade), which the callback refuses. err is Redis failing to
+// answer, which is not a sign-in from another browser.
+func OIDCStateBindingDigest(ctx context.Context, rdb *redis.Client, state string) (string, error) {
 	data, err := rdb.Get(ctx, oidcStateKey(state)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("reading the sign-in's state: %w", err)
 	}
 	_, _, digest, err := splitStateData(data)
 	if err != nil {
-		return ""
+		return "", nil //nolint:nilerr // old state data: no binding, refused as one
 	}
-	return digest
+	return digest, nil
 }
 
 func splitStateData(data string) (nonce, codeVerifier, bindingDigest string, err error) {
