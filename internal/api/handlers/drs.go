@@ -271,7 +271,7 @@ func (h *DRSHandler) GetConfig(c fiber.Ctx, p *apischema.Params) error {
 			EvalIntervalSeconds: 300,
 			IncludeContainers:   false,
 			ExcludeVeeamWorkers: true,
-			BootHoldoffMinutes:  10, // the column default (migration 000147)
+			BootHoldoffMinutes:  10, // the column default
 		}
 	} else {
 		resp = toDRSConfigResponse(cfg)
