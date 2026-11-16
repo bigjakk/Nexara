@@ -66,3 +66,37 @@ func TestSSHCredentialsConfigured(t *testing.T) {
 		})
 	}
 }
+
+// GET .../ssh-credentials answers null for none, and 503 when it could not look,
+// rather than a null that reads as "none configured".
+func TestGetSSHCredentials_CouldNotLookIsNotNone(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{"none", pgx.ErrNoRows, http.StatusOK},
+		{"could not look", errors.New("db down"), http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := NewRollingUpdateHandler(db.New(&sshConfiguredDBTX{err: tt.err}), "", nil, nil)
+			mirror := compiledMirror(t, apischema.Properties{
+				"cluster_id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath},
+			})
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Get("/clusters/:cluster_id/ssh-credentials",
+				withRequestParams(t, mirror, []string{"cluster_id"}, h.GetSSHCredentials))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/clusters/"+uuid.New().String()+"/ssh-credentials", nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != tt.wantStatus || (tt.wantStatus == http.StatusOK && string(body) != "null") {
+				t.Fatalf("got %d %s, want %d", resp.StatusCode, body, tt.wantStatus)
+			}
+		})
+	}
+}

@@ -2139,7 +2139,7 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/clusters/:id/ssh-credentials` | Get SSH credentials |
+| GET | `/clusters/:id/ssh-credentials` | Get SSH credentials: the username, port and auth type, never the secret. `null` when none are configured, 503 when they could not be read |
 | GET | `/clusters/:id/ssh-credentials/configured` | `{"configured": true}` or `false`, and nothing else: whether the cluster has SSH credentials. Needs `manage:node`, `manage:rolling_update` or `manage:ssh_credentials` on the cluster |
 | PUT | `/clusters/:id/ssh-credentials` | Create/update SSH credentials |
 | DELETE | `/clusters/:id/ssh-credentials` | Delete SSH credentials |

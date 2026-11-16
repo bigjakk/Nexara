@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
@@ -809,8 +810,14 @@ func (h *RollingUpdateHandler) GetSSHCredentials(c fiber.Ctx, p *apischema.Param
 	}
 
 	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return c.JSON(nil) // No credentials configured.
+	}
+	if err != nil {
+		// Could not look is not "none": the form would offer to set up
+		// credentials that may already exist.
+		slog.Error("read cluster SSH credentials", "cluster_id", clusterID, "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, "Could not read the cluster's SSH credentials. Try again.")
 	}
 
 	return c.JSON(sshCredentialResponse{
@@ -944,8 +951,12 @@ func (h *RollingUpdateHandler) TestSSHConnection(c fiber.Ctx, p *apischema.Param
 	}
 
 	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
+	}
+	if err != nil {
+		slog.Error("read cluster SSH credentials", "cluster_id", clusterID, "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, "Could not read the cluster's SSH credentials. Try again.")
 	}
 
 	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, nodeName)
@@ -1109,8 +1120,12 @@ func (h *RollingUpdateHandler) PinSSHHostKey(c fiber.Ctx, p *apischema.Params) e
 	expectedFingerprint := p.String("expected_fingerprint")
 
 	creds, err := h.queries.GetClusterSSHCredentials(c.Context(), clusterID)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fiber.NewError(fiber.StatusNotFound, "SSH credentials not configured for this cluster")
+	}
+	if err != nil {
+		slog.Error("read cluster SSH credentials", "cluster_id", clusterID, "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, "Could not read the cluster's SSH credentials. Try again.")
 	}
 
 	sshHost, hostErr := h.resolveNodeAddress(c, clusterID, nodeName)
