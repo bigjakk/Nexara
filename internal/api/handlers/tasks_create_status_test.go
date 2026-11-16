@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -235,9 +236,9 @@ func TestTaskCreateRefusesWhatIsNotANewRunningTaskOfTheCluster(t *testing.T) {
 		if tt.want == http.StatusCreated && (!slices.Contains(dbtx.args, any("qmcreate")) ||
 			!slices.ContainsFunc(dbtx.args, func(a any) bool { at, ok := a.(time.Time); return ok && at.Unix() == runningTaskStart }) ||
 			slices.Contains(dbtx.args, any("forged")) || slices.Contains(dbtx.args, any("forged too")) ||
-			dbtx.details["provided_description"] != "forged too") {
-			t.Errorf("%s: the insert was handed %v, the audit entry %v; want Proxmox's type, qmcreate, and the "+
-				"description as provided_description alone, and Proxmox's start", tt.name, dbtx.args, dbtx.details)
+			dbtx.details["description_set"] != true || slices.Contains(slices.Collect(maps.Values(dbtx.details)), any("forged too"))) {
+			t.Errorf("%s: the insert was handed %v, the audit entry %v; want Proxmox's type, qmcreate, "+
+				"description_set and never the description's text, and Proxmox's start", tt.name, dbtx.args, dbtx.details)
 		}
 	}
 }
