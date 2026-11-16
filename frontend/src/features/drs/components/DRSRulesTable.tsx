@@ -81,19 +81,18 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
         },
       });
     } else {
-      deleteManualRule.mutate(deleteTarget.id, {
-        onSuccess: () => {
-          setDeleteTarget(null);
-        },
+      // Through the promise, not mutate()'s onError: the app's error toast
+      // reports the failure, which it cannot see beside an onError given there.
+      const id = deleteTarget.id;
+      const close = () => {
+        setDeleteTarget((cur) => (cur?.id === id ? null : cur));
+      };
+      void deleteManualRule.mutateAsync(id).then(close, (err: unknown) => {
         // A 404 means the rule is already gone — deleted from another tab
         // or by another operator. The hook refetches the list and the app's
         // mutation handler toasts the 404; the dialog has nothing left to
         // confirm, so it closes rather than offering the dead row again.
-        onError: (err) => {
-          if (err instanceof ApiClientError && err.status === 404) {
-            setDeleteTarget(null);
-          }
-        },
+        if (err instanceof ApiClientError && err.status === 404) close();
       });
     }
   };

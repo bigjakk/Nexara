@@ -28,22 +28,15 @@ function mockEvaluationSteps(steps: EvaluationStep[]) {
   vi.mocked(useTriggerEvaluation).mockImplementation(
     () =>
       ({
-        mutate: (
-          _vars: undefined,
-          opts?: {
-            onSuccess?: (d: EvaluateResponse) => void;
-            onError?: () => void;
-          },
-        ) => {
+        mutateAsync: () => {
           const step = steps[Math.min(clicks, steps.length - 1)];
           clicks += 1;
           if (step && "ok" in step) {
             error = null;
-            opts?.onSuccess?.(step.ok);
-            return;
+            return Promise.resolve(step.ok);
           }
           error = new Error(step ? step.failure : "evaluation failed");
-          opts?.onError?.();
+          return Promise.reject(error);
         },
         isPending: false,
         isError: error !== null,

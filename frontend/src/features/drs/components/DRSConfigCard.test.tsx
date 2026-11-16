@@ -26,13 +26,16 @@ const baseConfig: DRSConfig = {
   updated_at: "",
 };
 
-function mockHooks(config: DRSConfig, mutate = vi.fn()) {
+function mockHooks(
+  config: DRSConfig,
+  mutateAsync = vi.fn().mockResolvedValue(undefined),
+) {
   vi.mocked(useDRSConfig).mockReturnValue({
     data: config,
     isLoading: false,
   } as unknown as ReturnType<typeof useDRSConfig>);
   vi.mocked(useUpdateDRSConfig).mockReturnValue({
-    mutate,
+    mutateAsync,
     isPending: false,
     error: null,
   } as unknown as ReturnType<typeof useUpdateDRSConfig>);
@@ -84,8 +87,8 @@ describe("DRSConfigCard boot hold-off", () => {
   });
 
   it("shows the stored hold-off and saves the edited one", async () => {
-    const mutate = vi.fn();
-    mockHooks({ ...baseConfig, boot_holdoff_minutes: 15 }, mutate);
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    mockHooks({ ...baseConfig, boot_holdoff_minutes: 15 }, mutateAsync);
     const user = userEvent.setup();
     renderWithProviders(<DRSConfigCard clusterId="c1" />);
 
@@ -97,9 +100,8 @@ describe("DRSConfigCard boot hold-off", () => {
       screen.getByRole("button", { name: /Save Configuration/i }),
     );
 
-    expect(mutate).toHaveBeenCalledWith(
+    expect(mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ boot_holdoff_minutes: 0 }),
-      expect.anything(),
     );
   });
 });

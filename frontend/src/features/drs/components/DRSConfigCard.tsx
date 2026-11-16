@@ -23,6 +23,7 @@ import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface DRSConfigCardProps {
   clusterId: string;
@@ -32,6 +33,9 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const { t } = useTranslation("clusters");
   const { data: config, isLoading } = useDRSConfig(clusterId);
   const updateConfig = useUpdateDRSConfig(clusterId);
+  // The card shows a failed save itself (the hook opts out of the app's
+  // toast), and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   const nativeRebalance = config?.native_crs?.auto_rebalance ?? false;
 
   const [mode, setMode] = useState<DRSMode>("disabled");
@@ -89,7 +93,8 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       include_containers: includeContainers,
       exclude_veeam_workers: excludeVeeamWorkers,
     };
-    updateConfig.mutate(request, {
+    settle(updateConfig.mutateAsync(request), {
+      action: t("drsSaveAction"),
       onSuccess: () => {
         setSaveStatus("saved");
         setTimeout(() => {

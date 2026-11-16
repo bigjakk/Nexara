@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { usageLevel, USAGE_TEXT_CLASS } from "@/lib/usage-level";
 import { formatUptime } from "@/lib/format";
 import { useTriggerEvaluation } from "../api/drs-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { DRSRecommendation, HeldNode, NodeScore } from "../types/drs";
 import { Play, Loader2, AlertTriangle } from "lucide-react";
 
@@ -44,6 +45,9 @@ function LoadBar({ value, label }: { value: number; label: string }) {
 export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   const { t } = useTranslation("clusters");
   const evaluation = useTriggerEvaluation(clusterId);
+  // The panel shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was left is toasted instead.
+  const settle = useSaveOutcome(clusterId);
   const [results, setResults] = useState<DRSRecommendation[] | null>(null);
   const [nodeScores, setNodeScores] = useState<NodeScore[] | null>(null);
   const [heldNodes, setHeldNodes] = useState<HeldNode[]>([]);
@@ -82,7 +86,8 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
   }, [clusterId, clearEvaluation]);
 
   const handleEvaluate = () => {
-    evaluation.mutate(undefined, {
+    settle(evaluation.mutateAsync(), {
+      action: t("drsEvaluateAction"),
       onSuccess: (data) => {
         setResults(data.recommendations);
         setNodeScores(data.node_scores);

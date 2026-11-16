@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import type {
   DRSConfig,
   DRSConfigRequest,
@@ -25,6 +26,7 @@ export function useDRSConfig(clusterId: string) {
 export function useUpdateDRSConfig(clusterId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (config: DRSConfigRequest) =>
       apiClient.put<DRSConfig>(
         apiPath`/api/v1/clusters/${clusterId}/drs/config`,
@@ -126,6 +128,7 @@ export function useDeleteHARule(clusterId: string) {
 
 export function useTriggerEvaluation(clusterId: string) {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: () =>
       apiClient.post<EvaluateResponse>(
         apiPath`/api/v1/clusters/${clusterId}/drs/evaluate`,

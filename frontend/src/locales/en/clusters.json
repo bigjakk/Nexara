@@ -19,6 +19,8 @@
   "drsBootHoldoffDesc": "For this many minutes after a node boots, DRS moves no guest onto it or off it, so a cluster starting up is not rebalanced while its guests are still booting. 0 turns it off. A manual migrate is not affected.",
   "drsBootHoldoffUnit": "minutes",
   "drsHeldNode": "{{node}} booted {{uptime}} ago, so DRS leaves it alone until its {{holdoff}}-minute hold-off ends.",
+  "drsSaveAction": "Saving the DRS configuration",
+  "drsEvaluateAction": "Evaluating DRS",
   "noNodesFound": "No nodes found for this cluster.",
   "cpus": "CPUs",
   "pveVersion": "PVE Version",
