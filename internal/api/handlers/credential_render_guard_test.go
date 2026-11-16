@@ -115,6 +115,78 @@ var credentialRenderers = map[string]credentialRendererNote{
 		reason: "redacts Password and keys in fmt and slog; no MarshalJSON, it is sent as a form — " +
 			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
 	},
+	"internal/proxmox.TermProxyResponse": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Ticket and Password in fmt and slog (types_redaction.go); no MarshalJSON, the console handlers read the fields — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.StorageConfig": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Password, EncryptionKey and Keyring in fmt and slog (types_redaction.go); no MarshalJSON, the storage handlers return it with the secrets withheld themselves — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.CreateCTParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Password in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.SDNIPAM": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, the IPAM listing returns it with the token withheld (sdnIPAMsForRead) — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.CreateSDNIPAMParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.UpdateSDNIPAMParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.SDNDNS": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Key in fmt and slog (types_redaction.go); no MarshalJSON, the DNS listing returns it with the key withheld — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.CreateSDNDNSParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Key in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.UpdateSDNDNSParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Key in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.MetricServerConfig": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, the metric server listing returns it with the token withheld — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.CreateMetricServerParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
+	"internal/proxmox.UpdateMetricServerParams": {
+		redacts:    true,
+		renderings: []string{"GoString", "LogValue", "String"},
+		reason: "redacts Token in fmt and slog (types_redaction.go); no MarshalJSON, it is sent as a form — " +
+			"see TestGuard_AccessTypesNeverPrintTheirSecrets",
+	},
 	"internal/ssh.Config": {
 		redacts:    true,
 		renderings: []string{"GoString", "LogValue", "MarshalJSON", "String"},

@@ -31,6 +31,22 @@ func TestGuard_AccessTypesNeverPrintTheirSecrets(t *testing.T) {
 		{"AccessTokenCreated", token, "nexara@pve!ci"},
 		{"CreateAccessUserParams", create, "alice@pve"},
 		{"UpdateAccessUserParams", update, "REDACTED"},
+		// The other credential-bearing Proxmox types (types_redaction.go), one row per secret field.
+		{"TermProxyResponse ticket", TermProxyResponse{UPID: "UPID:pve-01:x", Ticket: secret}, "UPID:pve-01:x"},
+		{"TermProxyResponse password", TermProxyResponse{UPID: "UPID:pve-01:x", Password: secret}, "UPID:pve-01:x"},
+		{"StorageConfig password", StorageConfig{Storage: "store01", Password: secret}, "store01"},
+		{"StorageConfig encryption key", StorageConfig{Storage: "store01", EncryptionKey: secret}, "store01"},
+		{"StorageConfig keyring", StorageConfig{Storage: "store01", Keyring: secret}, "store01"},
+		{"CreateCTParams", CreateCTParams{Hostname: "linux01", Password: secret}, "linux01"},
+		{"SDNIPAM", SDNIPAM{IPAM: "ipam01", Token: secret}, "ipam01"},
+		{"CreateSDNIPAMParams", CreateSDNIPAMParams{IPAM: "ipam01", Token: secret}, "ipam01"},
+		{"UpdateSDNIPAMParams", UpdateSDNIPAMParams{URL: "https://ipam.example.com", Token: secret}, "ipam.example.com"},
+		{"SDNDNS", SDNDNS{DNS: "dns01", Key: secret}, "dns01"},
+		{"CreateSDNDNSParams", CreateSDNDNSParams{DNS: "dns01", Key: secret}, "dns01"},
+		{"UpdateSDNDNSParams", UpdateSDNDNSParams{URL: "https://dns.example.com", Key: secret}, "dns.example.com"},
+		{"MetricServerConfig", MetricServerConfig{ID: "metrics01", Token: secret}, "metrics01"},
+		{"CreateMetricServerParams", CreateMetricServerParams{ID: "metrics01", Token: secret}, "metrics01"},
+		{"UpdateMetricServerParams", UpdateMetricServerParams{Server: "192.0.2.30", Token: secret}, "192.0.2.30"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
