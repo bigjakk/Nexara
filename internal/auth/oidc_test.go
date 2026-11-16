@@ -169,11 +169,13 @@ func TestStepUp_TheURLAsksForAFreshSignInAndTheStateSaysItIsAStepUp(t *testing.T
 	authTime := time.Now().Add(-time.Minute).Truncate(time.Second)
 	for _, tc := range []struct {
 		name, stepUp string
-		authTime     any // the claim; nil sends none
+		authTime     any  // the claim; nil sends none
+		relaxed      bool // the configuration's relaxed step-up: no prompt, no max_age
 	}{
-		{"a sign-in", "", nil},
-		{"a step-up", "session:user", authTime.Unix()},
-		{"a step-up whose token has no auth_time", "session:user", nil},
+		{"a sign-in", "", nil, false},
+		{"a step-up", "session:user", authTime.Unix(), false},
+		{"a step-up whose token has no auth_time", "session:user", nil, false},
+		{"a relaxed step-up", "session:user", nil, true},
 	} {
 		var issuer, nonce string
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -200,7 +202,7 @@ func TestStepUp_TheURLAsksForAFreshSignInAndTheStateSaysItIsAStepUp(t *testing.T
 
 		authURL, state, err := p.GenerateAuthURL(t.Context(), "0:digest")
 		if tc.stepUp != "" {
-			authURL, state, err = p.GenerateStepUpURL(t.Context(), "0:digest", tc.stepUp)
+			authURL, state, err = p.GenerateStepUpURL(t.Context(), "0:digest", tc.stepUp, !tc.relaxed)
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
@@ -208,7 +210,7 @@ func TestStepUp_TheURLAsksForAFreshSignInAndTheStateSaysItIsAStepUp(t *testing.T
 		u, _ := url.Parse(authURL)
 		nonce = u.Query().Get("nonce")
 		fresh := u.Query().Get("prompt") == "login" && u.Query().Get("max_age") == "0"
-		if fresh != (tc.stepUp != "") {
+		if asked := u.Query().Has("prompt") || u.Query().Has("max_age"); fresh != (tc.stepUp != "" && !tc.relaxed) || asked != fresh {
 			t.Errorf("%s: the URL asks for a fresh sign-in: %v", tc.name, fresh)
 		}
 		if _, peeked, _ := OIDCStatePeek(t.Context(), rdb, state); peeked != tc.stepUp {

@@ -3,12 +3,12 @@ INSERT INTO oidc_configs (
     name, enabled, issuer_url, client_id, client_secret_encrypted,
     redirect_uri, scopes, email_claim, display_name_claim, groups_claim,
     group_role_mapping, default_role_id, auto_provision, allowed_domains,
-    allow_private_address
+    allow_private_address, relaxed_step_up
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15
+    $15, $16
 ) RETURNING *;
 
 -- name: GetOIDCConfig :one
@@ -36,7 +36,8 @@ UPDATE oidc_configs SET
     default_role_id = $13,
     auto_provision = $14,
     allowed_domains = $15,
-    allow_private_address = $16
+    allow_private_address = $16,
+    relaxed_step_up = $17
 WHERE id = $1
 RETURNING *;
 

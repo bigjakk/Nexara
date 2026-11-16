@@ -164,15 +164,19 @@ func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string
 }
 
 // GenerateStepUpURL is GenerateAuthURL for a step-up: a fresh authentication at the
-// provider by somebody who is signed in already. It asks the provider to authenticate
-// the user again whatever session it holds (prompt=login) and to say when it did
-// (max_age=0, which makes auth_time a required claim), and stores stepUp, which says
+// provider by somebody who is signed in already. With fresh it asks the provider to
+// authenticate the user again whatever session it holds (prompt=login) and to say when
+// it did (max_age=0, which makes auth_time a required claim); without it (the
+// configuration's relaxed step-up) it asks for neither. It stores stepUp, which says
 // whose step-up it is, with the state, so the callback (ExchangeAndVerify's StepUp)
 // knows it is one and never takes it for a sign-in. stepUp must not be empty or hold
 // a "|".
-func (p *OIDCProvider) GenerateStepUpURL(ctx context.Context, bindingDigest, stepUp string) (authURL, state string, err error) {
+func (p *OIDCProvider) GenerateStepUpURL(ctx context.Context, bindingDigest, stepUp string, fresh bool) (authURL, state string, err error) {
 	if stepUp == "" || strings.Contains(stepUp, "|") {
 		return "", "", fmt.Errorf("generate step-up URL: unusable step-up record")
+	}
+	if !fresh {
+		return p.generateAuthURL(ctx, bindingDigest, stepUp)
 	}
 	return p.generateAuthURL(ctx, bindingDigest, stepUp,
 		oauth2.SetAuthURLParam("prompt", "login"), oauth2.SetAuthURLParam("max_age", "0"))

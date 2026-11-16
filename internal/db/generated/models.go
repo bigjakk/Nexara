@@ -878,6 +878,7 @@ type OidcConfig struct {
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 	AllowPrivateAddress   bool            `json:"allow_private_address"`
+	RelaxedStepUp         bool            `json:"relaxed_step_up"`
 }
 
 type PbsDatastoreMetric struct {

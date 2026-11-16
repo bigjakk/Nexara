@@ -48,9 +48,11 @@ func stepUpCookieOf(resp *http.Response) string {
 
 // confirmStepUp runs the callback's decision for erin's session through the probe and
 // returns its answer and the cookie it set.
-func confirmStepUp(t *testing.T, a *epochApp, record string, info *auth.OIDCUserInfo) (answer, cookie string) {
+func confirmStepUp(t *testing.T, a *epochApp, record string, info *auth.OIDCUserInfo, relaxed ...bool) (answer, cookie string) {
 	t.Helper()
-	a.probe = func(c fiber.Ctx) error { return c.SendString(a.oidc.finishStepUp(c, record, info, false)) }
+	a.probe = func(c fiber.Ctx) error {
+		return c.SendString(a.oidc.finishStepUp(c, record, info, false, len(relaxed) > 0 && relaxed[0]))
+	}
 	resp := a.send(t, http.MethodGet, "/probe", "", nil, 20*time.Second)
 	return readBody(t, resp.Body), stepUpCookieOf(resp)
 }
@@ -168,5 +170,27 @@ func TestTOTPSetup_TheSSOProofIsBoundToTheBrowser(t *testing.T) {
 	}
 	if got := a.beginSetupIn(t, erin, session, cookie); got != http.StatusOK {
 		t.Errorf("the owner's setup after them = %d, want 200: the proof was burned", got)
+	}
+}
+
+// TestTOTPSetup_TheRelaxedStepUpAcceptsARoundTripWithoutAuthTime: with the operator's
+// relaxed_step_up, a completed round trip whose token has no auth_time records a proof
+// the owner's setup uses, audited as the relaxed rule; without it, it is refused.
+func TestTOTPSetup_TheRelaxedStepUpAcceptsARoundTripWithoutAuthTime(t *testing.T) {
+	t.Parallel()
+	for _, relaxed := range []bool{true, false} {
+		a, erin, session := ssoSetupApp(t)
+		record := stepUpRecord(session, erin.ID)
+		got, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: erin.Email, StepUp: record}, relaxed)
+		want, setup := "", http.StatusOK
+		if !relaxed {
+			want, setup = "no_auth_time", http.StatusForbidden
+		}
+		if got != want || a.beginSetupIn(t, erin, session, cookie) != setup {
+			t.Errorf("relaxed %v: the callback answered %q, want %q, and the setup was not %d", relaxed, got, want, setup)
+		}
+		if _, details := auditOf(a, ssoStepUpConfirmedAction); relaxed && (len(details) != 1 || !strings.Contains(details[0], `"rule":"relaxed"`)) {
+			t.Errorf("confirmation rows %v, want one under the relaxed rule", details)
+		}
 	}
 }

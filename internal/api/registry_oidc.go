@@ -238,6 +238,11 @@ func oidcConfigParams(extra apischema.Properties) apischema.Properties {
 			"configuration and audited; on an update it is kept while issuer_url stays the same. Every contact " +
 			"with the provider checks the address again. A loopback, link-local, unspecified or zoned address " +
 			"is refused either way."),
+		"relaxed_step_up": optFlag("Let an account of this provider confirm a 2FA setup by completing a " +
+			"round trip through the provider, without proof that it signed in afresh: for a provider that " +
+			"sends no auth_time, or ignores or refuses prompt=login. Off (the default), the confirmation asks " +
+			"for prompt=login and max_age=0 and needs an auth_time from the last 5 minutes. On an update, " +
+			"left out keeps the stored value. Audited when it changes."),
 		"acknowledge_insecure_redirect": {
 			Type:     apischema.Boolean,
 			Optional: true,

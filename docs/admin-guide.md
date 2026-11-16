@@ -775,6 +775,27 @@ are named `__Host-nexara_oidc_…`, which no other site on the domain and no pla
 reads no other name. A sign-in that was in flight while Nexara was upgraded to this release is
 refused once; start it again.
 
+#### Confirming a 2FA setup through the provider
+
+An SSO account has no password, so before it sets up 2FA it signs in at the provider again (see
+[Two-Factor Authentication](#two-factor-authentication-totp)). By default Nexara asks for a strict confirmation, which
+the provider must support:
+
+- it must honour `prompt=login` or `max_age=0`, so that it really asks the user to sign in again, and
+- it must put `auth_time` in the ID token. **Entra ID (Azure AD)** sends it only when the app registration adds
+  `auth_time` as an optional ID-token claim (**Token configuration > Add optional claim**). Keycloak and Authentik
+  send it.
+
+A provider that sends no `auth_time` (Dex, for one, which also ignores `prompt=login`), or that refuses `prompt=login`,
+cannot give the strict confirmation, and its users cannot turn 2FA on. For such a provider you can choose the
+relaxed confirmation, per configuration, with `relaxed_step_up` on the configuration (off for every existing and new
+one; audited when it changes). Nexara then asks for neither `prompt` nor `max_age`, and accepts the completed round
+trip through the provider as the confirmation, still bound to the same browser, the same Nexara sign-in and the same
+account. It keeps out someone who has only a stolen Nexara session token. It does not keep out someone at the
+owner's unlocked browser whose session at the provider is still open: they can complete the round trip without
+typing anything. It is your choice; the audit log records which rule each confirmation passed under
+(`totp_step_up_confirmed`, `rule` `strict` or `relaxed`).
+
 ### Two-Factor Authentication (TOTP)
 
 #### User Self-Service

@@ -368,7 +368,10 @@ An account that signs in through single sign-on has no password to send to
    callback signs nobody in and creates or links no account. It accepts the answer only when it
    comes back in the browser that began it, its ID token resolves to the same account, and the
    token carries an `auth_time` within the last 5 minutes (1 minute ahead allowed for clock
-   skew), by the database's clock. It then records a proof for the session that asked, good for
+   skew), by the database's clock. On a configuration with `relaxed_step_up: true` the URL
+   carries neither `prompt` nor `max_age`, and `auth_time` is neither required nor judged:
+   the completed round trip, in the same browser, for the same session and account, is the
+   proof. The `totp_step_up_confirmed` row's `rule` says `strict` or `relaxed`. It then records a proof for the session that asked, good for
    5 minutes and one setup, bound to this browser by an HttpOnly, SameSite=Strict cookie
    (`__Host-nexara_totp_step_up` at `/` when `Secure`; `nexara_totp_step_up` at
    `/api/v1/auth/totp/setup` otherwise), and redirects to `/settings/security?sso_step_up=confirmed`. Anything
@@ -2391,7 +2394,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/oidc/configs` | List OIDC configs, oldest first. Sign-in uses the oldest enabled one |
-| POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; an issuer that resolves to a private address answers `422 private_address_confirm_required`, its address in `details.ip`, until the body sets `allow_private_address` (stored, audited; a loopback, link-local, unspecified or zoned address is `400` either way); so does `PUT`, which keeps a confirmation while `issuer_url` stays the same |
+| POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; an issuer that resolves to a private address answers `422 private_address_confirm_required`, its address in `details.ip`, until the body sets `allow_private_address` (stored, audited; a loopback, link-local, unspecified or zoned address is `400` either way); so does `PUT`, which keeps a confirmation while `issuer_url` stays the same. `relaxed_step_up` (default `false`) lets the provider's accounts confirm a 2FA setup without `auth_time` (see Two-factor setup for an SSO account); a `PUT` that leaves it out keeps the stored value, and a change is audited |
 | GET | `/oidc/configs/:id` | Get OIDC config. `linked_accounts` (also in the list) counts the accounts bound to an identity of its issuer |
 | PUT | `/oidc/configs/:id` | Update OIDC config. Moving `issuer_url` while accounts are linked to the current issuer answers `422 oidc_issuer_change_confirm_required`, with `details.linked_accounts`, until the body sets `acknowledge_issuer_change`: those accounts are refused at sign-in until their links are reset (`DELETE /oidc/links`) |
 | DELETE | `/oidc/configs/:id` | Delete OIDC config |

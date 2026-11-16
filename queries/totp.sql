@@ -27,7 +27,8 @@ SELECT count(*) FROM totp_recovery_codes WHERE user_id = $1;
 -- provider again (the SSO step-up), for purpose, until ttl_seconds from now. Decided
 -- here against the database's clock: only for a session that is the user's, live (not
 -- revoked, not expired) and of an active user, and only when auth_time (the ID token's,
--- in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
+-- in Unix seconds) lies within window_seconds before now and skew_seconds after it,
+-- unless relaxed (the configuration's relaxed_step_up), when auth_time is not judged. 0
 -- rows: refused. A newer proof replaces an older one of the same session and purpose.
 -- binding is the record of the browser cookie the proof is bound to.
 INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, binding, expires_at)
@@ -38,8 +39,9 @@ WHERE s.id = sqlc.arg(session_id)
   AND NOT s.is_revoked
   AND s.expires_at > now()
   AND u.is_active
-  AND to_timestamp(sqlc.arg(auth_time)::float8) >= now() - make_interval(secs => sqlc.arg(window_seconds)::float8)
-  AND to_timestamp(sqlc.arg(auth_time)::float8) <= now() + make_interval(secs => sqlc.arg(skew_seconds)::float8)
+  AND (sqlc.arg(relaxed)::boolean
+       OR (to_timestamp(sqlc.arg(auth_time)::float8) >= now() - make_interval(secs => sqlc.arg(window_seconds)::float8)
+           AND to_timestamp(sqlc.arg(auth_time)::float8) <= now() + make_interval(secs => sqlc.arg(skew_seconds)::float8)))
 ON CONFLICT (session_id, purpose) DO UPDATE
   SET user_id = EXCLUDED.user_id, binding = EXCLUDED.binding, created_at = now(), expires_at = EXCLUDED.expires_at;
 

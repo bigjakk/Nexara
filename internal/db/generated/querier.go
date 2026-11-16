@@ -2993,7 +2993,8 @@ type Querier interface {
 	// provider again (the SSO step-up), for purpose, until ttl_seconds from now. Decided
 	// here against the database's clock: only for a session that is the user's, live (not
 	// revoked, not expired) and of an active user, and only when auth_time (the ID token's,
-	// in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
+	// in Unix seconds) lies within window_seconds before now and skew_seconds after it,
+	// unless relaxed (the configuration's relaxed_step_up), when auth_time is not judged. 0
 	// rows: refused. A newer proof replaces an older one of the same session and purpose.
 	// binding is the record of the browser cookie the proof is bound to.
 	RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error)

@@ -288,9 +288,9 @@ func TestTOTPStepUpProof_SQL(t *testing.T) {
 			}
 		}
 		now := float64(time.Now().Unix())
-		record := func(session, user uuid.UUID, authTime float64) int64 {
+		record := func(session, user uuid.UUID, authTime float64, relaxed ...bool) int64 {
 			n, err := q.RecordTOTPStepUpProof(ctx, gen.RecordTOTPStepUpProofParams{Purpose: "totp_setup", Binding: "1:browser", TtlSeconds: 300,
-				SessionID: session, UserID: user, AuthTime: authTime, WindowSeconds: 300, SkewSeconds: 60})
+				SessionID: session, UserID: user, Relaxed: len(relaxed) > 0, AuthTime: authTime, WindowSeconds: 300, SkewSeconds: 60})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -320,6 +320,12 @@ func TestTOTPStepUpProof_SQL(t *testing.T) {
 			if got := record(tc.session, tc.user, tc.authTime); got != tc.want {
 				t.Errorf("%s: recorded %d rows, want %d", tc.name, got, tc.want)
 			}
+		}
+		if record(revoked, userID, 0, true) != 0 {
+			t.Error("a relaxed step-up was recorded for a revoked session")
+		}
+		if record(live, userID, 0, true) != 1 || consume(live, userID, "totp_setup") != 1 {
+			t.Error("a relaxed step-up with no auth_time was not recorded and used")
 		}
 		if fresh, err := q.TOTPStepUpAuthTimeIsFresh(ctx, gen.TOTPStepUpAuthTimeIsFreshParams{AuthTime: now - 600, WindowSeconds: 300, SkewSeconds: 60}); err != nil || fresh {
 			t.Errorf("an auth_time ten minutes old is fresh = %v, %v; want false", fresh, err)

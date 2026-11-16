@@ -105,6 +105,10 @@ type oidcConfigRequest struct {
 	// AcknowledgeIssuerChange confirms moving the issuer of a configuration that
 	// accounts are linked under (requireOIDCIssuerChangeAck).
 	AcknowledgeIssuerChange bool
+	// RelaxedStepUp is the operator's opt-in for a provider that cannot report a fresh
+	// sign-in (see StartStepUp); RelaxedStepUpSent says the caller sent it, so that an
+	// update that does not name it keeps the stored value.
+	RelaxedStepUp, RelaxedStepUpSent bool
 }
 
 // oidcConfigFromParams reads the declared body.
@@ -136,6 +140,8 @@ func oidcConfigFromParams(p *apischema.Params) (oidcConfigRequest, error) {
 		AcknowledgeInsecureRedirect: p.Bool("acknowledge_insecure_redirect"),
 		AllowPrivateAddress:         p.Bool("allow_private_address"),
 		AcknowledgeIssuerChange:     p.Bool("acknowledge_issuer_change"),
+		RelaxedStepUp:               p.Bool("relaxed_step_up"),
+		RelaxedStepUpSent:           p.Has("relaxed_step_up"),
 	}, nil
 }
 
@@ -161,6 +167,9 @@ type oidcConfigResponse struct {
 	// AllowPrivateAddress: the operator confirmed this configuration's issuer on
 	// a private network address.
 	AllowPrivateAddress bool `json:"allow_private_address"`
+	// RelaxedStepUp: a 2FA setup's step-up through this provider accepts a completed
+	// round trip without auth_time (StartStepUp).
+	RelaxedStepUp bool `json:"relaxed_step_up"`
 
 	// LinkedAccounts is how many accounts are bound to an identity of this
 	// configuration's issuer: the ones a change of the issuer leaves refused.
@@ -198,6 +207,7 @@ func toOIDCConfigResponse(cfg db.OidcConfig) oidcConfigResponse {
 		UpdatedAt:        cfg.UpdatedAt.Format(time.RFC3339Nano),
 
 		AllowPrivateAddress: cfg.AllowPrivateAddress,
+		RelaxedStepUp:       cfg.RelaxedStepUp,
 	}
 
 	mapping := make(map[string]string)
@@ -324,6 +334,7 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		AutoProvision:         req.AutoProvision,
 		AllowedDomains:        allowedDomains,
 		AllowPrivateAddress:   allowPrivate,
+		RelaxedStepUp:         req.RelaxedStepUp,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to create OIDC config")
@@ -339,6 +350,9 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	}
 	if allowPrivate {
 		fields["allow_private_address"] = true
+	}
+	if cfg.RelaxedStepUp {
+		fields["relaxed_step_up"] = true
 	}
 	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_created", details)
@@ -447,6 +461,11 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		allowedDomains = []string{}
 	}
 
+	relaxed := existing.RelaxedStepUp
+	if req.RelaxedStepUpSent {
+		relaxed = req.RelaxedStepUp
+	}
+
 	cfg, err := h.queries.UpdateOIDCConfig(c.Context(), db.UpdateOIDCConfigParams{
 		ID:                    id,
 		Name:                  withDefault(req.Name, "Default"),
@@ -464,6 +483,7 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		AutoProvision:         req.AutoProvision,
 		AllowedDomains:        allowedDomains,
 		AllowPrivateAddress:   allowPrivate,
+		RelaxedStepUp:         relaxed,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update OIDC config")
@@ -491,6 +511,9 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	// again, grants it or drops it says so.
 	if allowPrivate || existing.AllowPrivateAddress {
 		fields["allow_private_address"] = allowPrivate
+	}
+	if cfg.RelaxedStepUp != existing.RelaxedStepUp {
+		fields["relaxed_step_up"] = cfg.RelaxedStepUp
 	}
 	details, _ := json.Marshal(fields)
 	AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "oidc", cfg.ID.String(), "oidc_config_updated", details)
@@ -708,7 +731,7 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
 	}
 	if stepUp != "" || userInfo.StepUp != "" {
-		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, oidcBindingSecure(cfg.RedirectUri)))
+		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo, oidcBindingSecure(cfg.RedirectUri), cfg.RelaxedStepUp))
 	}
 
 	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
@@ -782,6 +805,13 @@ func parseStepUpRecord(record string) (sessionID, userID uuid.UUID, ok bool) {
 // StartStepUp begins a step-up for the session sessionID of userID and returns the
 // provider's URL to send the browser to. It sets the state's browser binding as
 // Authorize does. Its error is the answer the route ends in.
+//
+// A configuration with relaxed_step_up (the operator's opt-in, for a provider that
+// sends no auth_time, or ignores or refuses prompt=login) asks for neither prompt nor
+// max_age, and its callback takes the completed round trip as the proof: same browser,
+// same session, same account, the proof bound to the browser. That keeps out someone
+// who has only a stolen session token; it does not keep out someone at the owner's
+// unlocked browser whose provider session is still open.
 func (h *OIDCHandler) StartStepUp(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error) {
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
@@ -805,7 +835,7 @@ func (h *OIDCHandler) StartStepUp(c fiber.Ctx, userID, sessionID uuid.UUID) (str
 	if err != nil {
 		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
 	}
-	authURL, state, err := provider.GenerateStepUpURL(c.Context(), record, stepUpRecord(sessionID, userID))
+	authURL, state, err := provider.GenerateStepUpURL(c.Context(), record, stepUpRecord(sessionID, userID), !cfg.RelaxedStepUp)
 	if err != nil {
 		slog.Error("OIDC step-up: could not generate the auth URL", "error", err)
 		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
@@ -838,7 +868,10 @@ func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UU
 // The proof is bound to this browser as well as to the session: a random secret goes
 // into the browser's step-up cookie (setTOTPStepUpCookie, Secure as secure says) and only
 // its record into the proof, so a stolen token of the same session cannot use it.
-func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo, secure bool) string {
+//
+// relaxed is the configuration's relaxed_step_up: auth_time is then neither required
+// nor judged. The audit row says which rule the proof passed under.
+func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo, secure, relaxed bool) string {
 	sessionID, userID, ok := parseStepUpRecord(stepUp)
 	if !ok || info.StepUp != stepUp {
 		return h.refuseStepUp(c, stepUp, "malformed_state")
@@ -850,10 +883,13 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 		return h.refuseStepUp(c, stepUp, "account_not_checked")
 	case !same:
 		return h.refuseStepUp(c, stepUp, "another_account")
-	case info.AuthTime.IsZero():
+	case !relaxed && info.AuthTime.IsZero():
 		return h.refuseStepUp(c, stepUp, "no_auth_time")
 	}
-	authTime := float64(info.AuthTime.Unix())
+	authTime := float64(0)
+	if !info.AuthTime.IsZero() {
+		authTime = float64(info.AuthTime.Unix())
+	}
 	secret, record, err := newBinding(secure)
 	if err != nil {
 		slog.Error("OIDC step-up: could not make the browser binding", "user_id", userID, "error", err)
@@ -861,13 +897,13 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 	}
 	n, err := h.queries.RecordTOTPStepUpProof(c.Context(), db.RecordTOTPStepUpProofParams{
 		Purpose: totpStepUpPurpose, Binding: record, TtlSeconds: ssoStepUpProofTTL.Seconds(), SessionID: sessionID, UserID: userID,
-		AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
+		Relaxed: relaxed, AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
 	})
 	if err != nil {
 		slog.Error("OIDC step-up: could not record the proof", "user_id", userID, "error", err)
 		return h.refuseStepUp(c, stepUp, "not_recorded")
 	}
-	if n == 0 {
+	if n == 0 && !relaxed {
 		fresh, ferr := h.queries.TOTPStepUpAuthTimeIsFresh(c.Context(), db.TOTPStepUpAuthTimeIsFreshParams{
 			AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
 		})
@@ -876,8 +912,15 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 		}
 		return h.refuseStepUp(c, stepUp, "session_ended")
 	}
+	if n == 0 {
+		return h.refuseStepUp(c, stepUp, "session_ended")
+	}
 	setTOTPStepUpCookie(c, secret, secure, ssoStepUpProofTTL)
-	details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc"})
+	rule := "strict"
+	if relaxed {
+		rule = "relaxed"
+	}
+	details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc", "rule": rule})
 	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), ssoStepUpConfirmedAction, details)
 	return ""
 }

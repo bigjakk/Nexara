@@ -28,7 +28,7 @@ func oidcConfigMirror() apischema.Properties {
 		"redirect_uri": str, "scopes": list, "email_claim": str, "display_name_claim": str, "groups_claim": str,
 		"group_role_mapping": {Type: apischema.Object, Optional: true}, "default_role_id": str,
 		"auto_provision": flag, "allowed_domains": list, "acknowledge_insecure_redirect": flag,
-		"allow_private_address": flag, "acknowledge_issuer_change": flag,
+		"allow_private_address": flag, "acknowledge_issuer_change": flag, "relaxed_step_up": flag,
 	}
 }
 
@@ -126,5 +126,41 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestOIDCConfigWrites_TheRelaxedStepUpIsTheOperatorsAndAudited: relaxed_step_up is
+// stored when sent, audited when it changes, kept by an update that does not name it,
+// and returned in the configuration's answer.
+func TestOIDCConfigWrites_TheRelaxedStepUpIsTheOperatorsAndAudited(t *testing.T) {
+	t.Parallel()
+	stored := db.OidcConfig{ID: uuid.New(), IssuerUrl: "https://10.0.0.5/realms/main", AllowPrivateAddress: true,
+		RedirectUri: "https://nexara.example.com/api/v1/auth/oidc/callback"}
+	store := newEpochStore()
+	store.oidcConfig = &stored
+	a := newEpochApp(t, store, epochOptions{})
+	app := fiber.New(fiber.Config{ErrorHandler: authErrorHandler})
+	app.Use(func(c fiber.Ctx) error { c.Locals("user_id", uuid.New()); return c.Next() })
+	app.Put("/oidc/configs/:id", withRequestParams(t, oidcConfigMirror(), []string{"id"}, a.oidc.Update))
+	put := func(extra string) string {
+		body := `{"issuer_url":"` + stored.IssuerUrl + `","client_id":"nexara","redirect_uri":"` + stored.RedirectUri + `"` + extra + `}`
+		req := httptest.NewRequest(http.MethodPut, "/oidc/configs/"+stored.ID.String(), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		return string(raw)
+	}
+	put(`,"relaxed_step_up":true`)
+	if !store.oidcConfig.RelaxedStepUp {
+		t.Fatal("relaxed_step_up was not stored")
+	}
+	if answer := put(""); !store.oidcConfig.RelaxedStepUp || !strings.Contains(answer, `"relaxed_step_up":true`) {
+		t.Errorf("an update that does not name it: stored %v, answer %s; want it kept and returned", store.oidcConfig.RelaxedStepUp, answer)
+	}
+	if d := store.auditDetailsWritten(); len(d) != 2 || !strings.Contains(d[0], `"relaxed_step_up":true`) || strings.Contains(d[1], "relaxed_step_up") {
+		t.Errorf("audit details %v, want the change recorded once", d)
 	}
 }

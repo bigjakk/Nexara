@@ -151,8 +151,9 @@ WHERE s.id = $4
   AND NOT s.is_revoked
   AND s.expires_at > now()
   AND u.is_active
-  AND to_timestamp($6::float8) >= now() - make_interval(secs => $7::float8)
-  AND to_timestamp($6::float8) <= now() + make_interval(secs => $8::float8)
+  AND ($6::boolean
+       OR (to_timestamp($7::float8) >= now() - make_interval(secs => $8::float8)
+           AND to_timestamp($7::float8) <= now() + make_interval(secs => $9::float8)))
 ON CONFLICT (session_id, purpose) DO UPDATE
   SET user_id = EXCLUDED.user_id, binding = EXCLUDED.binding, created_at = now(), expires_at = EXCLUDED.expires_at
 `
@@ -163,6 +164,7 @@ type RecordTOTPStepUpProofParams struct {
 	TtlSeconds    float64   `json:"ttl_seconds"`
 	SessionID     uuid.UUID `json:"session_id"`
 	UserID        uuid.UUID `json:"user_id"`
+	Relaxed       bool      `json:"relaxed"`
 	AuthTime      float64   `json:"auth_time"`
 	WindowSeconds float64   `json:"window_seconds"`
 	SkewSeconds   float64   `json:"skew_seconds"`
@@ -172,7 +174,8 @@ type RecordTOTPStepUpProofParams struct {
 // provider again (the SSO step-up), for purpose, until ttl_seconds from now. Decided
 // here against the database's clock: only for a session that is the user's, live (not
 // revoked, not expired) and of an active user, and only when auth_time (the ID token's,
-// in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
+// in Unix seconds) lies within window_seconds before now and skew_seconds after it,
+// unless relaxed (the configuration's relaxed_step_up), when auth_time is not judged. 0
 // rows: refused. A newer proof replaces an older one of the same session and purpose.
 // binding is the record of the browser cookie the proof is bound to.
 func (q *Queries) RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error) {
@@ -182,6 +185,7 @@ func (q *Queries) RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepU
 		arg.TtlSeconds,
 		arg.SessionID,
 		arg.UserID,
+		arg.Relaxed,
 		arg.AuthTime,
 		arg.WindowSeconds,
 		arg.SkewSeconds,

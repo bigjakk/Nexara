@@ -75,13 +75,13 @@ INSERT INTO oidc_configs (
     name, enabled, issuer_url, client_id, client_secret_encrypted,
     redirect_uri, scopes, email_claim, display_name_claim, groups_claim,
     group_role_mapping, default_role_id, auto_provision, allowed_domains,
-    allow_private_address
+    allow_private_address, relaxed_step_up
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15
-) RETURNING id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address
+    $15, $16
+) RETURNING id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address, relaxed_step_up
 `
 
 type CreateOIDCConfigParams struct {
@@ -100,6 +100,7 @@ type CreateOIDCConfigParams struct {
 	AutoProvision         bool            `json:"auto_provision"`
 	AllowedDomains        []string        `json:"allowed_domains"`
 	AllowPrivateAddress   bool            `json:"allow_private_address"`
+	RelaxedStepUp         bool            `json:"relaxed_step_up"`
 }
 
 func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigParams) (OidcConfig, error) {
@@ -119,6 +120,7 @@ func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigPara
 		arg.AutoProvision,
 		arg.AllowedDomains,
 		arg.AllowPrivateAddress,
+		arg.RelaxedStepUp,
 	)
 	var i OidcConfig
 	err := row.Scan(
@@ -140,6 +142,7 @@ func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.RelaxedStepUp,
 	)
 	return i, err
 }
@@ -197,7 +200,7 @@ func (q *Queries) DeleteOIDCConfig(ctx context.Context, id uuid.UUID) error {
 }
 
 const getEnabledOIDCConfig = `-- name: GetEnabledOIDCConfig :one
-SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address FROM oidc_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
+SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address, relaxed_step_up FROM oidc_configs WHERE enabled = true ORDER BY created_at, id LIMIT 1
 `
 
 func (q *Queries) GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error) {
@@ -222,12 +225,13 @@ func (q *Queries) GetEnabledOIDCConfig(ctx context.Context) (OidcConfig, error) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.RelaxedStepUp,
 	)
 	return i, err
 }
 
 const getOIDCConfig = `-- name: GetOIDCConfig :one
-SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address FROM oidc_configs WHERE id = $1
+SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address, relaxed_step_up FROM oidc_configs WHERE id = $1
 `
 
 func (q *Queries) GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, error) {
@@ -252,6 +256,7 @@ func (q *Queries) GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.RelaxedStepUp,
 	)
 	return i, err
 }
@@ -332,7 +337,7 @@ func (q *Queries) LinkOIDCIdentity(ctx context.Context, arg LinkOIDCIdentityPara
 }
 
 const listOIDCConfigs = `-- name: ListOIDCConfigs :many
-SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address FROM oidc_configs ORDER BY created_at
+SELECT id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address, relaxed_step_up FROM oidc_configs ORDER BY created_at
 `
 
 func (q *Queries) ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error) {
@@ -363,6 +368,7 @@ func (q *Queries) ListOIDCConfigs(ctx context.Context) ([]OidcConfig, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AllowPrivateAddress,
+			&i.RelaxedStepUp,
 		); err != nil {
 			return nil, err
 		}
@@ -437,9 +443,10 @@ UPDATE oidc_configs SET
     default_role_id = $13,
     auto_provision = $14,
     allowed_domains = $15,
-    allow_private_address = $16
+    allow_private_address = $16,
+    relaxed_step_up = $17
 WHERE id = $1
-RETURNING id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address
+RETURNING id, name, enabled, issuer_url, client_id, client_secret_encrypted, redirect_uri, scopes, email_claim, display_name_claim, groups_claim, group_role_mapping, default_role_id, auto_provision, allowed_domains, created_at, updated_at, allow_private_address, relaxed_step_up
 `
 
 type UpdateOIDCConfigParams struct {
@@ -459,6 +466,7 @@ type UpdateOIDCConfigParams struct {
 	AutoProvision         bool            `json:"auto_provision"`
 	AllowedDomains        []string        `json:"allowed_domains"`
 	AllowPrivateAddress   bool            `json:"allow_private_address"`
+	RelaxedStepUp         bool            `json:"relaxed_step_up"`
 }
 
 func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigParams) (OidcConfig, error) {
@@ -479,6 +487,7 @@ func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigPara
 		arg.AutoProvision,
 		arg.AllowedDomains,
 		arg.AllowPrivateAddress,
+		arg.RelaxedStepUp,
 	)
 	var i OidcConfig
 	err := row.Scan(
@@ -500,6 +509,7 @@ func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.RelaxedStepUp,
 	)
 	return i, err
 }

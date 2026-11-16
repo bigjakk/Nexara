@@ -297,16 +297,16 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 	case "InsertAuditLog":
 		return s.insertAudit(args)
 	case "RecordTOTPStepUpProof":
-		// purpose, binding, ttl_seconds, session_id, user_id, auth_time, window_seconds,
-		// skew_seconds; and the SQL's WHERE: the user's live session, an active user, a
-		// recent auth_time.
+		// purpose, binding, ttl_seconds, session_id, user_id, relaxed, auth_time,
+		// window_seconds, skew_seconds; and the SQL's WHERE: the user's live session, an
+		// active user, a recent auth_time unless relaxed.
 		sid, uid := args[3].(uuid.UUID), args[4].(uuid.UUID)
 		u, ok := s.users[uid]
 		live := false
 		for _, sess := range s.sessions {
 			live = live || sess.ID == sid && sess.UserID == uid && !sess.IsRevoked && sess.ExpiresAt.After(time.Now())
 		}
-		if !ok || !u.IsActive || !live || !stepUpAuthTimeFresh(args[5].(float64), args[6].(float64), args[7].(float64)) {
+		if !ok || !u.IsActive || !live || !args[5].(bool) && !stepUpAuthTimeFresh(args[6].(float64), args[7].(float64), args[8].(float64)) {
 			return pgconn.NewCommandTag("INSERT 0 0"), nil
 		}
 		s.stepUpProofs[stepUpProofKey{sid, args[0].(string)}] = stepUpProof{uid, args[1].(string),
@@ -513,7 +513,7 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		cfg.Name, cfg.Enabled, cfg.IssuerUrl, cfg.ClientID = args[0].(string), args[1].(bool), args[2].(string), args[3].(string)
 		cfg.ClientSecretEncrypted, cfg.RedirectUri = args[4].(string), args[5].(string)
-		cfg.AllowPrivateAddress = args[14].(bool)
+		cfg.AllowPrivateAddress, cfg.RelaxedStepUp = args[14].(bool), args[15].(bool)
 		was := s.oidcConfig
 		remember(func() { s.oidcConfig = was })
 		s.oidcConfig = &cfg
