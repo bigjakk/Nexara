@@ -108,6 +108,12 @@ WHERE id = sqlc.arg(id)
   AND (sync_lease_expires_at IS NULL OR sync_lease_expires_at <= now())
 RETURNING *;
 
+-- name: RenewLDAPSyncLease :execrows
+-- Moves the lease's end on, for the sync that holds it; 0 rows: it no longer does.
+UPDATE ldap_configs
+SET sync_lease_expires_at = now() + make_interval(secs => sqlc.arg(lease_seconds)::double precision)
+WHERE id = sqlc.arg(id) AND sync_lease_token = sqlc.arg(token)::uuid;
+
 -- name: ReleaseLDAPSyncLease :exec
 -- Releases the lease this sync claimed, and only that one.
 UPDATE ldap_configs SET sync_lease_token = NULL, sync_lease_expires_at = NULL

@@ -52,6 +52,7 @@ type epochStore struct {
 	// when it is enabled; nil is none. syncLeased says a sync holds its lease.
 	ldapConfig *db.LdapConfig
 	syncLeased bool
+	leaseLost  bool // RenewLDAPSyncLease finds the lease no longer the sync's
 	// grants are the global "action:resource" permissions GetUserScopedPermissions
 	// answers for a user, for a real RBAC engine over this store.
 	grants map[uuid.UUID][]string
@@ -212,6 +213,12 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		// login_name, id: an LDAP account, as the SQL's WHERE.
 		if u, ok := s.users[args[1].(uuid.UUID)]; ok && u.AuthSource == "ldap" {
 			u.LdapLoginName = args[0].(string)
+		}
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "RenewLDAPSyncLease":
+		// The holder's renewal; 0 rows once leaseLost says another took the lease.
+		if s.leaseLost {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
 		}
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "ReleaseLDAPSyncLease":

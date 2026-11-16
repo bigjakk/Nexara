@@ -2979,6 +2979,8 @@ type Querier interface {
 	RemoveFavorite(ctx context.Context, arg RemoveFavoriteParams) error
 	RemoveRolePermission(ctx context.Context, arg RemoveRolePermissionParams) error
 	RenameVMFolder(ctx context.Context, arg RenameVMFolderParams) (VmFolder, error)
+	// Moves the lease's end on, for the sync that holds it; 0 rows: it no longer does.
+	RenewLDAPSyncLease(ctx context.Context, arg RenewLDAPSyncLeaseParams) (int64, error)
 	// RequestDRSEvaluation queues an out-of-band evaluation for the scheduler
 	// leader to pick up on its next tick. The API's manual-trigger endpoint uses
 	// this instead of executing migrations itself, so every dispatch goes through

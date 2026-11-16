@@ -119,6 +119,10 @@ func TestLDAPSyncState_SQL(t *testing.T) {
 		if err := claim(first, 3600); err != nil {
 			t.Fatalf("the first claim: %v", err)
 		}
+		for token, want := range map[uuid.UUID]int64{first: 1, second: 0} {
+			n, err := q.RenewLDAPSyncLease(ctx, gen.RenewLDAPSyncLeaseParams{ID: cfgID, Token: token, LeaseSeconds: 3600})
+			must(n, err, want, "renewing the lease")
+		}
 		if err := claim(second, 3600); !errors.Is(err, pgx.ErrNoRows) {
 			t.Errorf("a second claim while the first holds the lease: %v, want no row", err)
 		}

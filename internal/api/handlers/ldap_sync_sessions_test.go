@@ -304,3 +304,29 @@ func TestLDAPSync_APanicInTheScheduledSyncIsRecovered(t *testing.T) {
 		t.Error("the lease is still held after the panic")
 	}
 }
+
+// TestLDAPSync_TheLeaseIsShortRenewedAndNamedInThe409: the sync renews its lease before
+// every account and stops, changing nothing, once it is no longer its own; and the 409 of
+// a busy config says when the lease ends, so a stopped sync blocks Sync Now no longer.
+func TestLDAPSync_TheLeaseIsShortRenewedAndNamedInThe409(t *testing.T) {
+	t.Parallel()
+	user := db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap"}
+	store := newEpochStore(user)
+	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{})
+	store.leaseLost = true
+	if status := sync(); status == http.StatusOK || !store.user(user.ID).IsActive || len(store.named("RenewLDAPSyncLease")) != 1 {
+		t.Errorf("with the lease lost: status %d, active %t, %d renewals; want a failure, active, one renewal",
+			status, store.user(user.ID).IsActive, len(store.named("RenewLDAPSyncLease")))
+	}
+
+	store.syncLeased = true
+	store.ldapConfig.SyncLeaseExpiresAt = pgtype.Timestamptz{Time: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Valid: true}
+	resp := a.send(t, http.MethodGet, "/probe", "", map[string]string{"X-Test-Acting-User": uuid.NewString()}, 10*time.Second)
+	body := decodeObject(t, resp)
+	if resp.StatusCode != http.StatusConflict || !strings.Contains(messageOf(body), "03:04:05 UTC") {
+		t.Errorf("busy: %d %v, want 409 naming when the lease ends", resp.StatusCode, body)
+	}
+	if got := ldapSyncLease; got > 5*time.Minute {
+		t.Errorf("the lease lasts %v past a renewal: a stopped sync blocks the next one that long", got)
+	}
+}

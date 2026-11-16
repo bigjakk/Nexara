@@ -485,6 +485,27 @@ func (q *Queries) ReleaseLDAPSyncLease(ctx context.Context, arg ReleaseLDAPSyncL
 	return err
 }
 
+const renewLDAPSyncLease = `-- name: RenewLDAPSyncLease :execrows
+UPDATE ldap_configs
+SET sync_lease_expires_at = now() + make_interval(secs => $1::double precision)
+WHERE id = $2 AND sync_lease_token = $3::uuid
+`
+
+type RenewLDAPSyncLeaseParams struct {
+	LeaseSeconds float64   `json:"lease_seconds"`
+	ID           uuid.UUID `json:"id"`
+	Token        uuid.UUID `json:"token"`
+}
+
+// Moves the lease's end on, for the sync that holds it; 0 rows: it no longer does.
+func (q *Queries) RenewLDAPSyncLease(ctx context.Context, arg RenewLDAPSyncLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewLDAPSyncLease, arg.LeaseSeconds, arg.ID, arg.Token)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setLDAPLoginName = `-- name: SetLDAPLoginName :exec
 UPDATE users SET ldap_login_name = $1
 WHERE id = $2 AND auth_source = 'ldap' AND ldap_login_name <> $1

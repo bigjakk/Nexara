@@ -560,10 +560,18 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 
 	res, err := h.syncConfig(c.Context(), id)
 	if errors.Is(err, errLDAPSyncRunning) {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+		// When the lease ends: a sync that stopped without releasing it holds it until then.
+		answer := fiber.Map{
 			"error":   "ldap_sync_running",
 			"message": "A sync of this directory is already running. Try again when it has finished.",
-		})
+		}
+		if cur, gerr := h.queries.GetLDAPConfig(c.Context(), id); gerr == nil && cur.SyncLeaseExpiresAt.Valid {
+			until := cur.SyncLeaseExpiresAt.Time.UTC()
+			answer["message"] = "A sync of this directory is already running. Try again when it has finished; if it stopped, " +
+				"a new sync can start from " + until.Format("15:04:05") + " UTC."
+			answer["details"] = fiber.Map{"lease_expires_at": until.Format(time.RFC3339)}
+		}
+		return c.Status(fiber.StatusConflict).JSON(answer)
 	}
 	if res.ran {
 		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", res.auditDetails(err))
@@ -594,10 +602,17 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	})
 }
 
-// ldapSyncLease is the longest one sync may hold its config's lease (ClaimLDAPSyncLease),
-// and the bound on the sync itself: a lease left by a process that died lets the next
-// sync run once it is over.
-const ldapSyncLease = time.Hour
+// ldapSyncLease is how long a sync's lease (ClaimLDAPSyncLease) lasts past its last
+// renewal: the sync renews it before every account, so a process that died or stopped
+// holds the config for this long at most. It outlasts the slowest single step, a dial
+// (one minute) and a search (30 s). ldapSyncMaxDuration bounds the whole sync.
+const (
+	ldapSyncLease       = 3 * time.Minute
+	ldapSyncMaxDuration = time.Hour
+)
+
+// errLDAPSyncLeaseLost is a sync stopped because its lease was no longer its own.
+var errLDAPSyncLeaseLost = errors.New("ldap sync: the sync lease was lost")
 
 // errLDAPSyncRunning is a sync refused because another sync of the same config holds
 // its lease: the scheduled one, or a Sync Now on this or another replica.
@@ -660,8 +675,18 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 		}
 	}()
 	res.ran = true
-	ctx, cancel := context.WithTimeout(ctx, ldapSyncLease)
+	ctx, cancel := context.WithTimeout(ctx, ldapSyncMaxDuration)
 	defer cancel()
+	renew := func() error {
+		n, err := h.queries.RenewLDAPSyncLease(ctx, db.RenewLDAPSyncLeaseParams{ID: id, Token: token, LeaseSeconds: ldapSyncLease.Seconds()})
+		if err != nil {
+			return fmt.Errorf("renew the sync lease: %w", err)
+		}
+		if n == 0 {
+			return errLDAPSyncLeaseLost
+		}
+		return nil
+	}
 
 	ldapCfg, err := h.buildLDAPConfig(cfg)
 	if err != nil {
@@ -695,6 +720,9 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 		if err := ctx.Err(); err != nil {
 			return res, fmt.Errorf("the sync was stopped: %w", err)
 		}
+		if err := renew(); err != nil {
+			return res, err
+		}
 		// The name the person signs in with, which is what the user filter is written
 		// for; the address only for an account no sign-in has named yet.
 		name := dbUser.LdapLoginName
@@ -723,6 +751,9 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 	}
 
 	for _, r := range results {
+		if err := renew(); err != nil {
+			return res, err
+		}
 		dbUser, ldapUser := r.dbUser, r.found
 		if ldapUser == nil {
 			// Gone from the directory. And the sessions are ended, as an admin's
