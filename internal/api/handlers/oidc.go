@@ -818,7 +818,7 @@ const (
 // the page maps the classes it knows to its own words (a crafted link cannot put a
 // sentence into Nexara's dialog). The classes, also the audit rows' reason:
 // provider_error, another_browser, not_completed, malformed_state, account_not_checked,
-// another_account, no_auth_time, not_recorded, stale_sign_in, session_ended.
+// another_account, not_linked, no_auth_time, not_recorded, stale_sign_in, session_ended.
 // ssoStepUpPage is where a step-up's callback sends the browser back to.
 const ssoStepUpPage = "/settings/security"
 
@@ -881,19 +881,25 @@ func (h *OIDCHandler) StartStepUp(c fiber.Ctx, userID, sessionID uuid.UUID) (str
 }
 
 // ssoStepUpIsSameAccount decides whether the identity the provider vouched for in a
-// step-up is the account that asked for it: the account a sign-in with this ID token
-// would resolve to must be that one. Today a sign-in resolves an SSO account by its
-// email claim among the oidc accounts (provisionUser's GetUserByEmailAndSource); this is
-// the one place the step-up asks, so it follows the sign-in's rule when that changes.
-func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UUID, info *auth.OIDCUserInfo) (bool, error) {
-	u, err := h.queries.GetUserByEmailAndSource(ctx, db.GetUserByEmailAndSourceParams{Email: info.Email, AuthSource: "oidc"})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+// step-up is the account that asked for it, by the sign-in's rule (accountForIdentity):
+// only an account bound to this identity that is the session's own is accepted (""). An
+// identity bound to another account, an address bound to another identity, or no account
+// at all is another_account; the session's own account not linked yet (its session
+// predates the upgrade that added links) is not_linked, which a sign-in links. It writes
+// nothing: a step-up never links, creates or changes an account.
+func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UUID, info *auth.OIDCUserInfo) (string, error) {
+	acct, err := h.accountForIdentity(ctx, info)
+	switch {
+	case errors.Is(err, errOIDCIdentityMismatch):
+		return "another_account", nil
+	case err != nil:
+		return "", fmt.Errorf("look up the step-up's account: %w", err)
+	case !acct.Found || acct.User.ID != userID:
+		return "another_account", nil
+	case !acct.Bound:
+		return "not_linked", nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("look up the step-up's account: %w", err)
-	}
-	return u.ID == userID, nil
+	return "", nil
 }
 
 // finishStepUp is the step-up callback once the provider has vouched for info: it
@@ -912,13 +918,13 @@ func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUs
 	if !ok || info.StepUp != stepUp {
 		return h.refuseStepUp(c, stepUp, "malformed_state")
 	}
-	same, err := h.ssoStepUpIsSameAccount(c.Context(), userID, info)
+	refusal, err := h.ssoStepUpIsSameAccount(c.Context(), userID, info)
 	switch {
 	case err != nil:
 		slog.Error("OIDC step-up: could not check the account", "user_id", userID, "error", err)
 		return h.refuseStepUp(c, stepUp, "account_not_checked")
-	case !same:
-		return h.refuseStepUp(c, stepUp, "another_account")
+	case refusal != "":
+		return h.refuseStepUp(c, stepUp, refusal)
 	case !relaxed && info.AuthTime.IsZero():
 		return h.refuseStepUp(c, stepUp, "no_auth_time")
 	}

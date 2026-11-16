@@ -78,6 +78,7 @@ func TestOIDCCallback_AStepUpRoundTripRecordsAProofAndSignsNobodyIn(t *testing.T
 	t.Parallel()
 	a, erin, session := ssoSetupApp(t)
 	idp := newStepUpProvider(t, erin.Email)
+	a.store.mutate(erin.ID, func(u *db.User) { u.OidcIssuer, u.OidcSubject = idp.srv.URL, "sub-1" })
 	a.store.oidcConfig = &db.OidcConfig{ID: uuid.New(), Enabled: true, IssuerUrl: idp.srv.URL, ClientID: "nexara",
 		RedirectUri: "http://nexara.example.com/api/v1/auth/oidc/callback", EmailClaim: "email"}
 	a.oidc.newProvider = func(ctx context.Context, cfg auth.OIDCConfig, rdb *redis.Client) (*auth.OIDCProvider, error) {

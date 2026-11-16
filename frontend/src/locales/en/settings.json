@@ -67,6 +67,7 @@
   "stepUpRefused": "Your identity provider did not confirm the sign-in, so nothing was confirmed. Try again.",
   "stepUpRefusedAnotherBrowser": "The confirmation was not started in this browser, or it took too long, so nothing was confirmed. Start it again from this page.",
   "stepUpRefusedAnotherAccount": "You signed in at your identity provider as a different account from the one signed in here, so nothing was confirmed. Confirm again, as this account.",
+  "stepUpRefusedNotLinked": "Your account is not linked to your single sign-on identity yet, so nothing was confirmed. Sign out, sign in again once, then confirm again.",
   "stepUpRefusedNoAuthTime": "Your identity provider did not say when you signed in, so Nexara cannot tell the sign-in was fresh and confirmed nothing. An administrator can have the provider send auth_time, or allow the relaxed confirmation in the OIDC settings.",
   "stepUpRefusedStale": "Your identity provider did not ask you to sign in again, or the sign-in was too long ago, so nothing was confirmed. Sign out at your identity provider first, then confirm again.",
   "stepUpRefusedSessionEnded": "Your Nexara session ended before the confirmation came back, so nothing was confirmed. Sign in again and start over.",

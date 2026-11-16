@@ -14,12 +14,14 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// ssoSetupApp is the epoch harness with an SSO account, erin, holding a live session,
-// and another SSO account, frank.
+// ssoSetupApp is the epoch harness with an SSO account, erin, bound to the identity
+// erinIdentity and holding a live session, and another SSO account, frank, bound to his.
 func ssoSetupApp(t *testing.T) (a *epochApp, erin db.User, session uuid.UUID) {
 	t.Helper()
-	erin = db.User{ID: uuid.New(), Email: "erin@example.com", IsActive: true, Role: "user", AuthSource: "oidc"}
-	frank := db.User{ID: uuid.New(), Email: "frank@example.com", IsActive: true, Role: "user", AuthSource: "oidc"}
+	erin = db.User{ID: uuid.New(), Email: "erin@example.com", IsActive: true, Role: "user", AuthSource: "oidc",
+		OidcIssuer: epochIssuer, OidcSubject: "subject-of-erin"}
+	frank := db.User{ID: uuid.New(), Email: "frank@example.com", IsActive: true, Role: "user", AuthSource: "oidc",
+		OidcIssuer: epochIssuer, OidcSubject: "subject-of-frank"}
 	store := newEpochStore(erin, frank)
 	session = uuid.New()
 	store.sessions = append(store.sessions, db.Session{ID: session, UserID: erin.ID, ExpiresAt: time.Now().Add(time.Hour)})
@@ -34,6 +36,11 @@ func (a *epochApp) beginSetupIn(t *testing.T, user db.User, session uuid.UUID, c
 		headers["Cookie"] = cookie
 	}
 	return a.send(t, http.MethodPost, "/auth/totp/setup", `{}`, headers, 20*time.Second).StatusCode
+}
+
+// erinIdentity is the step-up's identity of erin, as the provider vouches for it.
+func erinIdentity(record string, authTime time.Time) *auth.OIDCUserInfo {
+	return &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: "subject-of-erin", Email: "erin@example.com", AuthTime: authTime, StepUp: record}
 }
 
 // stepUpCookieOf is the step-up cookie a response set, as a request's "name=value".
@@ -64,23 +71,31 @@ func confirmStepUp(t *testing.T, a *epochApp, record string, info *auth.OIDCUser
 func TestTOTPSetup_AnSSOAccountProvesAFreshSignInAtItsProvider(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, email string
-		authTime    time.Time
-		setupIn     string // "asking" or "other": the session the setup comes from
-		setups      []int  // the answers of successive setups
-		reason      string // the refusal's class, "" for none
+		name, subject, email string
+		authTime             time.Time
+		setupIn              string // "asking" or "other": the session the setup comes from
+		setups               []int  // the answers of successive setups
+		reason               string // the refusal's class, "" for none
 	}{
-		{"a fresh sign-in as the account", "erin@example.com", time.Now(), "asking", []int{200, 403}, ""},
-		{"used from another session", "erin@example.com", time.Now(), "other", []int{403}, ""},
-		{"another account", "frank@example.com", time.Now(), "asking", []int{403}, "another_account"},
-		{"no auth_time", "erin@example.com", time.Time{}, "asking", []int{403}, "no_auth_time"},
-		{"a sign-in ten minutes old", "erin@example.com", time.Now().Add(-10 * time.Minute), "asking", []int{403}, "stale_sign_in"},
+		{"a fresh sign-in as the account", "subject-of-erin", "erin@example.com", time.Now(), "asking", []int{200, 403}, ""},
+		{"used from another session", "subject-of-erin", "erin@example.com", time.Now(), "other", []int{403}, ""},
+		{"another account", "subject-of-frank", "frank@example.com", time.Now(), "asking", []int{403}, "another_account"},
+		{"an identity bound to another account, with this address", "subject-of-frank", "erin@example.com", time.Now(), "asking", []int{403}, "another_account"},
+		{"this address, bound to another identity", "subject-of-a-stranger", "erin@example.com", time.Now(), "asking", []int{403}, "another_account"},
+		{"the account is not linked yet", "", "erin@example.com", time.Now(), "asking", []int{403}, "not_linked"},
+		{"no auth_time", "subject-of-erin", "erin@example.com", time.Time{}, "asking", []int{403}, "no_auth_time"},
+		{"a sign-in ten minutes old", "subject-of-erin", "erin@example.com", time.Now().Add(-10 * time.Minute), "asking", []int{403}, "stale_sign_in"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a, erin, session := ssoSetupApp(t)
 			record := stepUpRecord(session, erin.ID)
-			got, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: tc.email, AuthTime: tc.authTime, StepUp: record})
+			info := &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: tc.subject, Email: tc.email, AuthTime: tc.authTime, StepUp: record}
+			if tc.subject == "" { // erin's session predates links: she is unlinked, the provider still names her
+				a.store.mutate(erin.ID, func(u *db.User) { u.OidcIssuer, u.OidcSubject = "", "" })
+				info.Subject = "subject-of-erin"
+			}
+			got, cookie := confirmStepUp(t, a, record, info)
 			if got != tc.reason {
 				t.Errorf("the callback's answer = %q, want %q", got, tc.reason)
 			}
@@ -159,7 +174,7 @@ func TestTOTPSetup_TheSSOProofIsBoundToTheBrowser(t *testing.T) {
 	t.Parallel()
 	a, erin, session := ssoSetupApp(t)
 	record := stepUpRecord(session, erin.ID)
-	_, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: erin.Email, AuthTime: time.Now(), StepUp: record})
+	_, cookie := confirmStepUp(t, a, record, erinIdentity(record, time.Now()))
 	if cookie == "" {
 		t.Fatal("the callback set no step-up cookie")
 	}
@@ -181,7 +196,7 @@ func TestTOTPSetup_TheRelaxedStepUpAcceptsARoundTripWithoutAuthTime(t *testing.T
 	for _, relaxed := range []bool{true, false} {
 		a, erin, session := ssoSetupApp(t)
 		record := stepUpRecord(session, erin.ID)
-		got, cookie := confirmStepUp(t, a, record, &auth.OIDCUserInfo{Email: erin.Email, StepUp: record}, relaxed)
+		got, cookie := confirmStepUp(t, a, record, erinIdentity(record, time.Time{}), relaxed)
 		want, setup := "", http.StatusOK
 		if !relaxed {
 			want, setup = "no_auth_time", http.StatusForbidden

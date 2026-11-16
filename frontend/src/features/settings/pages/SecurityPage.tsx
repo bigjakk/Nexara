@@ -42,6 +42,7 @@ type SetupStep = "idle" | "qr" | "verify" | "recovery";
 const STEP_UP_REFUSALS: Record<string, string> = {
   another_browser: "stepUpRefusedAnotherBrowser",
   another_account: "stepUpRefusedAnotherAccount",
+  not_linked: "stepUpRefusedNotLinked",
   no_auth_time: "stepUpRefusedNoAuthTime",
   stale_sign_in: "stepUpRefusedStale",
   session_ended: "stepUpRefusedSessionEnded",

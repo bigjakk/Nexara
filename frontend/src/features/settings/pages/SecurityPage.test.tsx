@@ -195,6 +195,12 @@ describe("SecurityPage: beginning a 2FA setup", () => {
       0,
     ],
     [
+      "refused as not linked",
+      "?sso_step_up_error=not_linked",
+      /Sign out, sign in again once/,
+      0,
+    ],
+    [
       "sent a crafted text",
       "?sso_step_up_error=Call%20the%20helpdesk%20now",
       /did not confirm the sign-in, so nothing was confirmed/,
