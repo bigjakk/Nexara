@@ -25,6 +25,7 @@ import {
   QueryStateNotice,
 } from "@/components/QueryStateNotice";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
@@ -1000,6 +1001,8 @@ function EditMappingDialog({
 }) {
   const listQuery = useClusterUSBMappings(clusterId);
   const update = useUpdateUSBMapping(clusterId);
+  // A save that lands after the dialog has gone is toasted instead.
+  const settle = useSaveOutcome();
   const { pinned, reread, onSaveError } = usePinnedMapping(
     target.mapping,
     listQuery,
@@ -1123,23 +1126,22 @@ function EditMappingDialog({
   function save() {
     if (!canSave || nextMap === null) return;
     const saving = pinned;
-    update.mutate(
-      {
+    settle(
+      update.mutateAsync({
         id: saving.id,
         map: nextMap,
         digest: saving.digest,
         ...(target.kind === "description"
           ? { description: trimmedDescription }
           : {}),
-      },
+      }),
       {
+        action: `Saving USB mapping ${saving.id}`,
         onSuccess: () => {
           onSaved(saving.id, Promise.resolve());
           onClose();
         },
-        onError: (err) => {
-          onSaveError(err);
-        },
+        onError: onSaveError,
       },
     );
   }

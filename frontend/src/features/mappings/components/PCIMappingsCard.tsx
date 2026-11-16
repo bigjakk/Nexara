@@ -26,6 +26,7 @@ import {
   QueryStateNotice,
 } from "@/components/QueryStateNotice";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import {
@@ -786,6 +787,8 @@ function EditMappingDialog({
 }) {
   const listQuery = useClusterPCIMappings(clusterId);
   const update = useUpdatePCIMapping(clusterId);
+  // A save that lands after the dialog has gone is toasted instead.
+  const settle = useSaveOutcome();
   const { pinned, reread, onSaveError } = usePinnedMapping(
     target.mapping,
     listQuery,
@@ -906,32 +909,33 @@ function EditMappingDialog({
   function save() {
     if (!canSave) return;
     const saving = pinned;
-    update.mutate(
-      target.kind === "description"
-        ? {
-            id: saving.id,
-            map: saving.map,
-            description: trimmedDescription,
-            digest: saving.digest,
-          }
-        : {
-            id: saving.id,
-            map: saving.map,
-            add_node: node,
-            add_path: pick.path,
-            ...(target.kind === "replace" && replacedRaw !== undefined
-              ? { replace: replacedRaw }
-              : {}),
-            digest: saving.digest,
-          },
+    settle(
+      update.mutateAsync(
+        target.kind === "description"
+          ? {
+              id: saving.id,
+              map: saving.map,
+              description: trimmedDescription,
+              digest: saving.digest,
+            }
+          : {
+              id: saving.id,
+              map: saving.map,
+              add_node: node,
+              add_path: pick.path,
+              ...(target.kind === "replace" && replacedRaw !== undefined
+                ? { replace: replacedRaw }
+                : {}),
+              digest: saving.digest,
+            },
+      ),
       {
+        action: `Saving PCI mapping ${saving.id}`,
         onSuccess: () => {
           onSaved(saving.id, Promise.resolve());
           onClose();
         },
-        onError: (err) => {
-          onSaveError(err);
-        },
+        onError: onSaveError,
       },
     );
   }
