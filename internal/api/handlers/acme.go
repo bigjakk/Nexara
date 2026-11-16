@@ -581,15 +581,12 @@ func (h *ACMEHandler) SetNodeACMEConfig(c fiber.Ctx, p *apischema.Params) error 
 	//
 	// Both keys are non-nil slices so "nothing set" and "nothing cleared" read
 	// as [] rather than one of them being null: a reader filtering on the row
-	// should not have to handle two spellings of empty.
-	cleared := audited.Delete
-	if cleared == nil {
-		cleared = []string{}
-	}
+	// should not have to handle two spellings of empty. cleared is filtered
+	// through the allow-list, never the caller's Delete itself.
 	details, _ := json.Marshal(map[string]any{
 		"node":     node,
 		"settings": proxmox.NodeACMESetKeys(audited),
-		"cleared":  cleared,
+		"cleared":  proxmox.NodeACMEClearKeys(audited),
 	})
 	AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "acme_config", node, "updated", details)
 	return c.JSON(fiber.Map{"status": "ok"})

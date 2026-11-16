@@ -758,6 +758,21 @@ func NodeACMESetKeys(cfg NodeACMEConfig) []string {
 	return keys
 }
 
+// NodeACMEClearKeys is NodeOptionsClearKeys for the ACME settings: the names
+// cfg.Delete would clear, in request order, keeping only those SetNodeACMEConfig
+// accepts. cfg.Delete is the caller's own strings and the audit row is readable
+// by every Viewer, so the row records these and never cfg.Delete itself. Never
+// nil.
+func NodeACMEClearKeys(cfg NodeACMEConfig) []string {
+	keys := make([]string, 0, len(cfg.Delete))
+	for _, k := range cfg.Delete {
+		if deletableNodeACMEKeys[k] {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 // SetNodeACMEConfig writes the node's ACME settings.
 //
 // An empty field means "leave alone": every ACME key is optional in PVE's

@@ -360,3 +360,22 @@ func TestNodeACMESetKeys_NamesKeysWithoutValues(t *testing.T) {
 		t.Errorf("an empty config names %v, want nothing", got)
 	}
 }
+
+// NodeACMEClearKeys keeps the audit row's cleared list to ACME setting names: a
+// caller's other strings, an options key among them, never reach it.
+func TestNodeACMEClearKeys_NamesOnlySettings(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		delete []string
+		want   []string
+	}{
+		{"nothing to clear", nil, []string{}},
+		{"settings, in request order", []string{"acmedomain1", "acme"}, []string{"acmedomain1", "acme"}},
+		{"free text and an options key are dropped", []string{"sentinel free text", "location", "acmedomain0"}, []string{"acmedomain0"}},
+	} {
+		if got := NodeACMEClearKeys(NodeACMEConfig{Delete: tt.delete}); got == nil || !slices.Equal(got, tt.want) {
+			t.Errorf("%s: %#v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
