@@ -12,9 +12,7 @@ import (
 
 // bareInsertExempt are the production files still allowed a bare audit insert,
 // each with why. An entry that no longer matches a call fails the guard.
-var bareInsertExempt = map[string]string{
-	"internal/api/handlers/oidc.go": "lane L15 is removing this call; drop the entry when it lands",
-}
+var bareInsertExempt = map[string]string{}
 
 // TestGuard_AuditRowsGoThroughWrite fails on a production call to InsertAuditLog
 // or InsertAuditLogWithSource outside this package: such a row reaches neither
