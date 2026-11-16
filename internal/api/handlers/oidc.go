@@ -67,16 +67,20 @@ const oidcExchangeCallbackEmailKey = "oidc_callback_email"
 // the TOTP pending token, both in Redis, and nothing of it comes from or goes to the
 // client.
 type pendingSSOIdentity struct {
-	ConfigID    string   `json:"config_id"`
-	Issuer      string   `json:"issuer"`
-	Subject     string   `json:"subject"`
-	Email       string   `json:"email"`
-	DisplayName string   `json:"display_name"`
-	Groups      []string `json:"groups"`
+	ConfigID string `json:"config_id"`
+	// ConfigUpdatedAt is the configuration's updated_at at the callback: an edit since
+	// (allowed domains, group mapping) refuses the finish.
+	ConfigUpdatedAt string   `json:"config_updated_at"`
+	Issuer          string   `json:"issuer"`
+	Subject         string   `json:"subject"`
+	Email           string   `json:"email"`
+	DisplayName     string   `json:"display_name"`
+	Groups          []string `json:"groups"`
 }
 
 func newPendingSSOIdentity(cfg db.OidcConfig, info *auth.OIDCUserInfo) *pendingSSOIdentity {
-	return &pendingSSOIdentity{ConfigID: cfg.ID.String(), Issuer: info.Issuer, Subject: info.Subject,
+	return &pendingSSOIdentity{ConfigID: cfg.ID.String(), ConfigUpdatedAt: cfg.UpdatedAt.Format(time.RFC3339Nano),
+		Issuer: info.Issuer, Subject: info.Subject,
 		Email: info.Email, DisplayName: info.DisplayName, Groups: info.Groups}
 }
 
@@ -1330,7 +1334,8 @@ func (h *OIDCHandler) FinishSignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUI
 		slog.Error("oidc sign-in after the second factor: could not load the configuration", "user_id", userID, "error", err)
 		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
 	}
-	if cfg.ID.String() != identity.ConfigID || cfg.IssuerUrl != identity.Issuer {
+	if cfg.ID.String() != identity.ConfigID || cfg.IssuerUrl != identity.Issuer ||
+		cfg.UpdatedAt.Format(time.RFC3339Nano) != identity.ConfigUpdatedAt {
 		slog.Warn("oidc sign-in after the second factor: the configuration changed since the callback; refusing", "user_id", userID)
 		return db.User{}, couldNotComplete
 	}

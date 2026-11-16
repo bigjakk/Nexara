@@ -54,6 +54,7 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 		wrongFirst bool
 		taken      bool // another identity links the account between the callback and the code
 		bound      bool // the account is bound to the identity already
+		edited     bool // an administrator edits the configuration while the code is typed
 		wantRole   uuid.UUID
 	}{
 		{name: "linked and synced after the code, untouched after a wrong one", groups: []string{"admins"},
@@ -61,6 +62,7 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 		{name: "dropped from the group mapped to Admin: the role is gone", groups: []string{"operators"},
 			wantRole: operatorRole},
 		{name: "another identity took the account: refused", groups: []string{"admins"}, taken: true},
+		{name: "the configuration was edited while the code was typed: refused", groups: []string{"admins"}, edited: true},
 		{name: "a bound account: its sign-in row waits for the code", groups: []string{"admins"},
 			bound: true, wrongFirst: true, wantRole: adminRole},
 	} {
@@ -106,14 +108,23 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 			if tc.taken {
 				store.mutate(user.ID, func(u *db.User) { u.OidcIssuer, u.OidcSubject = epochIssuer, "subject-of-another" })
 			}
+			if tc.edited {
+				store.mu.Lock()
+				store.oidcConfig.UpdatedAt = store.oidcConfig.UpdatedAt.Add(time.Second)
+				store.mu.Unlock()
+			}
 
 			resp := a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, plain))
 
-			if tc.taken {
-				body := authRequireStatus(t, resp, http.StatusForbidden)
+			if tc.taken || tc.edited {
+				status, message := http.StatusForbidden, oidcIdentityMismatchMessage
+				if tc.edited {
+					status, message = http.StatusUnauthorized, oidcCouldNotCompleteMessage
+				}
+				body := authRequireStatus(t, resp, status)
 				epochRequireNothingIssued(t, resp, body)
-				if n := len(store.liveSessionsOf(user.ID)); n != 0 || body["message"] != oidcIdentityMismatchMessage {
-					t.Errorf("%d sessions, answer %v; want none and the mismatch answer", n, body)
+				if n := len(store.liveSessionsOf(user.ID)); n != 0 || body["message"] != message {
+					t.Errorf("%d sessions, answer %v; want none and %q", n, body, message)
 				}
 				untouched("after a refused code")
 				return
