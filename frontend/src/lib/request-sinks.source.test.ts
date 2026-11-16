@@ -40,7 +40,10 @@ const loaded = import.meta.glob<{ default: Linter.Config[] }>(
  * The frontend directory, which every specifier is resolved against, and
  * under which the Linter lints files.
  */
-const FRONTEND = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+// Read through a binding: Vite rewrites a literal new URL("…", import.meta.url)
+// as an asset URL (http://localhost:3000/ under jsdom since 8.3.5), not a path.
+const here = import.meta.url;
+const FRONTEND = new URL("../..", here).pathname.replace(/\/$/, "");
 
 /** The rules of the committed request-sink block. */
 function sinkRules(): string[] {

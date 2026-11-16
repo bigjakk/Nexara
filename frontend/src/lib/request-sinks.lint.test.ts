@@ -27,7 +27,10 @@ function sinkBlock(): Linter.Config {
 }
 
 /** The frontend directory, which the config's file patterns are relative to. */
-const FRONTEND = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+// Read through a binding: Vite rewrites a literal new URL("…", import.meta.url)
+// as an asset URL (http://localhost:3000/ under jsdom since 8.3.5), not a path.
+const here = import.meta.url;
+const FRONTEND = new URL("../..", here).pathname.replace(/\/$/, "");
 
 const PLANTED = "src/features/planted/planted.ts";
 
