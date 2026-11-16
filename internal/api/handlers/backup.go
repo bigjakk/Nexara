@@ -1823,7 +1823,8 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	// Proxmox starts the guest itself when asked to, so the start is held to
 	// what the power route asks of the same guest: execute on its kind here.
 	if p.Bool("start_after_restore") {
-		if err := requireRestoreStartPerm(c, p.String("backup_type"), clusterID); err != nil {
+		if err := requireGuestPowerPerm(c, guestResource(p.String("backup_type") == "ct"), clusterID,
+			"Starting the guest after the restore"); err != nil {
 			return err
 		}
 	}
@@ -1892,6 +1893,14 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 			existingNode, nodeErr := h.queries.GetNode(c.Context(), vm.NodeID)
 			if nodeErr != nil {
 				return fiber.NewError(fiber.StatusInternalServerError, "Failed to look up VM node")
+			}
+			// The restore stops a guest that is not stopped, as the power route
+			// would, so it needs what that route needs on the guest's own kind.
+			if vm.Status != "stopped" {
+				if err := requireGuestPowerPerm(c, guestResource(vm.Type == "lxc"), clusterID,
+					"Restoring over a running guest stops it, which"); err != nil {
+					return err
+				}
 			}
 			// Auto-correct to the correct node.
 			req.TargetNode = existingNode.Name
@@ -2034,21 +2043,26 @@ func (h *BackupHandler) RestoreBackup(c fiber.Ctx, p *apischema.Params) error {
 	})
 }
 
-// requireRestoreStartPerm refuses a start after restore to a caller who could
-// not start the guest through its power route (execute:vm or execute:container
-// on the cluster), naming the permission in the 403.
-func requireRestoreStartPerm(c fiber.Ctx, backupType string, clusterID uuid.UUID) error {
-	resource := "vm"
-	if backupType == "ct" {
-		resource = "container"
+// guestResource is the RBAC resource of a guest's kind.
+func guestResource(container bool) string {
+	if container {
+		return "container"
 	}
+	return "vm"
+}
+
+// requireGuestPowerPerm refuses what powers a guest on or off to a caller who
+// could not do so through its power route: execute:<resource> on the cluster.
+// The 403 says what needed it ("Starting the guest after the restore") and names
+// the permission.
+func requireGuestPowerPerm(c fiber.Ctx, resource string, clusterID uuid.UUID, what string) error {
 	allowed, err := hasClusterPerm(c, "execute", resource, clusterID)
 	if err != nil {
 		return err
 	}
 	if !allowed {
 		return fiber.NewError(fiber.StatusForbidden,
-			"Starting the guest after the restore requires execute:"+resource+" on this cluster")
+			what+" requires execute:"+resource+" on this cluster")
 	}
 	return nil
 }

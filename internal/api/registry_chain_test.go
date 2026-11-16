@@ -32,8 +32,9 @@ type stubRBACEngine struct {
 	listed []auth.ScopedPermission
 }
 
-func (s *stubRBACEngine) HasPermission(_ context.Context, _ uuid.UUID, action, resource, _ string, _ uuid.UUID) (bool, error) {
-	return s.grants[action+":"+resource], nil
+// A grant keyed "action:resource@<scope id>" holds on that scope alone.
+func (s *stubRBACEngine) HasPermission(_ context.Context, _ uuid.UUID, action, resource, _ string, scopeID uuid.UUID) (bool, error) {
+	return s.grants[action+":"+resource] || s.grants[action+":"+resource+"@"+scopeID.String()], nil
 }
 
 func (s *stubRBACEngine) HasGlobalPermission(_ context.Context, _ uuid.UUID, action, resource string) (bool, error) {

@@ -1782,8 +1782,11 @@ storage is found, and the stop is recorded as a task of its own. The caller need
 server, on the cluster it is attached to or instance-wide when it is standalone;
 a server the caller may not view answers `404`, like one that does not exist.
 `start_after_restore` also needs what starting the guest needs, `execute:vm`
-(`execute:container` for a `ct`) on the cluster; without it the answer is `403`
-naming that permission, and nothing is restored.
+(`execute:container` for a `ct`) on the cluster, and a `force` restore over a
+guest that is not stopped needs it on that guest's own kind, since it stops the
+guest first; without it the answer is `403` naming that permission, and nothing
+is stopped or restored. Over a stopped guest `manage:backup` is enough, as in
+Proxmox.
 
 A backup job carries exactly one guest selection, set on create and update:
 

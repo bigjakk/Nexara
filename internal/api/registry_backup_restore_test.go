@@ -54,6 +54,8 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		restore    = "POST /api2/json/nodes/pve-02/qemu"
 	)
 	both := grantsOf("manage:backup", "view:backup")
+	withExec := grantsOf("manage:backup", "view:backup", "execute:vm")
+	otherCluster := "5c4b3a29-1817-4615-9413-0000000000aa"
 	tests := []struct {
 		name    string
 		grants  map[string]bool
@@ -64,26 +66,34 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 		from    string // the storage the archive is read through; empty when refused
 		by      string // how it was tied to the server
 		start   bool   // start_after_restore, sent as Proxmox's own "start"
+		ct      bool   // backup_type ct
+		guest   string // the existing guest's type; qemu when empty
 	}{
 		{"the storage of the requested server and datastore, on the node asked for", both, restoreStorages, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", false},
-		{"start after restore is asked of Proxmox with the restore itself", grantsOf("manage:backup", "view:backup", "execute:vm"), restoreStorages, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", true},
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", false, false, ""},
+		{"start after restore is asked of Proxmox with the restore itself", withExec, restoreStorages, false, 200,
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store04", "address", true, false, ""},
 		// Restoring is not starting: the start needs what the VM's power route needs.
-		{"start after restore without execute:vm: refused, nothing asked of Proxmox", both, restoreStorages, false, 403, nil, "", "", true},
+		{"start after restore without execute:vm: refused, nothing asked of Proxmox", both, restoreStorages, false, 403, nil, "", "", true, false, ""},
+		{"a container's start needs execute:container", withExec, restoreStorages, false, 403, nil, "", "", true, true, ""},
+		{"execute:vm held on another cluster does not count", grantsOf("manage:backup", "view:backup", "execute:vm@"+otherCluster),
+			restoreStorages, false, 403, nil, "", "", true, false, ""},
+		// Over a running guest the restore stops it first: execute on the guest's own kind, from its row.
+		{"over a running container without execute:container: nothing is stopped", withExec, restoreStorages, true, 403,
+			nil, "", "", false, false, "lxc"},
 		{"another Nexara PBS server owns the only pbs storage: nothing is dispatched", both, restoreOtherServerOnly, false, 400,
-			[]string{storageGet}, "", "", false},
+			[]string{storageGet}, "", "", false, false, ""},
 		{"the only candidate is used, and recorded as such", both, restoreAliasOnly, false, 200,
-			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate", false},
-		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", both, restoreStorages, true, 200,
-			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address", false},
-		{"over an existing guest with no such storage: it is not stopped", both, restoreOtherServerOnly, true, 400,
-			[]string{storageGet}, "", "", false},
-		{"a storage list that never answers: refused in time, and the guest is not stopped", both, restoreHangs, true, 502,
-			[]string{storageGet}, "", "", false},
+			[]string{storageGet, "POST /api2/json/nodes/pve-01/qemu"}, "store05", "only_candidate", false, false, ""},
+		{"over an existing guest: the storage is chosen on the guest's node, then the stop, then the restore", withExec, restoreStorages, true, 200,
+			[]string{storageGet, stopPost, stopPoll, restore}, "store02", "address", false, false, ""},
+		{"over an existing guest with no such storage: it is not stopped", withExec, restoreOtherServerOnly, true, 400,
+			[]string{storageGet}, "", "", false, false, ""},
+		{"a storage list that never answers: refused in time, and the guest is not stopped", withExec, restoreHangs, true, 502,
+			[]string{storageGet}, "", "", false, false, ""},
 		// A server the caller may not view is a missing one, and nothing is asked of Proxmox.
-		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", "", false},
-		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", "", false},
+		{"a caller who may manage backups here but not view the PBS server", grantsOf("manage:backup"), restoreStorages, false, 404, nil, "", "", false, false, ""},
+		{"a caller who may view the PBS server but not manage backups here", grantsOf("view:backup"), restoreStorages, false, 403, nil, "", "", false, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -96,6 +106,13 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 			app, dbtx := newBackupAppAs(t, base, tt.grants, fiber.MethodPost, clusterScope+"/restore",
 				(*handlers.BackupHandler).RestoreBackup)
 			clusterID, nodeID := uuid.MustParse(testClusterID), uuid.MustParse("5c4b3a29-1817-4615-9413-000000000002")
+			guest, backupType := "qemu", "vm"
+			if tt.guest != "" {
+				guest = tt.guest
+			}
+			if tt.ct {
+				backupType = "ct"
+			}
 			pbs01 := db.PbsServer{ID: uuid.MustParse(testPBSServerID), Name: "pbs01", ApiUrl: "https://pbs01.example.com:8007"}
 			pbs02 := db.PbsServer{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000007"), Name: "pbs02", ApiUrl: "https://pbs02.example.com:8007"}
 			dbtx.lists = map[string][]any{"ListPBSServers": {pbs01, pbs02}}
@@ -103,13 +120,13 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 				"GetPBSServer": pbs01,
 				"GetCluster":   db.Cluster{ID: clusterID},
 				// The guest lives on pve-02; the request names pve-01.
-				"GetVMByClusterAndVmid": db.Vm{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000003"), ClusterID: clusterID, NodeID: nodeID, Vmid: 101, Name: "linux01", Type: "qemu"},
+				"GetVMByClusterAndVmid": db.Vm{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000003"), ClusterID: clusterID, NodeID: nodeID, Vmid: 101, Name: "linux01", Type: guest},
 				"GetNode":               db.Node{ID: nodeID, ClusterID: clusterID, Name: "pve-02"},
 				// The node the request names is a member; the handler checks it itself.
 				"GetNodeByClusterAndName": db.Node{ID: uuid.MustParse("5c4b3a29-1817-4615-9413-000000000004"), ClusterID: clusterID, Name: "pve-01"},
 			}
 
-			body := `{"pbs_server_id":"` + testPBSServerID + `","backup_type":"vm","backup_id":"101","backup_time":1700000000,` +
+			body := `{"pbs_server_id":"` + testPBSServerID + `","backup_type":"` + backupType + `","backup_id":"101","backup_time":1700000000,` +
 				`"target_node":"pve-01","vmid":101,"datastore":"datastore01","force":` + strconv.FormatBool(tt.force) +
 				`,"start_after_restore":` + strconv.FormatBool(tt.start) + `}`
 			req := httptest.NewRequest(http.MethodPost, backupRoute(clusterScope+"/restore"), strings.NewReader(body))
@@ -124,6 +141,10 @@ func TestRestoreReadsThroughTheRequestedServersStorage(t *testing.T) {
 
 			if resp.StatusCode != tt.status {
 				t.Errorf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+			if want := map[bool]string{true: "execute:container", false: "execute:vm"}[tt.ct || tt.guest == "lxc"]; tt.status == 403 &&
+				tt.grants["manage:backup"] && !strings.Contains(string(answer), want) {
+				t.Errorf("answer %q, want it to name %s", answer, want)
 			}
 			if tt.status == 404 && !strings.Contains(string(answer), "PBS server not found") {
 				t.Errorf("answer %q, want the missing-server message", answer)
