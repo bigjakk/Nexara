@@ -299,12 +299,6 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           setGrpCreateOpen(false);
           clearGroupForm();
         },
-        // The form is not reset on opening: one that landed after the dialog
-        // closed would otherwise offer the created group's name again. Only the
-        // name: nodes and comment are the edit dialog's too, which may be open.
-        onLateSuccess: (_result, now) => {
-          if (!now.open) setGrpName("");
-        },
         onError: showGroupError,
       },
     );
@@ -982,7 +976,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                 <Dialog
                   open={grpCreateOpen}
                   onOpenChange={(open) => {
-                    if (open) setGrpError(null);
+                    // A new group starts empty: the nodes and comment are the
+                    // edit dialog's too, and a closed create keeps what was typed.
+                    if (open) {
+                      setGrpError(null);
+                      clearGroupForm();
+                    }
                     setGrpCreateOpen(open);
                   }}
                 >

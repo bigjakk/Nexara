@@ -327,6 +327,29 @@ describe("ClusterHATab — HA resource settings", () => {
     ).not.toBeInTheDocument();
   });
 
+  // The nodes and comment are the edit dialog's state too: a New group opened
+  // after an edit offered the edited group's nodes.
+  it("opens Add Group empty after a group was edited", async () => {
+    const user = await openResources(PVE8, PVE8_RESOURCES, [
+      {
+        group: "ha-group01",
+        nodes: "pve-01:100",
+        restricted: 0,
+        nofailback: 0,
+      },
+    ]);
+    await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Edit group ha-group01" }),
+    );
+    expect(screen.getByDisplayValue("pve-01:100")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: "Add Group" }));
+
+    expect(screen.getByPlaceholderText("node1:100,node2:50")).toHaveValue("");
+  });
+
   it("lists existing groups while the version is unknown, without offering to add or edit one", async () => {
     const user = await openResources("", RESOURCES, [
       {
