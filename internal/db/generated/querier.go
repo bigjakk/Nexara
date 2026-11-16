@@ -374,6 +374,9 @@ type Querier interface {
 	// lands meanwhile must not be followed by a reboot. Zero rows means nothing is
 	// confirmed, and the caller sends nothing.
 	ConfirmNodeUpgrade(ctx context.Context, id uuid.UUID) (int64, error)
+	// Uses up session_id's proof for purpose, if it is the user's and still valid by the
+	// database's clock: 1 row, the proof held and is gone; 0, there was none to use.
+	ConsumeTOTPStepUpProof(ctx context.Context, arg ConsumeTOTPStepUpProofParams) (int64, error)
 	// CorrelateVeeamBackupObjects resolves every backup object on one server to a
 	// (cluster_id, vmid) guest, in one statement.
 	//
@@ -2984,6 +2987,13 @@ type Querier interface {
 	// The sets are disjoint by construction. cluster_id is never NULL here: only a
 	// global kind's trigger writes a row with none (000125).
 	RecordObservedObjects(ctx context.Context, arg RecordObservedObjectsParams) error
+	// Records that the person behind session_id has just signed in at the identity
+	// provider again (the SSO step-up), for purpose, until ttl_seconds from now. Decided
+	// here against the database's clock: only for a session that is the user's, live (not
+	// revoked, not expired) and of an active user, and only when auth_time (the ID token's,
+	// in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
+	// rows: refused. A newer proof replaces an older one of the same session and purpose.
+	RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error)
 	RecordUpsReading(ctx context.Context, arg RecordUpsReadingParams) error
 	// The inventory pass's re-read of what the connection probe stored at
 	// registration. A NULL argument leaves that column as it is.
@@ -3261,6 +3271,9 @@ type Querier interface {
 	SkipRollingUpdateNodeAny(ctx context.Context, arg SkipRollingUpdateNodeAnyParams) error
 	StartRollingUpdateJob(ctx context.Context, id uuid.UUID) error
 	StartVMImportJob(ctx context.Context, id uuid.UUID) error
+	// RecordTOTPStepUpProof's test of auth_time alone, to tell a refusal for a sign-in
+	// that was not recent from one for a session that ended.
+	TOTPStepUpAuthTimeIsFresh(ctx context.Context, arg TOTPStepUpAuthTimeIsFreshParams) (bool, error)
 	// TaskUPIDOnRecord says whether a UPID is already on record — an audit row
 	// names it, or the archive holds it, in any cluster — for POST /api/v1/tasks,
 	// which files only a task Nexara has not seen: a row filed under a known UPID

@@ -89,6 +89,8 @@ var auditClusterExempt = map[string]string{
 	"oidc.go.Callback":              "OIDC login callback is an auth event; no cluster in scope",
 	"oidc.go.exchangeFailure":       "a failed SSO sign-in; no cluster in scope",
 	"oidc.go.auditIdentityMismatch": "a failed SSO sign-in; no cluster in scope",
+	"oidc.go.finishStepUp":          "an SSO account's step-up before enrolling 2FA; no cluster in scope",
+	"oidc.go.refuseStepUp":          "a refused SSO step-up before enrolling 2FA; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",
 	"virtio_win.go.SetMirror":       "the virtio-win download source is one instance-wide setting row, gated on global manage:settings",
 	"audit.go.UpdateSyslogConfig":   "syslog forwarding is an install-global setting",

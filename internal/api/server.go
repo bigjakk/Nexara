@@ -515,6 +515,10 @@ func (s *Server) wireAuthCompositions() {
 		// And a directory account's password by a bind, in the sign-in's budgets.
 		s.totpHandler.SetDirectoryPasswordCheck(s.authHandler.ProveDirectoryPassword)
 	}
+	if s.totpHandler != nil && s.oidcHandler != nil {
+		// A single sign-on account's setup proves a fresh sign-in at its provider.
+		s.totpHandler.SetSSOStepUp(s.oidcHandler.StartStepUp)
+	}
 }
 
 // loadSyslogConfig reads syslog forwarding config from settings and configures the forwarder.

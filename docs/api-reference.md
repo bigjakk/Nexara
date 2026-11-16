@@ -354,6 +354,26 @@ The exchange code it ends with lives 5 seconds, so exchange it at once.
 A link from someone else's sign-in, the callback it ends in or the
 `/oidc-callback?oidc_token=` page that follows, signs nobody in.
 
+### Two-factor setup for an SSO account
+
+An account that signs in through single sign-on has no password to send to
+`POST /auth/totp/setup`, so it confirms a fresh sign-in at its identity provider first:
+
+1. `POST /api/v1/auth/totp/setup/sso-step-up` (a live interactive session, no body) answers
+   `{ "redirect_url": "https://idp.example.com/authorize?...&prompt=login&max_age=0" }` and sets
+   the same browser-binding cookie as step 2 of the OIDC flow.
+2. The browser signs in at the provider again and comes back to the OIDC callback. That
+   callback signs nobody in and creates or links no account. It accepts the answer only when it
+   comes back in the browser that began it, its ID token resolves to the same account, and the
+   token carries an `auth_time` within the last 5 minutes (1 minute ahead allowed for clock
+   skew), by the database's clock. It then records a proof for the session that asked, good for
+   5 minutes and one setup, and redirects to `/settings/security?sso_step_up=confirmed`. Anything
+   else is refused and audited (`totp_step_up_refused`, with the class of the refusal), and
+   redirects to `/settings/security?sso_step_up_error=<message>`. A provider that sends no
+   `auth_time` although `max_age` was asked cannot confirm anything.
+3. `POST /api/v1/auth/totp/setup` from the same session, with no body, uses up the proof
+   and answers the secret. Without a proof it answers `403`.
+
 ### Ended Sessions
 
 Every authenticated request is checked against its sign-in, reads included. An
@@ -383,7 +403,7 @@ refused with `403`, the first thing checked after authentication, ahead of the
 route's rate limit, its permission and its parameters, so the caller has to use
 an interactive login session instead. The routes are
 `POST /auth/change-password`, `POST /auth/totp/setup`,
-`POST /auth/totp/setup/verify`, `DELETE /auth/totp`,
+`POST /auth/totp/setup/sso-step-up`, `POST /auth/totp/setup/verify`, `DELETE /auth/totp`,
 `POST /auth/totp/recovery-codes/regenerate`, `POST /auth/logout-all`,
 `DELETE /auth/sessions/:id`, `POST /api-keys`, `GET /auth/sessions`,
 `PUT /auth/profile`, `GET /auth/me`, `GET /auth/totp/status`,
@@ -403,10 +423,10 @@ The refusal comes ahead of a route's own rate limiter, but not ahead of the
 per-address limiters, which run before any request is authenticated: a key that
 is refused still spends a request of the per-address Auth budget on the flagged
 routes that budget covers: `POST /auth/change-password`, `POST /auth/totp/setup`,
-`DELETE /auth/totp` and `POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
+`POST /auth/totp/setup/sso-step-up`, `DELETE /auth/totp` and `POST /auth/totp/recovery-codes/regenerate`. It spends nothing of the caps on
 `POST /auth/logout-all` and `DELETE /auth/sessions/:id`, which are per session. A
 session that has ended spends a request of the Auth budget in the same way when it
-is refused on `POST /auth/totp/setup`, `DELETE /auth/totp` or
+is refused on `POST /auth/totp/setup`, `POST /auth/totp/setup/sso-step-up`, `DELETE /auth/totp` or
 `POST /auth/totp/recovery-codes/regenerate`.
 
 ## Error Format
@@ -591,7 +611,7 @@ envelope documented above, with a `Retry-After` header. Requests that pass carry
 
 | Scope | Budget | Applies to |
 |-------|--------|------------|
-| Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/setup`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
+| Auth | 15/min, one budget for all of them | `/auth/login`, `/auth/register`, `/auth/change-password`, `/auth/totp/setup`, `/auth/totp/setup/sso-step-up`, `/auth/totp/verify-login`, `DELETE /auth/totp`, `/auth/totp/recovery-codes/regenerate`, `/auth/oidc/authorize`, `/auth/oidc/callback` |
 | Sign out everywhere | 5/min per session | `POST /auth/logout-all` — keyed on the caller's session (on the user for a token that names none), not the address, and deliberately not part of the Auth budget above: that budget is spent before a request is authenticated, so anyone could use it up and leave an account's owner without the way to end a stolen session. Each session spends its own, so one session cannot use up another's; a refused API key spends none of it. A call over the cap revokes nothing and leaves the refresh cookie in place |
 | End one session | 30/min per session | `DELETE /auth/sessions/:id` — keyed on the caller's session like sign out everywhere, with a budget of its own: ending one session is signing out everywhere one device at a time, so it is capped too, but a person ends several devices in a sitting, which is why the cap is larger. A refused API key spends none of it, and a call over the cap revokes nothing and leaves the refresh cookie in place |
 | Refresh | 30/min | `/auth/refresh` |
@@ -801,7 +821,8 @@ Returns recent release notes from GitHub Releases (feeds the in-app "What's new"
 | GET | `/auth/oidc/callback` | OIDC callback (internal) |
 | POST | `/auth/oidc/token-exchange` | Exchange OIDC code for JWT |
 | POST | `/auth/totp/verify-login` | Complete TOTP challenge (`429` with `Retry-After` while the account's codes are locked; `503` when the attempt cannot be counted, and the code is not checked) |
-| POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit). An LDAP account sends its directory password instead: it is checked by a bind as the account's own directory entry and counted in that account's sign-in limits, so `403` when wrong, `429` (with `Retry-After`) while sign-in is locked, and the wrong password that uses up the limit locks sign-in too; `503` when the attempt cannot be counted or the directory cannot be reached, with nothing sent to it. An SSO account sends none and must have signed in within the last 10 minutes (`403` otherwise) |
+| POST | `/auth/totp/setup` | Begin TOTP enrollment. Send `current_password` (`400` without one, `403` when wrong, `429` while locked out with change-password, which shares the limit). An LDAP account sends its directory password instead: it is checked by a bind as the account's own directory entry and counted in that account's sign-in limits, so `403` when wrong, `429` (with `Retry-After`) while sign-in is locked, and the wrong password that uses up the limit locks sign-in too; `503` when the attempt cannot be counted or the directory cannot be reached, with nothing sent to it. An SSO account sends none and must first confirm a fresh sign-in at its identity provider with `POST /auth/totp/setup/sso-step-up` (`403` otherwise; the confirmation is used up). Any other account must have signed in within the last 10 minutes (`403` otherwise) |
+| POST | `/auth/totp/setup/sso-step-up` | Start an SSO account's confirmation at its identity provider; answers `{ "redirect_url": "..." }` (see Two-factor setup for an SSO account) |
 | POST | `/auth/totp/setup/verify` | Confirm TOTP enrollment |
 | DELETE | `/auth/totp` | Disable TOTP (`429` with `Retry-After` while this session's codes are locked — five wrong ones in 10 minutes, counted apart from sign-in's second step; `503` when the attempt cannot be counted, and nothing changes) |
 | GET | `/auth/totp/status` | Get TOTP enrollment status (interactive session only: `403` for an API key) |

@@ -59,6 +59,8 @@ const (
 const (
 	totpPasswordRequiredMessage          = "Enter your current password to set up two-factor authentication."
 	totpDirectoryPasswordRequiredMessage = "Enter your directory password to set up two-factor authentication."
+	totpSSOStepUpRequiredMessage         = "Confirm with your identity provider first: your account signs in through single sign-on, " +
+		"so Nexara asks you to sign in there again before it sets up two-factor authentication."
 )
 
 var totpSignInAgainMessage = fmt.Sprintf("To set up two-factor authentication, sign out and sign in again, then start within %d minutes: "+
@@ -93,6 +95,10 @@ type TOTPHandler struct {
 	// account, by a bind as its entry under the sign-in's budgets. Wired by
 	// SetDirectoryPasswordCheck; nil refuses every directory account's setup.
 	proveDirectoryPassword func(c fiber.Ctx, userID uuid.UUID, password string) error
+	// startSSOStepUp is OIDCHandler.StartStepUp: the round trip through the identity
+	// provider that a single sign-on account proves itself with. Wired by SetSSOStepUp;
+	// nil refuses every step-up.
+	startSSOStepUp func(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error)
 
 	// followUpTimeout bounds each follow-up of a decision that has been made — the
 	// audit row of a second step that was refused — and is authFollowUpTimeout when
@@ -158,6 +164,48 @@ func (h *TOTPHandler) SetDirectoryPasswordCheck(fn func(c fiber.Ctx, userID uuid
 	h.proveDirectoryPassword = fn
 }
 
+// SetSSOStepUp sets how a single sign-on account's step-up begins
+// (OIDCHandler.StartStepUp; called from server setup).
+func (h *TOTPHandler) SetSSOStepUp(fn func(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error)) {
+	h.startSSOStepUp = fn
+}
+
+// BeginSSOStepUp handles POST /api/v1/auth/totp/setup/sso-step-up: it starts the round
+// trip through the identity provider that a single sign-on account proves it is the
+// owner with before BeginSetup (see OIDCHandler.StartStepUp), and answers the URL to
+// send the browser to. Only for the caller's own live session, on an SSO account with
+// no second factor yet.
+func (h *TOTPHandler) BeginSSOStepUp(c fiber.Ctx, _ *apischema.Params) error {
+	userID, _ := c.Locals("user_id").(uuid.UUID)
+	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
+	if userID == uuid.Nil || sessionID == uuid.Nil {
+		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	}
+	row, err := h.queries.GetUserTOTPSecret(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check TOTP status")
+	}
+	if row.TotpSecret.Valid {
+		return fiber.NewError(fiber.StatusConflict, "TOTP is already enabled")
+	}
+	user, err := h.queries.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
+	}
+	if user.AuthSource != "oidc" {
+		return fiber.NewError(fiber.StatusForbidden, "Only an account that signs in through single sign-on confirms with its identity provider")
+	}
+	if h.startSSOStepUp == nil {
+		slog.Error("two-factor setup: no SSO step-up is wired, so no single sign-on account can begin a setup", "user_id", userID)
+		return fiber.NewError(fiber.StatusInternalServerError, totpSetupFailedMessage)
+	}
+	redirectURL, err := h.startSSOStepUp(c, userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"redirect_url": redirectURL})
+}
+
 // BeginSetup handles POST /api/v1/auth/totp/setup — starts TOTP enrollment.
 //
 // The secret it hands out is what turns a second factor on (ConfirmSetup needs a
@@ -220,11 +268,14 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx, p *apischema.Params) error {
 // the bind, so a guesser locks Nexara's sign-in before the directory's own lockout.
 //
 // An account that signs in through single sign-on has no password anywhere, so it
-// proves a recent sign-in instead: the session this request came with began within
-// totpFreshSignIn (its created_at is the sign-in; a refresh rotates the token and keeps
-// it). A token stolen from an older session cannot begin a setup; signing in again at
-// the identity provider is the proof. A password it sends is not looked at. Its cost: a
-// token stolen within the window can still begin a setup.
+// proves a fresh sign-in at its identity provider instead: a step-up round trip
+// (POST /auth/totp/setup/sso-step-up, OIDCHandler.StartStepUp) records a proof for
+// this session, and the setup uses it up (useSSOStepUp); 403 without one. A password
+// it sends is not looked at.
+//
+// Any other account proves a recent sign-in: the session this request came with began
+// within totpFreshSignIn (its created_at is the sign-in; a refresh rotates the token and
+// keeps it).
 func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password string) error {
 	if user.AuthSource == "local" {
 		if password == "" {
@@ -246,6 +297,9 @@ func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password st
 		}
 		return h.proveDirectoryPassword(c, user.ID, password)
 	}
+	if user.AuthSource == "oidc" {
+		return h.useSSOStepUp(c, user)
+	}
 
 	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
 	if sessionID == uuid.Nil {
@@ -265,6 +319,28 @@ func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password st
 		slog.Info("two-factor setup: refused, as the sign-in is too old for an account with no Nexara password",
 			"user_id", user.ID, "auth_source", user.AuthSource, "session_id", sessionID)
 		return fiber.NewError(fiber.StatusForbidden, totpSignInAgainMessage)
+	}
+	return nil
+}
+
+// useSSOStepUp uses up the proof a step-up through the identity provider recorded for
+// this session (OIDCHandler.finishStepUp): valid, by the database's clock, only for
+// this session, this account and this purpose, and only once. None is 403.
+func (h *TOTPHandler) useSSOStepUp(c fiber.Ctx, user db.User) error {
+	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
+	if sessionID == uuid.Nil {
+		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), authDBTimeout)
+	n, err := h.queries.ConsumeTOTPStepUpProof(ctx, db.ConsumeTOTPStepUpProofParams{
+		SessionID: sessionID, UserID: user.ID, Purpose: totpStepUpPurpose,
+	})
+	cancel()
+	if err != nil {
+		return totpSetupNotChecked("use the identity provider's confirmation", user.ID, err)
+	}
+	if n == 0 {
+		return fiber.NewError(fiber.StatusForbidden, totpSSOStepUpRequiredMessage)
 	}
 	return nil
 }

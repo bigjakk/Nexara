@@ -103,6 +103,7 @@ var selfServiceRoutes = map[string]string{
 	"POST /api/v1/auth/ws-token":                       "mints a hub token for the caller; per-cluster authorization is enforced at subscribe time in internal/ws",
 	"POST /api/v1/auth/totp/setup":                     "enrolls the caller's own second factor",
 	"POST /api/v1/auth/totp/setup/verify":              "confirms the caller's own enrollment",
+	"POST /api/v1/auth/totp/setup/sso-step-up":         "confirms the caller's own sign-in before enrolling a second factor",
 	"DELETE /api/v1/auth/totp":                         "disables the caller's own second factor",
 	"GET /api/v1/auth/totp/status":                     "reports the caller's own enrollment",
 	"POST /api/v1/auth/totp/recovery-codes/regenerate": "regenerates the caller's own recovery codes",

@@ -889,8 +889,8 @@ func TestTOTPSetup_ProvesTheCurrentPasswordInChangePasswordsBudget(t *testing.T)
 	}
 }
 
-// TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn: a single sign-on
-// account has no Nexara password to prove (its hash is empty), so beginning a setup asks
+// TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn: an account of another
+// source has no Nexara password to prove (its hash is empty), so beginning a setup asks
 // instead that the session it came with began within totpFreshSignIn. A password it sends
 // is not looked at, and counts nothing.
 func TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn(t *testing.T) {
@@ -906,7 +906,7 @@ func TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			a, _ := lockoutAppWith(t, "redis", func(s *raceStore) {
-				s.user.AuthSource, s.user.PasswordHash = "oidc", ""
+				s.user.AuthSource, s.user.PasswordHash = "other", "" // neither local, LDAP nor SSO
 				s.session.CreatedAt = time.Now().Add(-tc.signedIn)
 			}, raceOptions{})
 

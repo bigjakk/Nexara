@@ -262,3 +262,79 @@ func TestOIDCIdentity_SQL(t *testing.T) {
 		}
 	})
 }
+
+// TestTOTPStepUpProof_SQL: the SSO step-up's proof is recorded only for a live session of
+// an active user whose auth_time is recent by the database's clock, and is used up once,
+// only by that session, that user and that purpose, and only before it expires.
+func TestTOTPStepUpProof_SQL(t *testing.T) {
+	directoryTx(t, func(ctx context.Context, tx pgx.Tx, q *gen.Queries) {
+		var userID, other, live, revoked uuid.UUID
+		for _, row := range []struct {
+			dst  *uuid.UUID
+			stmt string
+		}{
+			{&userID, `INSERT INTO users (email, password_hash, display_name, auth_source) VALUES ('erin@example.com', '', 'Erin', 'oidc') RETURNING id`},
+			{&other, `INSERT INTO users (email, password_hash, display_name, auth_source) VALUES ('frank@example.com', '', 'Frank', 'oidc') RETURNING id`},
+		} {
+			if err := tx.QueryRow(ctx, row.stmt).Scan(row.dst); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for dst, revokedFlag := range map[*uuid.UUID]bool{&live: false, &revoked: true} {
+			if err := tx.QueryRow(ctx, `INSERT INTO sessions (user_id, token_hash, expires_at, is_revoked) VALUES ($1, 'h', now() + interval '1 hour', $2) RETURNING id`,
+				userID, revokedFlag).Scan(dst); err != nil {
+				t.Fatal(err)
+			}
+		}
+		now := float64(time.Now().Unix())
+		record := func(session, user uuid.UUID, authTime float64) int64 {
+			n, err := q.RecordTOTPStepUpProof(ctx, gen.RecordTOTPStepUpProofParams{Purpose: "totp_setup", TtlSeconds: 300,
+				SessionID: session, UserID: user, AuthTime: authTime, WindowSeconds: 300, SkewSeconds: 60})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		consume := func(session, user uuid.UUID, purpose string) int64 {
+			n, err := q.ConsumeTOTPStepUpProof(ctx, gen.ConsumeTOTPStepUpProofParams{SessionID: session, UserID: user, Purpose: purpose})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		for _, tc := range []struct {
+			name          string
+			session, user uuid.UUID
+			authTime      float64
+			want          int64
+		}{
+			{"an auth_time ten minutes old", live, userID, now - 600, 0},
+			{"an auth_time five minutes ahead", live, userID, now + 300, 0},
+			{"a revoked session", revoked, userID, now, 0},
+			{"a session of another user", live, other, now, 0},
+		} {
+			if got := record(tc.session, tc.user, tc.authTime); got != tc.want {
+				t.Errorf("%s: recorded %d rows, want %d", tc.name, got, tc.want)
+			}
+		}
+		if fresh, err := q.TOTPStepUpAuthTimeIsFresh(ctx, gen.TOTPStepUpAuthTimeIsFreshParams{AuthTime: now - 600, WindowSeconds: 300, SkewSeconds: 60}); err != nil || fresh {
+			t.Errorf("an auth_time ten minutes old is fresh = %v, %v; want false", fresh, err)
+		}
+		if got := record(live, userID, now-30); got != 1 {
+			t.Fatalf("a recent sign-in on a live session recorded %d rows, want 1", got)
+		}
+		if consume(live, userID, "other_purpose") != 0 || consume(live, other, "totp_setup") != 0 || consume(revoked, userID, "totp_setup") != 0 {
+			t.Error("the proof was used by another purpose, user or session")
+		}
+		if consume(live, userID, "totp_setup") != 1 || consume(live, userID, "totp_setup") != 0 {
+			t.Error("the proof was not used up exactly once")
+		}
+		record(live, userID, now)
+		if _, err := tx.Exec(ctx, `UPDATE totp_step_up_proofs SET expires_at = now() - interval '1 second'`); err != nil {
+			t.Fatal(err)
+		}
+		if consume(live, userID, "totp_setup") != 0 {
+			t.Error("an expired proof was used")
+		}
+	})
+}

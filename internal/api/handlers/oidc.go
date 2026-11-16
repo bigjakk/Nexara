@@ -637,44 +637,72 @@ const oidcCouldNotCompleteMessage = "The single sign-on could not be completed. 
 // state that is not stored at all. The binding is spent once the configuration says where its cookie lives (the
 // redirect URI's path); a binding that does not match is left alone, as it may be the
 // browser's own sign-in, still in flight.
+//
+// A state that a step-up stored (StartStepUp) is finished by finishStepUp and never
+// as a sign-in, whatever the provider answers: its refusals, a binding that does not
+// match included, are audited and sent back to the Security page.
 func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	code := c.Query("code")
 	state := c.Query("state")
+	binding, stepUp := "", ""
+	if state != "" {
+		var err error
+		binding, stepUp, err = auth.OIDCStatePeek(c.Context(), h.rdb, state)
+		if err != nil {
+			slog.Error("oidc callback: could not read the sign-in's state", "error", err)
+			return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcCouldNotCompleteMessage))
+		}
+	}
 	if code == "" || state == "" {
+		if stepUp != "" {
+			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "provider_error", ssoStepUpFailedMessage))
+		}
 		errMsg := c.Query("error_description", c.Query("error", "unknown error"))
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("SSO failed: "+errMsg))
 	}
-	binding, err := auth.OIDCStateBindingDigest(c.Context(), h.rdb, state)
-	if err != nil {
-		slog.Error("oidc callback: could not read the sign-in's state", "error", err)
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcCouldNotCompleteMessage))
-	}
 	if !oidcStateBinding.matches(c, state, binding) {
 		slog.Warn("oidc callback: refused a sign-in that was not started in this browser", "ip", c.IP())
+		if stepUp != "" {
+			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "another_browser", ssoStepUpNotThisBrowserMessage))
+		}
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(oidcNotThisBrowserMessage))
+	}
+	// fail is where a refusal from here on goes: the login page, or the Security page
+	// for a step-up.
+	fail := func(message string) error {
+		if stepUp != "" {
+			return stepUpRedirect(c, h.refuseStepUp(c, stepUp, "not_completed", message))
+		}
+		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(message))
 	}
 
 	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
 	if err != nil {
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC not configured"))
+		return fail("OIDC not configured")
 	}
 	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).spend(c, state, binding)
 
 	oidcCfg, err := h.buildOIDCConfig(cfg)
 	if err != nil {
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC config error"))
+		return fail("OIDC config error")
 	}
 
 	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
 	if err != nil {
 		slog.Error("OIDC provider init failed in callback", "error", err)
-		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape("OIDC provider error"))
+		return fail("OIDC provider error")
 	}
 
 	userInfo, err := provider.ExchangeAndVerify(c.Context(), code, state)
 	if err != nil {
 		slog.Error("OIDC exchange failed", "error", err)
+		if stepUp != "" {
+			return fail(ssoStepUpFailedMessage)
+		}
 		return c.Redirect().Status(fiber.StatusFound).To("/login?error=" + url.QueryEscape(h.exchangeFailure(c, err)))
+	}
+	if stepUp != "" || userInfo.StepUp != "" {
+		return stepUpRedirect(c, h.finishStepUp(c, stepUp, userInfo))
 	}
 
 	user, exchangeCode, failure := h.provisionAndStoreExchange(c, cfg, userInfo)
@@ -688,6 +716,187 @@ func (h *OIDCHandler) Callback(c fiber.Ctx) error {
 	AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "auth", user.ID.String(), "oidc_callback", details)
 
 	return c.Redirect().Status(fiber.StatusFound).To("/oidc-callback?oidc_token=" + exchangeCode)
+}
+
+// --- The step-up: a fresh sign-in at the provider by somebody signed in already ---
+//
+// A single sign-on account has no password Nexara could ask for before it hands out a
+// second factor's secret (TOTPHandler.BeginSetup), so it proves instead that the person
+// at this browser has just signed in at the identity provider again, as this account.
+// StartStepUp sends the browser to the provider with prompt=login and max_age=0, the
+// state bound to this browser exactly as a sign-in's is (oidcStateBinding) and carrying
+// the session and the account that asked (stepUpRecord). The callback of such a state
+// is never a sign-in: it creates no session, provisions and links nothing, and only
+// records, for that session, a short-lived proof that the setup then uses up
+// (finishStepUp). A thief holding a stolen session token can start one, but cannot
+// finish it without signing in at the provider as the owner, in the browser that
+// started it.
+const (
+	// totpStepUpPurpose is the one thing a step-up's proof is good for.
+	totpStepUpPurpose = "totp_setup"
+	// ssoStepUpWindow is how recent the ID token's auth_time must be, by the database's
+	// clock; ssoStepUpSkew how far ahead of it the provider's clock may be.
+	ssoStepUpWindow = 5 * time.Minute
+	ssoStepUpSkew   = time.Minute
+	// ssoStepUpProofTTL is how long the proof waits for the setup.
+	ssoStepUpProofTTL = 5 * time.Minute
+)
+
+// The audit actions of a step-up's callback. Their details are the client address
+// and, for a refusal, the class of it: never a claim of the ID token.
+const (
+	ssoStepUpConfirmedAction = "totp_step_up_confirmed"
+	ssoStepUpRefusedAction   = "totp_step_up_refused"
+)
+
+// The messages the Security page shows for a step-up that was refused.
+const (
+	ssoStepUpFailedMessage         = "Your identity provider did not confirm the sign-in, so nothing was confirmed. Try again."
+	ssoStepUpNotThisBrowserMessage = "The confirmation was not started in this browser, or it took too long, so nothing was " +
+		"confirmed. Start it again from this page."
+	ssoStepUpAnotherAccountMessage = "You signed in at your identity provider as a different account from the one signed in " +
+		"here, so nothing was confirmed. Confirm again, as this account."
+	ssoStepUpNoAuthTimeMessage = "Your identity provider did not say when you signed in (its ID token has no auth_time), so " +
+		"Nexara cannot tell the sign-in was fresh and confirmed nothing. Ask your administrator to have the provider send auth_time."
+	ssoStepUpStaleMessage = "Your identity provider did not ask you to sign in again, or the sign-in was too long ago, so " +
+		"nothing was confirmed. Confirm again, and sign in when the provider asks."
+	ssoStepUpSessionEndedMessage = "Your Nexara session ended before the confirmation came back, so nothing was confirmed. " +
+		"Sign in again and start over."
+)
+
+// ssoStepUpPage is where a step-up's callback sends the browser back to.
+const ssoStepUpPage = "/settings/security"
+
+// stepUpRecord is what a step-up's state carries: the session and the account that
+// asked for it.
+func stepUpRecord(sessionID, userID uuid.UUID) string {
+	return sessionID.String() + ":" + userID.String()
+}
+
+func parseStepUpRecord(record string) (sessionID, userID uuid.UUID, ok bool) {
+	s, u, found := strings.Cut(record, ":")
+	sid, err1 := uuid.Parse(s)
+	uid, err2 := uuid.Parse(u)
+	if !found || err1 != nil || err2 != nil || sid == uuid.Nil || uid == uuid.Nil {
+		return uuid.Nil, uuid.Nil, false
+	}
+	return sid, uid, true
+}
+
+// StartStepUp begins a step-up for the session sessionID of userID and returns the
+// provider's URL to send the browser to. It sets the state's browser binding as
+// Authorize does. Its error is the answer the route ends in.
+func (h *OIDCHandler) StartStepUp(c fiber.Ctx, userID, sessionID uuid.UUID) (string, error) {
+	cfg, err := h.queries.GetEnabledOIDCConfig(c.Context())
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fiber.NewError(fiber.StatusNotFound, "No enabled OIDC configuration")
+		}
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to load OIDC config")
+	}
+	oidcCfg, err := h.buildOIDCConfig(cfg)
+	if err != nil {
+		slog.Error("OIDC step-up: could not build the configuration", "error", err)
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to initialize OIDC configuration")
+	}
+	provider, err := auth.NewOIDCProvider(c.Context(), oidcCfg, h.rdb)
+	if err != nil {
+		slog.Error("OIDC step-up: provider init failed", "error", err)
+		return "", fiber.NewError(fiber.StatusServiceUnavailable, "The identity provider could not be reached. Try again shortly.")
+	}
+	secure := oidcBindingSecure(cfg.RedirectUri)
+	secret, record, err := newBinding(secure)
+	if err != nil {
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
+	}
+	authURL, state, err := provider.GenerateStepUpURL(c.Context(), record, stepUpRecord(sessionID, userID))
+	if err != nil {
+		slog.Error("OIDC step-up: could not generate the auth URL", "error", err)
+		return "", fiber.NewError(fiber.StatusInternalServerError, "Failed to generate auth URL")
+	}
+	oidcStateBinding.at(oidcCallbackCookiePath(cfg.RedirectUri)).set(c, state, secret, secure)
+	return authURL, nil
+}
+
+// ssoStepUpIsSameAccount decides whether the identity the provider vouched for in a
+// step-up is the account that asked for it: the account a sign-in with this ID token
+// would resolve to must be that one. Today a sign-in resolves an SSO account by its
+// email claim among the oidc accounts (provisionUser's GetUserByEmailAndSource); this is
+// the one place the step-up asks, so it follows the sign-in's rule when that changes.
+func (h *OIDCHandler) ssoStepUpIsSameAccount(ctx context.Context, userID uuid.UUID, info *auth.OIDCUserInfo) (bool, error) {
+	u, err := h.queries.GetUserByEmailAndSource(ctx, db.GetUserByEmailAndSourceParams{Email: info.Email, AuthSource: "oidc"})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("look up the step-up's account: %w", err)
+	}
+	return u.ID == userID, nil
+}
+
+// finishStepUp is the step-up callback once the provider has vouched for info: it
+// records the proof for the session the state names, or refuses. It answers "" when the
+// proof was recorded, or the message the Security page shows. Every outcome is audited.
+// It is split out of Callback, like provisionAndStoreExchange, so a test can drive it.
+func (h *OIDCHandler) finishStepUp(c fiber.Ctx, stepUp string, info *auth.OIDCUserInfo) string {
+	sessionID, userID, ok := parseStepUpRecord(stepUp)
+	if !ok || info.StepUp != stepUp {
+		return h.refuseStepUp(c, stepUp, "malformed_state", ssoStepUpFailedMessage)
+	}
+	same, err := h.ssoStepUpIsSameAccount(c.Context(), userID, info)
+	switch {
+	case err != nil:
+		slog.Error("OIDC step-up: could not check the account", "user_id", userID, "error", err)
+		return h.refuseStepUp(c, stepUp, "account_not_checked", ssoStepUpFailedMessage)
+	case !same:
+		return h.refuseStepUp(c, stepUp, "another_account", ssoStepUpAnotherAccountMessage)
+	case info.AuthTime.IsZero():
+		return h.refuseStepUp(c, stepUp, "no_auth_time", ssoStepUpNoAuthTimeMessage)
+	}
+	authTime := float64(info.AuthTime.Unix())
+	n, err := h.queries.RecordTOTPStepUpProof(c.Context(), db.RecordTOTPStepUpProofParams{
+		Purpose: totpStepUpPurpose, TtlSeconds: ssoStepUpProofTTL.Seconds(), SessionID: sessionID, UserID: userID,
+		AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
+	})
+	if err != nil {
+		slog.Error("OIDC step-up: could not record the proof", "user_id", userID, "error", err)
+		return h.refuseStepUp(c, stepUp, "not_recorded", ssoStepUpFailedMessage)
+	}
+	if n == 0 {
+		fresh, ferr := h.queries.TOTPStepUpAuthTimeIsFresh(c.Context(), db.TOTPStepUpAuthTimeIsFreshParams{
+			AuthTime: authTime, WindowSeconds: ssoStepUpWindow.Seconds(), SkewSeconds: ssoStepUpSkew.Seconds(),
+		})
+		if ferr == nil && !fresh {
+			return h.refuseStepUp(c, stepUp, "stale_sign_in", ssoStepUpStaleMessage)
+		}
+		return h.refuseStepUp(c, stepUp, "session_ended", ssoStepUpSessionEndedMessage)
+	}
+	details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc"})
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), ssoStepUpConfirmedAction, details)
+	return ""
+}
+
+// refuseStepUp audits a refused step-up under the account its state names (none when
+// it names none), logs the class, and returns message.
+func (h *OIDCHandler) refuseStepUp(c fiber.Ctx, stepUp, reason, message string) string {
+	_, userID, _ := parseStepUpRecord(stepUp)
+	slog.Warn("OIDC step-up: refused", "user_id", userID, "ip", c.IP(), "reason", reason)
+	details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "oidc", "reason": reason})
+	target := ""
+	if userID != uuid.Nil {
+		target = userID.String()
+	}
+	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", target, ssoStepUpRefusedAction, details)
+	return message
+}
+
+// stepUpRedirect sends the browser back to the Security page with the step-up's
+// outcome: confirmed when failure is "", else the message to show.
+func stepUpRedirect(c fiber.Ctx, failure string) error {
+	if failure == "" {
+		return c.Redirect().Status(fiber.StatusFound).To(ssoStepUpPage + "?sso_step_up=confirmed")
+	}
+	return c.Redirect().Status(fiber.StatusFound).To(ssoStepUpPage + "?sso_step_up_error=" + url.QueryEscape(failure))
 }
 
 // oidcEmailNotVerifiedMessage answers a sign-in whose identity provider says it has

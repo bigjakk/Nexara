@@ -87,6 +87,12 @@ type OIDCUserInfo struct {
 	Groups      []string
 	Subject     string
 	Issuer      string
+	// AuthTime is the ID token's auth_time, when the user last authenticated at the
+	// provider; zero when the token carries none.
+	AuthTime time.Time
+	// StepUp is what GenerateStepUpURL stored with the state: not empty only for the
+	// callback of a step-up, which must never be taken for a sign-in.
+	StepUp string
 }
 
 // OIDCProvider wraps the go-oidc provider with oauth2 config and Redis for state.
@@ -154,6 +160,25 @@ const OIDCStateTTL = 10 * time.Minute
 // the state, and the callback refuses a state the browser it comes back in cannot show
 // the secret of (login CSRF; see OIDCStateBindingDigest).
 func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string) (authURL, state string, err error) {
+	return p.generateAuthURL(ctx, bindingDigest, "")
+}
+
+// GenerateStepUpURL is GenerateAuthURL for a step-up: a fresh authentication at the
+// provider by somebody who is signed in already. It asks the provider to authenticate
+// the user again whatever session it holds (prompt=login) and to say when it did
+// (max_age=0, which makes auth_time a required claim), and stores stepUp, which says
+// whose step-up it is, with the state, so the callback (ExchangeAndVerify's StepUp)
+// knows it is one and never takes it for a sign-in. stepUp must not be empty or hold
+// a "|".
+func (p *OIDCProvider) GenerateStepUpURL(ctx context.Context, bindingDigest, stepUp string) (authURL, state string, err error) {
+	if stepUp == "" || strings.Contains(stepUp, "|") {
+		return "", "", fmt.Errorf("generate step-up URL: unusable step-up record")
+	}
+	return p.generateAuthURL(ctx, bindingDigest, stepUp,
+		oauth2.SetAuthURLParam("prompt", "login"), oauth2.SetAuthURLParam("max_age", "0"))
+}
+
+func (p *OIDCProvider) generateAuthURL(ctx context.Context, bindingDigest, stepUp string, extra ...oauth2.AuthCodeOption) (authURL, state string, err error) {
 	// The browser is sent to this URL (the SPA assigns it to window.location), and
 	// the discovery document names it: anything but an http(s) URL with a host —
 	// javascript:, data: — is refused.
@@ -176,8 +201,12 @@ func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string
 		return "", "", fmt.Errorf("generate PKCE verifier: %w", err)
 	}
 
-	// Store state data in Redis for OIDCStateTTL
+	// Store state data in Redis for OIDCStateTTL: a sign-in's in three fields, a
+	// step-up's with its record as a fourth.
 	stateData := nonce + "|" + codeVerifier + "|" + bindingDigest
+	if stepUp != "" {
+		stateData += "|" + stepUp
+	}
 	if err := p.rdb.Set(ctx, oidcStateKey(state), stateData, OIDCStateTTL).Err(); err != nil {
 		return "", "", fmt.Errorf("store state: %w", err)
 	}
@@ -185,11 +214,12 @@ func (p *OIDCProvider) GenerateAuthURL(ctx context.Context, bindingDigest string
 	// Generate PKCE S256 challenge
 	codeChallenge := generateCodeChallenge(codeVerifier)
 
-	authURL = p.oauth2Cfg.AuthCodeURL(state,
+	opts := append([]oauth2.AuthCodeOption{
 		oidc.Nonce(nonce),
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	)
+	}, extra...)
+	authURL = p.oauth2Cfg.AuthCodeURL(state, opts...)
 
 	return authURL, state, nil
 }
@@ -203,7 +233,7 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 		return nil, fmt.Errorf("%w: state not found or expired", ErrOIDCInvalidState)
 	}
 
-	nonce, codeVerifier, _, err := splitStateData(stateData)
+	nonce, codeVerifier, _, stepUp, err := splitStateData(stateData)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrOIDCInvalidState, err)
 	}
@@ -286,7 +316,19 @@ func (p *OIDCProvider) ExchangeAndVerify(ctx context.Context, code, state string
 		Groups:      groups,
 		Subject:     idToken.Subject,
 		Issuer:      idToken.Issuer,
+		AuthTime:    authTimeClaim(claims),
+		StepUp:      stepUp,
 	}, nil
+}
+
+// authTimeClaim is the ID token's auth_time (a JSON number of Unix seconds), or the
+// zero time when it is missing or not a positive number.
+func authTimeClaim(claims map[string]interface{}) time.Time {
+	v, ok := claims["auth_time"].(float64)
+	if !ok || v <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(v), 0)
 }
 
 // GenerateRandomString generates a cryptographically random URL-safe string.
@@ -317,26 +359,38 @@ func oidcStateKey(state string) string { return "oidc:state:" + state }
 // flight across that upgrade), which the callback refuses. err is Redis failing to
 // answer, which is not a sign-in from another browser.
 func OIDCStateBindingDigest(ctx context.Context, rdb *redis.Client, state string) (string, error) {
-	data, err := rdb.Get(ctx, oidcStateKey(state)).Result()
-	if errors.Is(err, redis.Nil) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("reading the sign-in's state: %w", err)
-	}
-	_, _, digest, err := splitStateData(data)
-	if err != nil {
-		return "", nil //nolint:nilerr // old state data: no binding, refused as one
-	}
-	return digest, nil
+	digest, _, err := OIDCStatePeek(ctx, rdb, state)
+	return digest, err
 }
 
-func splitStateData(data string) (nonce, codeVerifier, bindingDigest string, err error) {
-	parts := strings.SplitN(data, "|", 3)
-	if len(parts) != 3 {
-		return "", "", "", fmt.Errorf("malformed state data")
+// OIDCStatePeek is OIDCStateBindingDigest and, beside it, the step-up record stored
+// with the state ("" for a sign-in), without spending the state.
+func OIDCStatePeek(ctx context.Context, rdb *redis.Client, state string) (bindingDigest, stepUp string, err error) {
+	data, err := rdb.Get(ctx, oidcStateKey(state)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", "", nil
 	}
-	return parts[0], parts[1], parts[2], nil
+	if err != nil {
+		return "", "", fmt.Errorf("reading the sign-in's state: %w", err)
+	}
+	_, _, digest, stepUp, err := splitStateData(data)
+	if err != nil {
+		return "", "", nil //nolint:nilerr // old state data: no binding, refused as one
+	}
+	return digest, stepUp, nil
+}
+
+// splitStateData reads what generateAuthURL stored: three fields for a sign-in, four
+// for a step-up, whose fourth may not be empty.
+func splitStateData(data string) (nonce, codeVerifier, bindingDigest, stepUp string, err error) {
+	parts := strings.SplitN(data, "|", 4)
+	if len(parts) < 3 || len(parts) == 4 && parts[3] == "" {
+		return "", "", "", "", fmt.Errorf("malformed state data")
+	}
+	if len(parts) == 4 {
+		stepUp = parts[3]
+	}
+	return parts[0], parts[1], parts[2], stepUp, nil
 }
 
 func extractStringClaim(claims map[string]interface{}, key string) string {

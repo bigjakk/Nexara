@@ -74,12 +74,12 @@ var totpRecoveryCodeParam = apischema.Property{
 		"remaining count is on the status route.",
 }
 
-// registerTOTPEndpoints declares all 7 of TOTPHandler's routes.
+// registerTOTPEndpoints declares all 8 of TOTPHandler's routes.
 //
 // The split is the domain's own shape and every one of the three kinds is here:
 //
-//	5  SelfService  the caller's own enrollment — setup, confirm, disable,
-//	                status and recovery-code regeneration. Every one takes its
+//	6  SelfService  the caller's own enrollment — setup, its SSO step-up, confirm,
+//	                disable, status and recovery-code regeneration. Every one takes its
 //	                subject from c.Locals("user_id") and NONE of them names a
 //	                subject in its path or body, which is the property
 //	                SelfService has to establish.
@@ -142,9 +142,10 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"account sends its directory password instead, checked by a bind as its own directory entry and " +
 			"counted in its sign-in lockout: 403 when wrong, 429 while sign-in is locked (the wrong password " +
 			"that uses up the limit locks sign-in too), 503 when the attempt cannot be counted or the directory " +
-			"cannot be reached. An account that signs in through " +
-			"single sign-on has no password: it must have signed in within the last 10 minutes, and " +
-			"is answered 403, saying to sign in again, otherwise.",
+			"cannot be reached. An account that signs in through single sign-on has no password: it " +
+			"first confirms a fresh sign-in at its identity provider (POST /auth/totp/setup/sso-step-up), " +
+			"and this route uses that confirmation up; without one it is 403. Any other account must have " +
+			"signed in within the last 10 minutes, and is answered 403, saying to sign in again, otherwise.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "enrolls the caller's own second factor"},
 		Parameters: apischema.Properties{
@@ -163,6 +164,24 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 		Handler: h.BeginSetup,
 
 		InteractiveOnly: "starts enrolling a second factor on the account: a leaked key must not be able to begin taking over its login",
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodPost,
+		Path:   totpScope + "/setup/sso-step-up",
+		Description: "Begin the confirmation a single sign-on account gives before POST /auth/totp/setup: " +
+			"returns the identity provider's URL to send the browser to, which asks the user to sign in " +
+			"again (prompt=login, max_age=0). The provider's answer comes back to the SSO callback, which " +
+			"signs nobody in: it checks that the ID token is for this account, carries an auth_time from " +
+			"the last 5 minutes, and came back in the browser that began it, records a proof for this " +
+			"session that is good for 5 minutes and one setup, and redirects to the Security page. 403 for " +
+			"an account that does not sign in through single sign-on, 409 when 2FA is already on, 404 when " +
+			"no OIDC configuration is enabled.",
+		Group:       "Two-Factor Authentication",
+		Permissions: Permissions{SelfService: "confirms the caller's own sign-in before enrolling a second factor"},
+		Parameters:  apischema.Properties{},
+		Handler:     h.BeginSSOStepUp,
+
+		InteractiveOnly: "proves the owner's fresh sign-in so a second factor can be enrolled: a leaked key must not be able to begin taking over its login",
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,

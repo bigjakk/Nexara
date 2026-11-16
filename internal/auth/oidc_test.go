@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -151,6 +152,75 @@ func TestGenerateAuthURL_RefusesAnAuthorizationEndpointThatIsNotHTTP(t *testing.
 
 		if (err == nil) != ok || ok != strings.HasPrefix(authURL, endpoint) || !ok && len(mr.Keys()) != 0 {
 			t.Errorf("%s: url %q, err %v, keys %v; want it refused only when not http(s)", endpoint, authURL, err, mr.Keys())
+		}
+	}
+}
+
+// TestStepUp_TheURLAsksForAFreshSignInAndTheStateSaysItIsAStepUp: a step-up's URL asks
+// the provider to authenticate again (prompt=login, max_age=0) and a sign-in's does not;
+// its callback's verified token reports the step-up record and auth_time (zero when the
+// token has none), so the callback can never take a step-up for a sign-in.
+func TestStepUp_TheURLAsksForAFreshSignInAndTheStateSaysItIsAStepUp(t *testing.T) {
+	t.Parallel()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authTime := time.Now().Add(-time.Minute).Truncate(time.Second)
+	for _, tc := range []struct {
+		name, stepUp string
+		authTime     any // the claim; nil sends none
+	}{
+		{"a sign-in", "", nil},
+		{"a step-up", "session:user", authTime.Unix()},
+		{"a step-up whose token has no auth_time", "session:user", nil},
+	} {
+		var issuer, nonce string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			claims := jwt.MapClaims{"iss": issuer, "aud": "nexara", "sub": "alice", "nonce": nonce,
+				"exp": time.Now().Add(time.Minute).Unix(), "email": "alice@example.com"}
+			if tc.authTime != nil {
+				claims["auth_time"] = tc.authTime
+			}
+			idToken, _ := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at", "token_type": "Bearer", "id_token": idToken})
+		}))
+		t.Cleanup(srv.Close)
+		issuer = srv.URL
+		mr := miniredis.RunT(t)
+		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = rdb.Close() })
+		p := &OIDCProvider{
+			oauth2Cfg: oauth2.Config{ClientID: "nexara", Endpoint: oauth2.Endpoint{AuthURL: "https://idp.example.com/auth", TokenURL: srv.URL + "/token"}},
+			verifier: oidc.NewVerifier(srv.URL, &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}},
+				&oidc.Config{ClientID: "nexara"}),
+			rdb: rdb, cfg: OIDCConfig{EmailClaim: "email"}, client: srv.Client(),
+		}
+
+		authURL, state, err := p.GenerateAuthURL(t.Context(), "0:digest")
+		if tc.stepUp != "" {
+			authURL, state, err = p.GenerateStepUpURL(t.Context(), "0:digest", tc.stepUp)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		u, _ := url.Parse(authURL)
+		nonce = u.Query().Get("nonce")
+		fresh := u.Query().Get("prompt") == "login" && u.Query().Get("max_age") == "0"
+		if fresh != (tc.stepUp != "") {
+			t.Errorf("%s: the URL asks for a fresh sign-in: %v", tc.name, fresh)
+		}
+		if _, peeked, _ := OIDCStatePeek(t.Context(), rdb, state); peeked != tc.stepUp {
+			t.Errorf("%s: the peek reads step-up %q, want %q", tc.name, peeked, tc.stepUp)
+		}
+		info, err := p.ExchangeAndVerify(t.Context(), "idp-code", state)
+		wantTime := time.Time{}
+		if tc.authTime != nil {
+			wantTime = authTime
+		}
+		if err != nil || info.StepUp != tc.stepUp || !info.AuthTime.Equal(wantTime) {
+			t.Errorf("%s: info %+v, err %v; want step-up %q, auth_time %v", tc.name, info, err, tc.stepUp, wantTime)
 		}
 	}
 }

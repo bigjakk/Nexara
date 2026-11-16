@@ -1128,6 +1128,7 @@ var (
 		"/api/v1/auth/register":                       true,
 		"/api/v1/auth/change-password":                true,
 		"/api/v1/auth/totp/setup":                     true,
+		"/api/v1/auth/totp/setup/sso-step-up":         true,
 		"/api/v1/auth/totp/verify-login":              true,
 		"/api/v1/auth/totp":                           true,
 		"/api/v1/auth/totp/recovery-codes/regenerate": true,

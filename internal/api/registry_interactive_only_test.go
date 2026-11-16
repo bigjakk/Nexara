@@ -64,6 +64,11 @@ var interactiveOnlyRoutes = []struct {
 		why:  "begin enrolling its own authenticator on an account that has none",
 	},
 	{
+		method: fiber.MethodPost, path: "/api/v1/auth/totp/setup/sso-step-up", handler: "TOTPHandler.BeginSSOStepUp", target: "/api/v1/auth/totp/setup/sso-step-up",
+		body: `{}`,
+		why:  "send the owner a confirmation link of its own making, the start of enrolling its own authenticator",
+	},
+	{
 		method: fiber.MethodPost, path: "/api/v1/auth/totp/setup/verify", handler: "TOTPHandler.ConfirmSetup", target: "/api/v1/auth/totp/setup/verify",
 		body: `{"code":"123456"}`,
 		why:  "turn 2FA on with its own authenticator and take the recovery codes, locking the owner out of login",
@@ -341,8 +346,8 @@ func TestGuard_InteractiveOnlyRoutesAreExactlyTheCredentialRoutes(t *testing.T) 
 	for _, r := range interactiveOnlyRoutes {
 		want[r.method+" "+r.path] = r.why
 	}
-	if len(want) != 14 {
-		t.Fatalf("interactiveOnlyRoutes lists %d routes, want the 14 this guard was written for: change-password, the four TOTP "+
+	if len(want) != 15 {
+		t.Fatalf("interactiveOnlyRoutes lists %d routes, want the 15 this guard was written for: change-password, the five TOTP "+
 			"credential routes, logout-all, the revoking of one session, the creation of an API key, and the account's own "+
 			"sessions list, profile, hub token, identity, 2FA status and console token", len(want))
 	}

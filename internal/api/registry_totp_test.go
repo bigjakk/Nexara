@@ -17,10 +17,10 @@ import (
 )
 
 // totpRouteCount is how many endpoints registerTOTPEndpoints declares. It is
-// ALL 7 of TOTPHandler's routes — the six under /auth/totp and the admin reset
+// ALL 8 of TOTPHandler's routes — the seven under /auth/totp and the admin reset
 // that hangs off /users/:id. See vmRouteCount in registry_vms_test.go for why
 // the registry total is a sum of per-domain constants.
-const totpRouteCount = 7
+const totpRouteCount = 8
 
 // totpAdminResetKey is the one route in this domain that acts on somebody else.
 const totpAdminResetKey = "DELETE /api/v1/users/:id/totp"
@@ -38,17 +38,19 @@ var totpLegacyPermissions = map[string]string{
 	"POST /api/v1/auth/totp/verify-login":              "",
 	"POST /api/v1/auth/totp/setup":                     "",
 	"POST /api/v1/auth/totp/setup/verify":              "",
+	"POST /api/v1/auth/totp/setup/sso-step-up":         "", // added after the migration, checking nothing either
 	"DELETE /api/v1/auth/totp":                         "",
 	"GET /api/v1/auth/totp/status":                     "",
 	"POST /api/v1/auth/totp/recovery-codes/regenerate": "",
 	totpAdminResetKey:                                  "manage:user",
 }
 
-// totpSelfServiceRoutes are the five routes that act on the CALLER's own
+// totpSelfServiceRoutes are the six routes that act on the CALLER's own
 // enrollment, with the property SelfService has to establish: the subject comes
 // from the session, so there is no parameter a caller could substitute.
 var totpSelfServiceRoutes = []string{
 	"POST /api/v1/auth/totp/setup",
+	"POST /api/v1/auth/totp/setup/sso-step-up",
 	"POST /api/v1/auth/totp/setup/verify",
 	"DELETE /api/v1/auth/totp",
 	"GET /api/v1/auth/totp/status",
@@ -61,6 +63,7 @@ var totpRoutesOutsideTheClusterCheckShape = map[string]string{
 	"POST /api/v1/auth/totp/verify-login":              "Public: the caller holds a pending login token, not a session",
 	"POST /api/v1/auth/totp/setup":                     "SelfService: the subject is the caller's own session",
 	"POST /api/v1/auth/totp/setup/verify":              "SelfService: the subject is the caller's own session",
+	"POST /api/v1/auth/totp/setup/sso-step-up":         "SelfService: the subject is the caller's own session",
 	"DELETE /api/v1/auth/totp":                         "SelfService: the subject is the caller's own session",
 	"GET /api/v1/auth/totp/status":                     "SelfService: the subject is the caller's own session",
 	"POST /api/v1/auth/totp/recovery-codes/regenerate": "SelfService: the subject is the caller's own session",

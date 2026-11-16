@@ -1226,6 +1226,14 @@ type TotpRecoveryCode struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type TotpStepUpProof struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Purpose   string    `json:"purpose"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 type UpsClient struct {
 	UpsID uuid.UUID `json:"ups_id"`
 	// A logged-in connection's address as upsd reports it, with an IPv6-mapped IPv4 address unmapped. upsmon only appears here once its LOGIN succeeds

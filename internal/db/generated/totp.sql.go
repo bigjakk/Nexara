@@ -21,6 +21,30 @@ func (q *Queries) ClearTOTPSecret(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const consumeTOTPStepUpProof = `-- name: ConsumeTOTPStepUpProof :execrows
+DELETE FROM totp_step_up_proofs
+WHERE session_id = $1
+  AND user_id = $2
+  AND purpose = $3::text
+  AND expires_at > now()
+`
+
+type ConsumeTOTPStepUpProofParams struct {
+	SessionID uuid.UUID `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Purpose   string    `json:"purpose"`
+}
+
+// Uses up session_id's proof for purpose, if it is the user's and still valid by the
+// database's clock: 1 row, the proof held and is gone; 0, there was none to use.
+func (q *Queries) ConsumeTOTPStepUpProof(ctx context.Context, arg ConsumeTOTPStepUpProofParams) (int64, error) {
+	result, err := q.db.Exec(ctx, consumeTOTPStepUpProof, arg.SessionID, arg.UserID, arg.Purpose)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countRecoveryCodes = `-- name: CountRecoveryCodes :one
 SELECT count(*) FROM totp_recovery_codes WHERE user_id = $1
 `
@@ -109,6 +133,53 @@ func (q *Queries) ListRecoveryCodes(ctx context.Context, userID uuid.UUID) ([]Li
 	return items, nil
 }
 
+const recordTOTPStepUpProof = `-- name: RecordTOTPStepUpProof :execrows
+INSERT INTO totp_step_up_proofs (session_id, user_id, purpose, expires_at)
+SELECT s.id, s.user_id, $1::text, now() + make_interval(secs => $2::float8)
+FROM sessions s JOIN users u ON u.id = s.user_id
+WHERE s.id = $3
+  AND s.user_id = $4
+  AND NOT s.is_revoked
+  AND s.expires_at > now()
+  AND u.is_active
+  AND to_timestamp($5::float8) >= now() - make_interval(secs => $6::float8)
+  AND to_timestamp($5::float8) <= now() + make_interval(secs => $7::float8)
+ON CONFLICT (session_id, purpose) DO UPDATE
+  SET user_id = EXCLUDED.user_id, created_at = now(), expires_at = EXCLUDED.expires_at
+`
+
+type RecordTOTPStepUpProofParams struct {
+	Purpose       string    `json:"purpose"`
+	TtlSeconds    float64   `json:"ttl_seconds"`
+	SessionID     uuid.UUID `json:"session_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	AuthTime      float64   `json:"auth_time"`
+	WindowSeconds float64   `json:"window_seconds"`
+	SkewSeconds   float64   `json:"skew_seconds"`
+}
+
+// Records that the person behind session_id has just signed in at the identity
+// provider again (the SSO step-up), for purpose, until ttl_seconds from now. Decided
+// here against the database's clock: only for a session that is the user's, live (not
+// revoked, not expired) and of an active user, and only when auth_time (the ID token's,
+// in Unix seconds) lies within window_seconds before now and skew_seconds after it. 0
+// rows: refused. A newer proof replaces an older one of the same session and purpose.
+func (q *Queries) RecordTOTPStepUpProof(ctx context.Context, arg RecordTOTPStepUpProofParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordTOTPStepUpProof,
+		arg.Purpose,
+		arg.TtlSeconds,
+		arg.SessionID,
+		arg.UserID,
+		arg.AuthTime,
+		arg.WindowSeconds,
+		arg.SkewSeconds,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setTOTPSecret = `-- name: SetTOTPSecret :exec
 UPDATE users SET totp_secret = $2 WHERE id = $1
 `
@@ -121,4 +192,24 @@ type SetTOTPSecretParams struct {
 func (q *Queries) SetTOTPSecret(ctx context.Context, arg SetTOTPSecretParams) error {
 	_, err := q.db.Exec(ctx, setTOTPSecret, arg.ID, arg.TotpSecret)
 	return err
+}
+
+const tOTPStepUpAuthTimeIsFresh = `-- name: TOTPStepUpAuthTimeIsFresh :one
+SELECT COALESCE(to_timestamp($1::float8) >= now() - make_interval(secs => $2::float8)
+   AND to_timestamp($1::float8) <= now() + make_interval(secs => $3::float8), false)::boolean AS fresh
+`
+
+type TOTPStepUpAuthTimeIsFreshParams struct {
+	AuthTime      float64 `json:"auth_time"`
+	WindowSeconds float64 `json:"window_seconds"`
+	SkewSeconds   float64 `json:"skew_seconds"`
+}
+
+// RecordTOTPStepUpProof's test of auth_time alone, to tell a refusal for a sign-in
+// that was not recent from one for a session that ended.
+func (q *Queries) TOTPStepUpAuthTimeIsFresh(ctx context.Context, arg TOTPStepUpAuthTimeIsFreshParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tOTPStepUpAuthTimeIsFresh, arg.AuthTime, arg.WindowSeconds, arg.SkewSeconds)
+	var fresh bool
+	err := row.Scan(&fresh)
+	return fresh, err
 }

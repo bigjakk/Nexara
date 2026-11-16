@@ -61,10 +61,31 @@ type epochStore struct {
 	// their default (ListDirectoryConfigsUsingRole).
 	roles     map[uuid.UUID]db.Role
 	roleUsers map[uuid.UUID][]db.ListDirectoryConfigsUsingRoleRow
+	// stepUpProofs are totp_step_up_proofs: the expiry of each, by session and purpose,
+	// for the user it holds.
+	stepUpProofs map[stepUpProofKey]stepUpProof
+}
+
+type stepUpProofKey struct {
+	session uuid.UUID
+	purpose string
+}
+
+type stepUpProof struct {
+	user    uuid.UUID
+	expires time.Time
+}
+
+// stepUpAuthTimeFresh is the SQL's test of a step-up's auth_time (Unix seconds) against
+// now: within window seconds before it and skew seconds after.
+func stepUpAuthTimeFresh(authTime, window, skew float64) bool {
+	at, now := time.Unix(int64(authTime), 0), time.Now()
+	return !at.Before(now.Add(-time.Duration(window*float64(time.Second)))) && !at.After(now.Add(time.Duration(skew*float64(time.Second))))
 }
 
 func newEpochStore(users ...db.User) *epochStore {
 	s := &epochStore{
+		stepUpProofs:  map[stepUpProofKey]stepUpProof{},
 		users:         map[uuid.UUID]*db.User{},
 		recoveryCodes: map[uuid.UUID][]db.ListRecoveryCodesRow{},
 		after:         map[string]func(*epochStore){},
@@ -273,6 +294,28 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "InsertAuditLog":
 		return s.insertAudit(args)
+	case "RecordTOTPStepUpProof":
+		// purpose, ttl_seconds, session_id, user_id, auth_time, window_seconds, skew_seconds;
+		// and the SQL's WHERE: the user's live session, an active user, a recent auth_time.
+		sid, uid := args[2].(uuid.UUID), args[3].(uuid.UUID)
+		u, ok := s.users[uid]
+		live := false
+		for _, sess := range s.sessions {
+			live = live || sess.ID == sid && sess.UserID == uid && !sess.IsRevoked && sess.ExpiresAt.After(time.Now())
+		}
+		if !ok || !u.IsActive || !live || !stepUpAuthTimeFresh(args[4].(float64), args[5].(float64), args[6].(float64)) {
+			return pgconn.NewCommandTag("INSERT 0 0"), nil
+		}
+		s.stepUpProofs[stepUpProofKey{sid, args[0].(string)}] = stepUpProof{uid, time.Now().Add(time.Duration(args[1].(float64)) * time.Second)}
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	case "ConsumeTOTPStepUpProof":
+		// session_id, user_id, purpose: the user's, unexpired.
+		key := stepUpProofKey{args[0].(uuid.UUID), args[2].(string)}
+		if p, ok := s.stepUpProofs[key]; !ok || p.user != args[1].(uuid.UUID) || !p.expires.After(time.Now()) {
+			return pgconn.NewCommandTag("DELETE 0"), nil
+		}
+		delete(s.stepUpProofs, key)
+		return pgconn.NewCommandTag("DELETE 1"), nil
 	case "DeleteRole":
 		delete(s.roles, args[0].(uuid.UUID))
 		return pgconn.NewCommandTag("DELETE 1"), nil
@@ -449,6 +492,8 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		}
 		s.syncLeased = true
 		return authFakeRow{value: *s.ldapConfig}
+	case "TOTPStepUpAuthTimeIsFresh":
+		return authFakeScalar{value: stepUpAuthTimeFresh(args[0].(float64), args[1].(float64), args[2].(float64))}
 	case "GetEnabledOIDCConfig", "GetOIDCConfig":
 		if s.oidcConfig == nil {
 			return authFakeRow{err: pgx.ErrNoRows}
@@ -717,6 +762,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	app.Get("/auth/oidc/callback", a.oidc.Callback)
 	if a.totp != nil {
 		app.Post("/auth/totp/verify-login", withRequestParams(t, totpVerifyLoginMirror(), nil, a.totp.VerifyLogin))
+		app.Post("/auth/totp/setup/sso-step-up", withRequestParams(t, apischema.Properties{}, nil, a.totp.BeginSSOStepUp))
 		app.Post("/auth/totp/setup", withRequestParams(t, apischema.Properties{
 			"current_password": {Type: apischema.String, Optional: true},
 		}, nil, a.totp.BeginSetup))
