@@ -1,6 +1,10 @@
 package auth
 
 import (
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +14,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/oauth2"
 
@@ -64,5 +70,49 @@ func TestExchangeAndVerify_PostsTheCodeThroughTheProvidersClient(t *testing.T) {
 
 	if !errors.Is(err, ErrOIDCTokenExchange) || !strings.Contains(err.Error(), "connection blocked") || reached.Load() {
 		t.Errorf("err = %v, token endpoint reached: %v; want the dial refused and nothing sent", err, reached.Load())
+	}
+}
+
+// TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified: the check runs on the
+// verified ID token's claims, for an otherwise good sign-in; the same token saying true
+// signs in.
+func TestExchangeAndVerify_RefusesAnIDTokenWhoseEmailIsNotVerified(t *testing.T) {
+	t.Parallel()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, verified := range []bool{false, true} {
+		var issuer string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			idToken, _ := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+				"iss": issuer, "aud": "nexara", "sub": "alice", "nonce": "nonce",
+				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Unix(),
+				"email": "alice@example.com", "email_verified": verified,
+			}).SignedString(key)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at", "token_type": "Bearer", "id_token": idToken})
+		}))
+		t.Cleanup(srv.Close)
+		issuer = srv.URL
+		mr := miniredis.RunT(t)
+		rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		t.Cleanup(func() { _ = rdb.Close() })
+		if err := mr.Set(oidcStateKey("state"), "nonce|verifier|digest"); err != nil {
+			t.Fatal(err)
+		}
+		p := &OIDCProvider{
+			oauth2Cfg: oauth2.Config{ClientID: "nexara", Endpoint: oauth2.Endpoint{TokenURL: srv.URL + "/token"}},
+			verifier: oidc.NewVerifier(srv.URL, &oidc.StaticKeySet{PublicKeys: []crypto.PublicKey{&key.PublicKey}},
+				&oidc.Config{ClientID: "nexara"}),
+			rdb: rdb, cfg: OIDCConfig{EmailClaim: "email"}, client: srv.Client(),
+		}
+
+		info, err := p.ExchangeAndVerify(t.Context(), "idp-code", "state")
+
+		var unverified *OIDCEmailNotVerifiedError
+		if refused := errors.As(err, &unverified); refused == verified || verified && info == nil {
+			t.Errorf("email_verified %v: info %+v, err %v; want a refusal only when false", verified, info, err)
+		}
 	}
 }
