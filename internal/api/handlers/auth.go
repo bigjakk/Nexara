@@ -1133,6 +1133,8 @@ func ldapFailureClass(err error) string {
 		return "service_bind_failed"
 	case errors.Is(err, auth.ErrLDAPSearchFailed):
 		return "search_failed"
+	case errors.Is(err, auth.ErrLDAPFilterInvalid):
+		return "filter_invalid"
 	case errors.Is(err, auth.ErrLDAPUserNotFound):
 		return "user_not_found"
 	case errors.Is(err, auth.ErrLDAPUserBindFailed):

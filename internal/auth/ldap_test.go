@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,5 +105,38 @@ func TestFillGroups_AFailedGroupSearchIsNotNoGroups(t *testing.T) {
 		if u.GroupLookupFailed != tc.failed || len(u.Groups) != tc.groups {
 			t.Errorf("search err %v, %d entries: failed %t, %d groups; want %t, %d", tc.dir.err, len(tc.dir.entries), u.GroupLookupFailed, len(u.Groups), tc.failed, tc.groups)
 		}
+	}
+}
+
+// TestValidateFilters_AFilterGoLDAPNoLongerCompilesIsNamed: go-ldap v3.4.15 refuses a set or a
+// nested filter that does not end in ")", which v3.4.14 skipped, so a filter stored before the
+// upgrade can stop compiling. It is reported as ErrLDAPFilterInvalid, naming the field, at save,
+// at sign-in (searchUser) and at sync, rather than as a search that found nobody.
+func TestValidateFilters_AFilterGoLDAPNoLongerCompilesIsNamed(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		user, group string
+		field       string // "" when both compile
+	}{
+		{"(|(uid={{username}})(mail={{username}}))", "(member={{userDN}})", ""},
+		{"(|(uid={{username}})(mail={{username}})x", "", "user_filter"}, // a stray byte where ")" belongs
+		{"((uid={{username}})]", "", "user_filter"},
+		{"(uid={{username}})", "(&(member={{userDN}})(objectClass=group)!", "group_filter"},
+	} {
+		err := ValidateFilters(tc.user, tc.group)
+		if tc.field == "" {
+			if err != nil {
+				t.Errorf("%q, %q: %v, want both to compile", tc.user, tc.group, err)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrLDAPFilterInvalid) || !strings.Contains(err.Error(), tc.field) {
+			t.Errorf("%q, %q: %v, want ErrLDAPFilterInvalid naming %s", tc.user, tc.group, err, tc.field)
+		}
+	}
+	// The sign-in's search says the same before it asks any directory (a nil conn).
+	c := NewLDAPClient(LDAPConfig{UserFilter: "(|(uid={{username}})(mail={{username}})x"})
+	if _, err := c.searchUser(nil, "alice"); !errors.Is(err, ErrLDAPFilterInvalid) {
+		t.Errorf("searchUser = %v, want ErrLDAPFilterInvalid", err)
 	}
 }

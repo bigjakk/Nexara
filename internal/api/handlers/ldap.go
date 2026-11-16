@@ -594,6 +594,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
 		return fiber.NewError(fiber.StatusBadGateway, "The directory could not be searched, so the sync stopped and nobody was deactivated by it. "+
 			classifyLDAPError(err))
+	case errors.Is(err, auth.ErrLDAPFilterInvalid):
+		return fiber.NewError(fiber.StatusUnprocessableEntity, "The sync did not run, so nobody was deactivated by it: "+
+			strings.TrimPrefix(err.Error(), "ldap: ")+". Correct the filter in the directory settings and save them.")
 	default:
 		slog.Error("LDAP sync failed", "config_id", id, "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "The sync failed; the server log has the reason.")
@@ -751,6 +754,11 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 	ldapCfg, err := h.buildLDAPConfig(cfg)
 	if err != nil {
 		return res, fmt.Errorf("build the LDAP config: %w", err)
+	}
+	// A filter that does not compile would fail every search, and each account
+	// would only be skipped: the sync stops instead, and says why.
+	if err := auth.ValidateFilters(cfg.UserFilter, cfg.GroupFilter); err != nil {
+		return res, err
 	}
 	var client ldapDirectory = auth.NewLDAPClient(ldapCfg)
 	if h.directory != nil {
@@ -1099,6 +1107,8 @@ func classifyLDAPError(err error) string {
 		return "Search failed. Verify the search base DN exists and the bind account has read permissions."
 	case errors.Is(err, auth.ErrLDAPUserBindFailed):
 		return "User found but password is incorrect."
+	case errors.Is(err, auth.ErrLDAPFilterInvalid):
+		return "The user filter or the group filter is not a valid LDAP filter. Correct it and save the settings again."
 	default:
 		return "LDAP operation failed. Check server logs for details."
 	}
@@ -1111,7 +1121,7 @@ func validateLDAPFilters(userFilter, groupFilter string) error {
 	if groupFilter != "" && !strings.Contains(groupFilter, "{{userDN}}") {
 		return fmt.Errorf("group_filter must contain the {{userDN}} placeholder")
 	}
-	return nil
+	return auth.ValidateFilters(userFilter, groupFilter)
 }
 
 // ldapTransportProtected reports whether a config encrypts its connection at

@@ -19,7 +19,37 @@ var (
 	ErrLDAPUserNotFound    = errors.New("ldap: user not found")
 	ErrLDAPSearchFailed    = errors.New("ldap: search failed")
 	ErrLDAPUserBindFailed  = errors.New("ldap: user password incorrect")
+	// ErrLDAPFilterInvalid is a user or group filter that go-ldap cannot compile,
+	// which no directory is ever asked: go-ldap v3.4.15 compiles more strictly than
+	// v3.4.14 did (a set or a nested filter must end in ")"), so a filter stored
+	// before the upgrade may be one.
+	ErrLDAPFilterInvalid = errors.New("ldap: the filter is not a valid LDAP filter")
 )
+
+// ValidateFilters reports the first of the two filter templates that does not
+// compile, with its placeholder filled in, as ErrLDAPFilterInvalid; an empty one is
+// not checked. The value filled in is escaped (ldap.EscapeFilter) as a sign-in's is,
+// and an escaped value adds no structure, so the template alone decides. The error
+// names the field and go-ldap's reason, and nothing typed into a sign-in form.
+func ValidateFilters(userFilter, groupFilter string) error {
+	for _, f := range []struct{ field, filter, placeholder, sample string }{
+		{"user_filter", userFilter, "{{username}}", "alice"},
+		{"group_filter", groupFilter, "{{userDN}}", "uid=alice,dc=example,dc=com"},
+	} {
+		if f.filter == "" {
+			continue
+		}
+		_, err := ldap.CompileFilter(strings.ReplaceAll(f.filter, f.placeholder, ldap.EscapeFilter(f.sample)))
+		if err != nil {
+			var le *ldap.Error
+			if errors.As(err, &le) && le.Err != nil {
+				err = le.Err
+			}
+			return fmt.Errorf("%w: %s: %v", ErrLDAPFilterInvalid, f.field, err)
+		}
+	}
+	return nil
+}
 
 // LDAPConfig holds the configuration for connecting to an LDAP/AD server.
 type LDAPConfig struct {
@@ -221,10 +251,17 @@ func (c *LDAPClient) fillGroups(conn ldap.Client, user *LDAPUser, rebind bool) {
 		}
 	}
 	groups, err := c.getUserGroups(conn, user.DN)
+	if errors.Is(err, ErrLDAPFilterInvalid) {
+		slog.Warn("ldap: the stored group filter is not a valid LDAP filter, so no group search can run; "+
+			"the account's roles are left as they are", "error", err)
+	}
 	user.Groups, user.GroupLookupFailed = groups, err != nil
 }
 
 func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, error) {
+	if err := ValidateFilters(c.cfg.UserFilter, ""); err != nil {
+		return nil, err
+	}
 	filter := strings.ReplaceAll(c.cfg.UserFilter, "{{username}}", ldap.EscapeFilter(username))
 
 	attrs := []string{"dn", c.cfg.UsernameAttribute, c.cfg.EmailAttribute, c.cfg.DisplayNameAttribute}
@@ -266,6 +303,9 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 func (c *LDAPClient) getUserGroups(conn ldap.Client, userDN string) ([]string, error) {
 	if c.cfg.GroupSearchBaseDN == "" || c.cfg.GroupFilter == "" {
 		return nil, nil
+	}
+	if err := ValidateFilters("", c.cfg.GroupFilter); err != nil {
+		return nil, err
 	}
 
 	filter := strings.ReplaceAll(c.cfg.GroupFilter, "{{userDN}}", ldap.EscapeFilter(userDN))
