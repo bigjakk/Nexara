@@ -18,18 +18,10 @@ import {
 import type { LDAPConfig } from "@/types/api";
 import { LDAPPage } from "./LDAPPage";
 
-/**
- * Saving an LDAP configuration opts out of the global error toast
- * (useCreateLDAPConfig, useUpdateLDAPConfig), because the open form shows the
- * failure itself. Cancel does not wait for the request, so the form can be gone
- * — closed, replaced by another config's, or the page left — when it fails. The
- * failure is then a toast naming the configuration, unless the session has
- * ended too (hooks/useSaveOutcome.ts); a success that comes after the form is
- * gone closes nothing.
- *
- * These run on the app's own kind of client, whose mutation cache is the one
- * that raises the global toast, so that "once" means once and "none" means none.
- */
+// An LDAP save opts out of the global toast because the open form shows the failure; Cancel
+// does not wait, so a failure after the form is gone is a toast naming the configuration
+// (unless the session ended: hooks/useSaveOutcome.ts), and a late success closes nothing.
+// On the app's kind of client, so "once" means once and "none" means none.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

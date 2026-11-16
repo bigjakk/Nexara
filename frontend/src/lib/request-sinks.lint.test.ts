@@ -4,18 +4,10 @@ import { Linter } from "eslint";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-/**
- * The ESLint half of "every request goes through lib/api-client.ts": the
- * block in eslint.config.js that refuses fetch and XMLHttpRequest everywhere
- * else. A lint rule nothing trips is indistinguishable from one that was
- * deleted or scoped to no file, and the shipped tree trips neither of these
- * — so each spelling of a bypass is linted here with the block as committed,
- * and required to come back with exactly the rule that owns it.
- *
- * Only that block is run, over a parser with no type information: its two
- * rules read scope and syntax, not types, and the project's typed rules would
- * need a real file inside the TypeScript project.
- */
+// The ESLint half of "every request goes through lib/api-client.ts": a lint rule nothing
+// trips looks the same as a deleted one, so each spelling of a bypass is linted here with
+// the committed block and must come back with exactly the rule that owns it. Only that block
+// runs, untyped: its two rules read scope and syntax, not types.
 
 const loaded = import.meta.glob<{ default: Linter.Config[] }>(
   "/eslint.config.js",

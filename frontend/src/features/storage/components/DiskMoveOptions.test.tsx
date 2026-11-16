@@ -3,18 +3,10 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { DiskMoveOptions } from "./DiskMoveOptions";
 
-/**
- * The delete-source control is the one option here with a destructive meaning
- * that VARIES by caller: for a disk move it drops the source volume, for a
- * cross-cluster migration it destroys the source guest, and for a plain
- * node-to-node migration it means nothing at all — the backend never reads it.
- *
- * It was rendered unconditionally until a user asked why a same-cluster live
- * migration offered to delete a source that does not exist. These two cases pin
- * the visibility contract so the default stays "show" for the per-disk dialogs
- * that depend on it (see DiskActions.test.tsx) while the migration dialogs can
- * opt out.
- */
+// Delete-source means a different destructive thing per caller (the source volume on a disk
+// move, the source guest on a cross-cluster migration) and nothing on a node-to-node one.
+// These pin that it shows by default, for the per-disk dialogs (DiskActions.test.tsx), and
+// that the migration dialogs can hide it.
 const baseProps = {
   idPrefix: "test",
   hideFormat: true,

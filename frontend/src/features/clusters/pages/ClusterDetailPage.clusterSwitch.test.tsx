@@ -17,20 +17,11 @@ import { useAuthStore } from "@/stores/auth-store";
 import type { ClusterResponse, HealthIssue } from "@/types/api";
 import { ClusterDetailPage } from "./ClusterDetailPage";
 
-/**
- * The route clusters/:clusterId is one page across every cluster, and the
- * ?tab= that the search bar's shortcuts leave in the URL keeps the same tab
- * selected through a move from one cluster to another. These run the real page
- * and real tab components through a real router, and move the page from one
- * cluster to the next the way the search bar and the browser's Back button do,
- * to show that what a tab holds — a note typed into a form, a confirmation left
- * open — does not go with it. What the page keeps is in the last block.
- *
- * They run the page in a bare router. In the app the shell rebuilds the whole
- * page when the pathname changes (AppShell keys its error boundary on it), so
- * it would have been rebuilt anyway; here the page has only its own key to
- * stand on, which is what is being tested.
- */
+// clusters/:clusterId is one page across every cluster, and ?tab= keeps the tab through a move
+// to another; these move the real page the way the search bar and Back do, to show what a tab
+// holds (a typed note, an open confirmation) does not go with it. In a bare router: in the app
+// the shell would rebuild the page anyway (AppShell keys on the pathname), so here the page's
+// own key is all that stands, which is what is tested. What the page keeps is the last block.
 
 // Tabs this page imports and these tests never show.
 vi.mock("../components/ClusterCephTab", () => ({

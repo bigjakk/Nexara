@@ -8,20 +8,11 @@ import {
   type ScheduledTask,
 } from "./vm-queries";
 
-// A dispatched run settles on the server after its task's own task_update: the
-// collector marks the task finished first, and the scheduler's reconcile tick
-// rewrites the row after that, announcing it as schedule_change. That event is
-// what normally refreshes the tab; while a row is in flight the list also
-// re-reads itself, as the fallback for an event lost on the way. The polling
-// must stop once every row has settled — a tab left open would otherwise poll
-// forever — and thirty minutes after the view first saw a run in flight,
-// timed on the browser's clock so a skewed server clock cannot move it.
-//
-// setInterval and Date are faked: the first is what TanStack's
-// refetchInterval runs on, the second the clock the polling limit is timed
-// on. Both are installed before the hook mounts, because TanStack re-arms the
-// interval through the global setInterval on every update. RTL's waitFor polls
-// on setInterval too, so the waiting here is done on setTimeout instead.
+// A dispatched run's row settles after its task's task_update, announced as schedule_change;
+// while a row is in flight the list also re-reads itself, as a fallback for a lost event. The
+// polling must stop once every row settles, and thirty minutes after the view first saw one
+// in flight, on the browser's clock. setInterval and Date are faked before the hook mounts
+// (TanStack re-arms on the global setInterval), so the waiting here uses setTimeout.
 
 const CLUSTER = "c1";
 const LIST = `/api/v1/clusters/${CLUSTER}/schedules`;

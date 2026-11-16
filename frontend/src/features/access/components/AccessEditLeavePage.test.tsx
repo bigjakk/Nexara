@@ -16,24 +16,11 @@ import { DENIED, flushInAct, renderOnAppClient } from "@/test/save-outcome-kit";
 import type { AccessCapabilities } from "../api/access-queries";
 import { AccessUsersSection } from "./AccessUsersSection";
 
-/**
- * When a save from the Edit User dialog fails after the dialog is gone, the
- * dialog toasts it (AccessUsersSection.test.tsx). It knows it is gone from a
- * flag that has to be cleared by the commit that removes it, not by the passive
- * effects that follow. A navigation runs in a transition (React Router's
- * RouterProvider sets its state in startTransition), and after such a commit
- * the scheduler yields for a paint, so the commit's passive effects run a task
- * later: a request that settles in between finds the dialog off the page and a
- * flag cleared by a passive cleanup still set.
- *
- * That gap cannot be reached through the real dialog. Radix's Dialog, and its
- * Presence and FocusScope each on their own, schedule a sync update when they
- * unmount (their ref callbacks set state to null), and React flushes a commit's
- * passive effects inside the commit when a sync update is pending, so no
- * promise can settle before them. Nothing in the app should lean on that, so
- * this file stands the dialog in with plain elements, which leaves the flag as
- * the only thing that decides the outcome.
- */
+// A save that fails after the Edit User dialog is gone is toasted, and "gone" is a flag the
+// removing commit must clear, not a passive cleanup: after a transition's commit (a router
+// navigation) the passive effects run a task later, and a request can settle in between. The
+// real Radix dialog hides that gap (its sync updates flush the effects inside the commit), so
+// this file stands it in with plain elements, leaving the flag the only thing that decides.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

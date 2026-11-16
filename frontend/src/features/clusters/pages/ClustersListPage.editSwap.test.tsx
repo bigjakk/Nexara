@@ -20,19 +20,10 @@ import {
 import type { ClusterResponse } from "@/types/api";
 import { ClustersListPage } from "./ClustersListPage";
 
-/**
- * The Edit Cluster dialog is not held while its request is out, and the button
- * that sent it is disabled by the request, so focus is lost and Tab walks out of
- * the modal to the Edit buttons behind it, which a pointer cannot reach. Enter on
- * another cluster's puts its dialog where the first was, with nothing closed
- * between the two (EditClusterDialog.tsx; hooks/useSaveOutcome.ts).
- *
- * The dialog seeds its form from its props once and reads the error of its save
- * from state it keeps, so the page keys it on the cluster: the second is then a
- * dialog of its own, with its own form, and nothing of the first's save in it.
- * Unkeyed, it would be the first dialog with another cluster's name in its
- * heading.
- */
+// The Edit Cluster dialog is not held while its request is out, so focus can Tab out of the
+// modal and Enter on another cluster's Edit button puts its dialog where the first was, with
+// nothing closed between. The dialog seeds its form once and keeps its save's error, so the
+// page keys it on the cluster; unkeyed, it would be the first dialog under another name.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

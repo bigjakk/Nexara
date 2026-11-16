@@ -10,20 +10,10 @@ import {
   unaddressableHint,
 } from "./api-path";
 
-/**
- * The oracle for every refusal here is the URL parser a browser runs, not a
- * restatement of the rule in api-path.ts. `URL` in this environment is NOT
- * jsdom's own: vitest's jsdom environment (4.1.11) replaces it with a
- * subclass of node:url's URL, which is Node's implementation of the WHATWG
- * URL Standard — the standard fetch and XMLHttpRequest apply to a request's
- * URL before sending it. The same behaviour was measured on the wire with
- * Node 20's fetch, and a review found no disagreement against whatwg-url
- * (16.0.1), the standard's reference implementation, either.
- *
- * The question asked of the parser is the one that matters: does a value,
- * encoded the way the SPA always encoded path values, still arrive as the
- * one segment it was put in as?
- */
+// The oracle for every refusal is the browser's URL parser, not a restatement of the rule:
+// vitest's jsdom URL is node:url's WHATWG implementation, which fetch and XMLHttpRequest
+// apply before sending (also checked on the wire and against whatwg-url). The question is
+// whether a value encoded as the SPA encodes it still arrives as the one segment it was.
 const BASE = "http://nexara.example.com";
 const CLUSTER = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
 const PREFIX = `/api/v1/clusters/${CLUSTER}/pools/`;

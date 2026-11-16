@@ -5,21 +5,11 @@ import { render, screen } from "@testing-library/react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
-/**
- * Guard tests for the dialog primitives, in the spirit of
- * internal/api/handlers/tracktask_guard_test.go — encode the invariant so the
- * next person can't quietly break it.
- *
- * DialogContent/AlertDialogContent carry `max-h-[85vh] overflow-y-auto` in
- * their base class string, so any dialog taller than the viewport scrolls
- * instead of spilling off-screen unreachably (it is fixed-position and centred
- * via translate-y-[-50%], so there is nothing to scroll without this).
- *
- * jsdom does no layout and loads no CSS, so we cannot assert that a dialog
- * actually scrolls. What we CAN pin down are the two things that silently
- * un-fix all ~138 call sites: the tailwind-merge conflict groups, and call
- * sites that disable the scroll without capping their own height.
- */
+// DialogContent and AlertDialogContent carry `max-h-[85vh] overflow-y-auto`, so a dialog
+// taller than the viewport scrolls instead of spilling off-screen (it is fixed and centred).
+// jsdom does no layout, so this pins the two things that silently undo it at every call
+// site: the tailwind-merge conflict groups, and a call site that drops the scroll without
+// capping its own height.
 
 // Vite resolves a leading-slash glob against its root (frontend/), so this can
 // never reach the stale copies of the tree that live in git worktrees under

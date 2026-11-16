@@ -10,23 +10,11 @@ import { installFakeServer } from "@/test/fake-server";
 import { renderOnAppClient } from "@/test/save-outcome-kit";
 import { AppShell } from "./AppShell";
 
-/**
- * What the app shell does to a page when the route changes under it. The
- * detail pages are one route across many ids (clusters/:clusterId,
- * clusters/:clusterId/nodes/:nodeId, inventory/:kind/:clusterId/:vmId,
- * storage/:clusterId/:storageId, …), and each holds dialogs, drafts and saves
- * in flight in local state, most of it not keyed on the id. Left in place, such
- * a page would show, or send, what it holds against the next id.
- *
- * The shell is what stops that, once for all of them: it keys its error
- * boundary on the pathname (AppShell.tsx), so a move to another id builds the
- * page anew. The key was put there so that a crashed route would not hold the
- * next one hostage; this is its second job, and no other test pins it.
- * ClusterDetailPage keys its header, banner and tabs on the cluster as well, so
- * that it does not depend on this.
- *
- * These run the real shell around a page that holds one piece of local state.
- */
+// A detail page is one route across many ids and holds dialogs, drafts and saves in local
+// state not keyed on the id; left mounted, it would show or send them against the next id.
+// The shell keys its error boundary on the pathname (AppShell.tsx), so a move to another id
+// builds the page anew; no other test pins that second job of the key. These run the real
+// shell around a page with one piece of local state.
 
 function Page() {
   const { clusterId } = useParams();

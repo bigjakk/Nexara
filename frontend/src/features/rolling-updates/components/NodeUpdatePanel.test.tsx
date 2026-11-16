@@ -151,18 +151,10 @@ describe("NodeUpdatePanel", () => {
     });
   });
 
-  /**
-   * THE ORPHAN-JOB REGRESSION. The panel lives inside a Radix tab, which
-   * unmounts it the moment the operator switches tabs — and TanStack only runs
-   * per-call mutation callbacks while the observer still has listeners. When
-   * the start was chained through the create's `onSuccess`, switching tabs
-   * during the POST left the job created and never started.
-   *
-   * A 'pending' job counts as active in HasRunningJobForCluster, so that orphan
-   * makes every later rolling update on the cluster — this panel and the
-   * cluster-wide wizard both — refuse with "already active", until someone
-   * finds and cancels a job they never knew existed.
-   */
+  // The orphan-job regression: the panel sits in a Radix tab that unmounts it on a tab
+  // switch, and TanStack drops per-call callbacks without listeners, so a start chained on the
+  // create's onSuccess left the job created and never started. A pending job counts as active,
+  // so every later rolling update on the cluster then refused (rolling-update-queries.ts).
   it("still starts the job when the panel unmounts mid-flight", async () => {
     serveReady();
     let releaseCreate: (v: { id: string }) => void = () => undefined;

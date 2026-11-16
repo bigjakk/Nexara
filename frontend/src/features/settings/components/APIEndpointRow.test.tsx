@@ -559,22 +559,10 @@ describe("APIEndpointRow", () => {
     });
 
     it("keeps the description a separate node from the type in the list", () => {
-      // The JSX-whitespace trap: a bare {param.description} beside
-      // ParameterShape's leading inline <span> renders
-      // "Snapshot name.string" with no space, on every phone-width view
-      // of every migrated endpoint.
-      //
-      // The assertion is STRUCTURAL, and both of the obvious
-      // alternatives are blind to it. textContent concatenates across
-      // element boundaries with no separator, so it reads
-      // "Snapshot name.string" whether or not the fix is in place. And
-      // Testing Library's getNodeText concatenates only a node's DIRECT
-      // text children, so a bare getByText("Snapshot name.") matches the
-      // glued <dd> just as happily as the fixed <div>.
-      //
-      // What actually distinguishes them is WHICH element owns the text:
-      // its own block, or the <dd> itself with the type's inline <span>
-      // hard up against it.
+      // The JSX-whitespace trap: a bare {param.description} beside ParameterShape's inline <span>
+      // renders "Snapshot name.string". textContent and getByText are both blind to it (they
+      // concatenate without separators, or read only direct text), so the assertion is on which
+      // element owns the text: a block of its own, not the <dd> glued to the type's <span>.
       const { container } = renderRow(constrained, true);
       const dd = container.querySelector("dl dd");
       expect(dd).not.toBeNull();

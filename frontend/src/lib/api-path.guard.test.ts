@@ -2,48 +2,11 @@
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
 
-/**
- * Keeps every API path on apiPath (lib/api-path.ts).
- *
- * apiClient, apiFetch and openApiRequest only accept an ApiPath, so the type
- * checker already refuses a plain string there; each re-checks the path at
- * runtime (assertApiPath) before anything is sent, because the brand is a
- * type only; and ESLint refuses fetch and XMLHttpRequest anywhere but
- * lib/api-client.ts (eslint.config.js; request-sinks.lint.test.ts shows each
- * spelling reported), so no fetch or XHR leaves around them — and the XHR
- * openApiRequest returns cannot be re-opened: open() is left out of its
- * type, and the request's own open() throws for a caller who casts past that
- * (api-client.test.ts). What none of those can see is a path built for some
- * other use, or a cast to ApiPath or never. This scan reads the source, not
- * the types, and fails on:
- *
- *   1. a template literal, not tagged apiPath, with "/api/" anywhere in its
- *      fixed text — unless that text starts with a URL scheme and a literal
- *      host, as someone else's URL does (https://hooks.example.com/api/…);
- *      a host that is interpolated (`https://${location.host}/api/…`) may
- *      be this one, so it is not exempt;
- *   2. an apiPath template that does not start with a literal "/api/";
- *   3. an apiPath template the tag would refuse for its own fixed text: an
- *      interpolation before the "?" that is not a whole segment, a path that
- *      ends in "/", an empty or dot segment ("." or ".." or "%2e" in either
- *      case), or a "#", backslash, space or control character anywhere in the
- *      fixed text (the tag throws on each at runtime; this finds it without
- *      running it);
- *   4. a "+" that appends anything but a literal after a literal starting
- *      with "/api/";
- *   5. a type assertion to ApiPath — under its own name or any local alias —
- *      or to never, anywhere but lib/api-path.ts itself.
- *
- * A URL the browser loads by itself — a WebSocket's, window.open's, an href
- * or src — goes through neither the brand nor assertApiPath: rules 1 and 4
- * are all that hold a path built for one, and only when its fixed text shows
- * "/api/". A template such as `${base}/pools/${id}` shows none, and nothing
- * here catches it; sent with fetch or an XHR it still meets the brand,
- * ESLint and assertApiPath.
- *
- * Test files are not scanned: they build paths as expected values on
- * purpose, and api-path.test.ts writes deliberately broken templates.
- */
+// Keeps every API path on apiPath (lib/api-path.ts): the brand, assertApiPath and the
+// fetch/XHR lint cannot see a path built for another use, or a cast to ApiPath or never. This
+// reads source (not tests) for the five shapes below. Limit: a URL the browser loads itself
+// (WebSocket, window.open, href) meets only rules 1 and 4, and only when its fixed text shows
+// "/api/"; `${base}/pools/${id}` is not caught.
 
 // Vite resolves a leading-slash glob against its root (frontend/), so this can
 // never reach the stale copies of the tree that live in git worktrees under

@@ -20,22 +20,11 @@ import {
 import type { ClusterResponse } from "@/types/api";
 import { ClustersListPage } from "./ClustersListPage";
 
-/**
- * The Delete Cluster dialog keeps what the operator typed and ticked in state of
- * its own: the cluster's name, and "also delete the Proxmox user and API token
- * Nexara created for this cluster", which is off until they turn it on and which
- * makes the delete remove that user and token from the cluster's Proxmox.
- *
- * It is not held while its request is out, and the button that sent it is
- * disabled by the request, so focus is lost and Tab walks out of the modal to the
- * Delete buttons behind it, which a pointer cannot reach. Enter on another
- * cluster's puts its dialog where the first was, with nothing closed between the
- * two. The page keys the dialog on the cluster, so the second is a dialog of its
- * own, with the defaults of a new one. Unkeyed, it would be the first dialog with
- * another cluster's name in its text, and the tick still on: and confirming it
- * would delete the second cluster's Proxmox user and token on the strength of a
- * choice made for the first.
- */
+// The Delete Cluster dialog keeps the typed name and the "also delete Nexara's Proxmox user
+// and token" tick in its own state, and is not held while its request is out, so Enter on
+// another cluster's Delete can put its dialog where the first was. The page keys it on the
+// cluster; unkeyed, the tick would carry over, and confirming would delete the second
+// cluster's Proxmox user and token on a choice made for the first.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

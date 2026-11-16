@@ -4,29 +4,11 @@ import ts from "typescript";
 import { Linter } from "eslint";
 import tseslint from "typescript-eslint";
 
-/**
- * What the request-sink block in eslint.config.js cannot hold by itself,
- * held by reading the source:
- *
- *   - every eslint-disable of one of its rules — or of no-namespace, which is
- *     what keeps out the one scope where its ambient-declaration check has to
- *     look inside a block — and every blanket eslint-disable, is refused
- *     unless it is on the reviewed list below: a rule that any line can
- *     switch off is only as strong as the review of that line, so each
- *     exemption has to arrive as a diff to this file;
- *   - production code may not reach test code (which the block exempts)
- *     through any specifier that has to be resolved to be judged, through
- *     import.meta.glob, or through a new URL(…, import.meta.url);
- *   - the block has to be the configuration in force, and reach every source
- *     file: the lint script pins it, no other eslint.config.* exists under
- *     frontend/, and src holds no file of an extension it does not lint;
- *   - the type-only imports it allows are erased, which holds while tsconfig
- *     leaves verbatimModuleSyntax off.
- *
- * Directives are read by ESLint itself (SourceCode#getDisableDirectives and
- * #applyInlineConfig), so what counts as one here is exactly what counts as
- * one when the linter runs — a directive quoted inside a string is not one.
- */
+// What eslint.config.js's request-sink block cannot hold by itself, held by reading source:
+// a disable of its rules (or no-namespace, or a blanket one) only from the reviewed list
+// below; no reach from production into test code; the block is the configuration in force
+// over every source file; and allowed type-only imports stay erased (verbatimModuleSyntax
+// off). Directives are read by ESLint itself, so a quoted one is not counted.
 
 const sources: Record<string, string> = import.meta.glob(
   "/src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",

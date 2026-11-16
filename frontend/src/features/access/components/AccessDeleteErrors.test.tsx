@@ -9,17 +9,10 @@ import type { AccessCapabilities } from "../api/access-queries";
 import { AccessGroupsSection } from "./AccessGroupsSection";
 import { AccessRolesSection } from "./AccessRolesSection";
 
-/**
- * A failed group or role delete reaches the operator through one toast and
- * nothing else: the confirmation closes whatever the outcome, and neither
- * section has anywhere to show a delete's error. Their hooks opt out of the
- * global toast (a 409 opens the self-credential override instead), so the
- * section raises it; opting out without that would make the failure silent.
- *
- * These run on the app's own kind of client (test/app-query-client.ts), whose
- * mutation cache is the one that would raise a second, global toast.
- * renderWithProviders' client has none.
- */
+// A failed group or role delete reaches the operator through one toast and nothing else: the
+// confirmation closes either way and neither section shows a delete's error. Their hooks opt
+// out of the global toast (a 409 opens the self-credential override), so the section raises
+// it. On the app's kind of client, whose mutation cache would raise a second, global toast.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

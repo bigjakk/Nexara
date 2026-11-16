@@ -1,27 +1,10 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest";
 
-/**
- * Guard test, in the spirit of dialog.guard.test.tsx and
- * internal/api/handlers/tracktask_guard_test.go — encode the invariant so the
- * next person cannot quietly break it.
- *
- * A `<Button>` whose only child is a Lucide icon has NO accessible name.
- * Lucide renders `<svg aria-hidden="true">`, so the icon contributes nothing,
- * and a screen reader announces a bare "button". For a pager that means two
- * adjacent controls that are announced identically and cannot be told apart.
- *
- * Scoped to the shadcn `<Button>`, which is what every table row action and
- * toolbar control in this codebase uses. Deliberately NOT the lowercase
- * `<button>`: the sidebar trees use it for their expand toggles, and those want
- * the node's name plus aria-expanded rather than a static label — a different
- * fix, and failing this test would be the wrong way to ask for it.
- *
- * `title` counts. It is a weaker name than aria-label — announced
- * inconsistently, and invisible on touch — but the accessible-name algorithm
- * does fall back to it, so a button carrying one is named. Converting those
- * remains worthwhile; failing this test is not how to ask for it either.
- */
+// A shadcn <Button> whose only child is a Lucide icon has no accessible name (the svg is
+// aria-hidden), so a screen reader announces a bare "button". Not the lowercase <button>:
+// the sidebar trees' toggles want the node's name and aria-expanded instead (policed
+// below). `title` counts, as the accessible-name algorithm falls back to it.
 
 // A leading-slash glob resolves against Vite's root (frontend/), so it can
 // never reach the stale copies of the tree in git worktrees under
@@ -110,18 +93,10 @@ describe("icon-only Button accessible names", () => {
   });
 });
 
-/**
- * The disclosure half of the same problem.
- *
- * The sidebar trees expand and collapse with a lowercase `<button>` holding a
- * bare chevron, which the rule above deliberately does not cover — a static
- * label is the wrong shape for a control whose state changes, and failing that
- * test would be a misleading way to ask for aria-expanded.
- *
- * So police it on its own terms instead: anything that declares itself a
- * disclosure has to say what it discloses. There are no render tests for the
- * three tree files, so without this nothing catches a toggle losing its name.
- */
+// The disclosure half: the sidebar trees' lowercase <button> chevron toggles are outside the
+// rule above, since a static label is the wrong shape for a control whose state changes.
+// Anything that declares itself a disclosure must say what it discloses; the three tree
+// files have no render tests, so nothing else catches a toggle losing its name.
 describe("disclosure button accessible names", () => {
   const disclosures = Object.entries(sources).flatMap(([file, source]) =>
     [...source.matchAll(/<button\b/g)]

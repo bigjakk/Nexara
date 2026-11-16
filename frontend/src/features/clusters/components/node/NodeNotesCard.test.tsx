@@ -12,18 +12,10 @@ import { fill } from "@/test/user";
 import type { NodeNotes } from "../../api/node-options-queries";
 import { NodeNotesCard } from "./NodeNotesCard";
 
-/**
- * The Notes card shows a node's notes as plain text and edits them in a dialog
- * mounted afresh for each open, as the Options card's is: the digest pin, the
- * 409 re-read and the failure toast are tested through that card
- * (NodeOptionsCard.test.tsx), and here once more only for what notes add.
- *
- *   - They are read from a route of their own that answers only users who can
- *     manage the node, so anyone else's card asks for nothing.
- *   - They are free text anyone who can edit the node wrote: never markup.
- *   - After a 409 the notes now stored are shown in the dialog, since saving
- *     replaces them and the card that shows them is behind the overlay.
- */
+// The Notes card's dialog works as the Options card's (digest pin, 409 re-read and failure
+// toast are tested in NodeOptionsCard.test.tsx); here only what notes add: they are read from
+// a route only node managers may use, so anyone else's card asks for nothing; they are free
+// text, never markup; after a 409 the stored notes are shown in the dialog, over the card.
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),

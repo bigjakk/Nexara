@@ -25,19 +25,11 @@ import {
   useUpdateClusterFirewallRule,
 } from "./network-queries";
 
-/**
- * A rule update or delete that fails says so in a toast naming whose rule list
- * it was, and on a stale list reloads it (onRuleWriteError). That is the hook's
- * own onError, which TanStack runs whenever the answer lands — after the page
- * has gone, and a sign-out with it. A toast raised after the session ended is
- * shown to whoever is signed in by then, so a failure answered after its session
- * ended must raise no toast and send no reload: the toast would show the next
- * user the previous one's node or guest, and the reload is a request nobody who
- * is here asked for.
- *
- * Each of the four hooks that use it is held to that, with the control that the
- * same answer is reported, and the list reloaded, when the session goes on.
- */
+// A failed rule update or delete toasts whose rule list it was, and reloads a stale list
+// (onRuleWriteError), from the hook's own onError whenever the answer lands. Answered after
+// its session ended, it must raise no toast (the next user would see the previous one's node
+// or guest) and send no reload. Each of the four hooks is held to that, with the control
+// that the same answer is reported and reloaded while the session goes on.
 
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 

@@ -20,19 +20,11 @@ import {
 import { flushInAct } from "@/test/save-outcome-kit";
 import { useRunBackupJob } from "./backup-queries";
 
-/**
- * Run now answers with toasts that name the job and the nodes it ran on, raised
- * by the hook's own onSuccess — which TanStack runs whenever the answer lands,
- * after the page that asked has gone and a sign-out with it. A toast raised
- * after the session ended is shown to whoever is signed in by then, so a run
- * answered after its session ended must raise none, or the next user is shown
- * the previous one's job and nodes. A run that fails is the global net's to
- * report, and keeps to the same rule (lib/query-client.ts).
- *
- * Every case runs on the app's own kind of client (test/app-query-client.ts),
- * with the real api-client and a session, and is paired with the control that
- * the same answer toasts when the session goes on.
- */
+// Run now's success toasts name the job and its nodes, raised by the hook's onSuccess
+// whenever the answer lands; after the session ended they would show the next user the
+// previous one's job, so they must not appear. A failure is the global net's, under the same
+// rule (lib/query-client.ts). Each case runs on the app's kind of client with a real session,
+// paired with the control that the same answer toasts while the session goes on.
 
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 

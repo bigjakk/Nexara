@@ -2,26 +2,11 @@
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
 
-/**
- * A failed mutation is reported once (frontend/src/CLAUDE.md). The app's error
- * toast (createMutationCache, lib/query-client.ts) sees only the onError a hook
- * gives useMutation, never one given to mutate(vars, { onError }) or
- * mutateAsync(vars, { onError }). So a call that passes one to a hook without
- * its own reports the failure twice, and loses it when the caller unmounts.
- * This reads the source and fails on such a call: put the onError on the hook
- * (errorsHandledLocally) and settle the call through useSaveOutcome.
- *
- * It fails too on settle(x.mutateAsync(…), { onError }) through useSaveOutcome
- * when x's hook is not opted out: that failure is shown and toasted. And on a
- * read of x.error or x.isError, which renders the failure, when x's hook has
- * no onError, so the toast reports it as well (`x` may be `a ? b : c` of two).
- *
- * A hook counts as having one when its useMutation options hold an onError, a
- * spread of an object in the same file that does, or a spread of
- * errorsHandledLocally; one spread only on a flag counts where the hook is
- * called with `true`. A spread it cannot read (a caller's own options) is not
- * judged. Test files are not scanned.
- */
+// A failed mutation is reported once: the global toast sees only a hook's own onError, so an
+// onError passed to mutate() of a hook without one toasts twice and is lost on unmount. This
+// reads the source for that, for settle(x.mutateAsync(…)) on a hook not opted out, and for a
+// render of x.error or x.isError when x's hook has no onError. A hook counts as having one
+// by its options, a same-file spread or errorsHandledLocally; an unreadable spread is not judged.
 
 // A leading-slash glob resolves against Vite's root (frontend/), as in
 // api-path.guard.test.ts.
