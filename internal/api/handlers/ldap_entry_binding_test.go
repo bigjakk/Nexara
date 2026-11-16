@@ -171,29 +171,49 @@ func TestLDAPLogin_ADirectoryThatDidNotAnswerSpendsNoBudget(t *testing.T) {
 	}
 }
 
+// secondFactorDirectoryFixture is carol's unbound directory account with a second
+// factor (plain is its secret), carol's own entry and another entry with her address
+// ("evil"), and directory, which makes the next sign-in find one entry by one name.
+type secondFactorDirectoryFixture struct {
+	a          *epochApp
+	store      *epochStore
+	carol      db.User
+	cfg        uuid.UUID
+	plain      string
+	own, other auth.LDAPUser
+}
+
+func newSecondFactorDirectoryFixture(t *testing.T, mapping []byte) *secondFactorDirectoryFixture {
+	t.Helper()
+	encrypted, _, plain, err := auth.NewTOTPService(totpTestKey).GenerateSecret("carol@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &secondFactorDirectoryFixture{cfg: uuid.New(), plain: plain}
+	f.carol = db.User{ID: uuid.New(), Email: "carol@example.com", DisplayName: "Carol", IsActive: true, Role: "user", AuthSource: "ldap",
+		LdapLoginName: "carol", TotpSecret: pgtype.Text{String: encrypted, Valid: true}}
+	f.store = newEpochStore(f.carol)
+	f.store.ldapConfig = &db.LdapConfig{ID: f.cfg, Enabled: true, UserFilter: mailFilter, EmailAttribute: "mail", GroupRoleMapping: mapping}
+	f.a = newEpochApp(t, f.store, epochOptions{totp: true})
+	f.own = auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Username: "carol", Email: f.carol.Email, EntryID: entryOfCarol}
+	f.other = auth.LDAPUser{DN: "uid=evil,ou=people,dc=example,dc=com", Username: "evil", Email: f.carol.Email, EntryID: entryOfDave}
+	return f
+}
+
+func (f *secondFactorDirectoryFixture) directory(name string, entry auth.LDAPUser) {
+	f.a.auth.SetLDAPHandler(&LDAPHandler{queries: f.a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
+		return fakeSignInDirectory{names: map[string]bool{name: true}, entry: entry, password: racePassword}, nil
+	}})
+}
+
 // TestLDAPLogin_ASecondFactorAccountIsBoundOnlyAfterItsCode: the password step of an
 // account with a second factor writes nothing about its directory identity, so another
 // entry with its address (signing in as "evil") neither binds it nor leaves a name the
 // sync would bind it through; the owner's sign-in binds it once the code has passed.
 func TestLDAPLogin_ASecondFactorAccountIsBoundOnlyAfterItsCode(t *testing.T) {
 	t.Parallel()
-	encrypted, _, plain, err := auth.NewTOTPService(totpTestKey).GenerateSecret("carol@example.com")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := uuid.New()
-	carol := db.User{ID: uuid.New(), Email: "carol@example.com", IsActive: true, Role: "user", AuthSource: "ldap",
-		LdapLoginName: "carol", TotpSecret: pgtype.Text{String: encrypted, Valid: true}}
-	store := newEpochStore(carol)
-	store.ldapConfig = &db.LdapConfig{ID: cfg, Enabled: true, UserFilter: mailFilter, EmailAttribute: "mail"}
-	a := newEpochApp(t, store, epochOptions{totp: true})
-	own := auth.LDAPUser{DN: "uid=carol,ou=people,dc=example,dc=com", Username: "carol", Email: carol.Email, EntryID: entryOfCarol}
-	other := auth.LDAPUser{DN: "uid=evil,ou=people,dc=example,dc=com", Username: "evil", Email: carol.Email, EntryID: entryOfDave}
-	directory := func(name string, entry auth.LDAPUser) {
-		a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
-			return fakeSignInDirectory{names: map[string]bool{name: true}, entry: entry, password: racePassword}, nil
-		}})
-	}
+	f := newSecondFactorDirectoryFixture(t, nil)
+	a, store, carol, cfg, plain, own, other, directory := f.a, f.store, f.carol, f.cfg, f.plain, f.own, f.other, f.directory
 
 	directory("evil", other)
 	epochFirstStep(t, a, "evil")
@@ -286,5 +306,36 @@ func TestLDAPSync_ABoundEntryThatNoLongerShowsAnIdentifierIsSkipped(t *testing.T
 	a.store.mu.Unlock()
 	if status := syncNow(); status != http.StatusOK || !a.store.user(carol.ID).IsActive {
 		t.Errorf("sync = %d, carol active %t; want 200 and left as she is", status, a.store.user(carol.ID).IsActive)
+	}
+}
+
+// TestLDAPLogin_ASecondFactorAccountGetsItsRolesOnlyAfterItsCode: the password step of
+// an account with a second factor leaves its name and roles alone, so another entry
+// with its address can neither rename it nor replace its roles with its own groups';
+// the owner's code applies the owner's entry's name and roles.
+func TestLDAPLogin_ASecondFactorAccountGetsItsRolesOnlyAfterItsCode(t *testing.T) {
+	t.Parallel()
+	admins, ops := uuid.New(), uuid.New()
+	f := newSecondFactorDirectoryFixture(t, []byte(`{"cn=admins,dc=example,dc=com":"`+admins.String()+`","cn=ops,dc=example,dc=com":"`+ops.String()+`"}`))
+	f.other.Groups, f.other.DisplayName = []string{"cn=admins,dc=example,dc=com"}, "Evil"
+	f.own.Groups, f.own.DisplayName = []string{"cn=ops,dc=example,dc=com"}, "Carol Owner"
+	untouched := func(when string) {
+		t.Helper()
+		if n := len(f.store.named("RevokeAllUserRoles")) + len(f.store.named("AssignUserRole")); n != 0 || f.store.user(f.carol.ID).DisplayName != "Carol" {
+			t.Fatalf("%s: %d role writes, name %q; want none, Carol", when, n, f.store.user(f.carol.ID).DisplayName)
+		}
+	}
+	f.directory("evil", f.other)
+	epochFirstStep(t, f.a, "evil")
+	untouched("after another entry's password step")
+	f.directory("carol", f.own)
+	token := epochFirstStep(t, f.a, "carol")
+	untouched("after the owner's password step")
+	if resp := f.a.post(t, "/auth/totp/verify-login", epochVerifyBody(t, token, f.plain)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("verify-login = %d", resp.StatusCode)
+	}
+	assigned := f.store.named("AssignUserRole")
+	if len(assigned) != 1 || assigned[0].args[1] != ops || f.store.user(f.carol.ID).DisplayName != "Carol Owner" {
+		t.Errorf("after the code: role writes %v, name %q; want the owner's ops role and name", assigned, f.store.user(f.carol.ID).DisplayName)
 	}
 }

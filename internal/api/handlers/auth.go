@@ -1277,11 +1277,15 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 	// once nothing can refuse the sign-in: now for an active account with no second
 	// factor, after its code for one with (out.pending, carried server-side in the
 	// pending token), and never for a deactivated one.
-	learned := pendingDirectoryEntry{ConfigID: ldapCfg.ID.String(), EntryID: ldapUser.EntryID, Email: ldapUser.Email, LoginName: email}
+	learned := pendingDirectoryEntry{ConfigID: ldapCfg.ID.String(), EntryID: ldapUser.EntryID, Email: ldapUser.Email, LoginName: email,
+		DisplayName: ldapUser.DisplayName, Groups: ldapUser.Groups, GroupLookupFailed: ldapUser.GroupLookupFailed}
 	switch {
 	case !user.IsActive:
 	case user.TotpSecret.Valid:
+		// The name and the roles too wait for the code: the entry that bound may not be
+		// the owner's (FinishDirectorySignInAfterSecondFactor applies them).
 		out.pending = &learned
+		return user, true
 	default:
 		written, other, err := h.writeDirectoryIdentity(c, ldapCfg.ID, user, acct.Bound, learned)
 		if errors.Is(err, errLDAPEntryMismatch) {
@@ -1384,6 +1388,11 @@ type pendingDirectoryEntry struct {
 	EntryID   string `json:"entry_id"`
 	Email     string `json:"email"`
 	LoginName string `json:"login_name"`
+	// The entry's display name and groups, applied after the code (roles not at all
+	// when the group search failed).
+	DisplayName       string   `json:"display_name"`
+	Groups            []string `json:"groups"`
+	GroupLookupFailed bool     `json:"group_lookup_failed"`
 }
 
 // writeDirectoryIdentity writes what a completed directory sign-in learned: an account
@@ -1432,9 +1441,10 @@ func (h *AuthHandler) writeDirectoryIdentity(c fiber.Ctx, cfgID uuid.UUID, user 
 // (TOTPHandler.VerifyLogin), what the directory sign-in of userID learned (e): the
 // binding, the address and the sign-in name, as a sign-in with no second factor writes
 // them at once. The account is read again. A config changed since the password step
-// writes nothing (the next sign-in will). An account bound meanwhile to another entry,
-// or whose entry another account took, is refused 403, audited as identity_mismatch,
-// with nothing issued. It returns the account as last written.
+// writes nothing, roles and name included (the next sign-in will). An account bound
+// meanwhile to another entry, or whose entry another account took, is refused 403,
+// audited as identity_mismatch, with nothing issued. Then the entry's display name and
+// group roles are applied. It returns the account as last written.
 func (h *AuthHandler) FinishDirectorySignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUID, e *pendingDirectoryEntry) (db.User, error) {
 	user, err := h.queries.GetUserByID(c.Context(), userID)
 	if err != nil {
@@ -1459,6 +1469,20 @@ func (h *AuthHandler) FinishDirectorySignInAfterSecondFactor(c fiber.Ctx, userID
 	if err != nil {
 		slog.Error("ldap sign-in after the second factor: could not bind the account", "user_id", userID, "reason", ldapLinkFailureClass(err))
 		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, "Failed to complete the sign-in")
+	}
+	// The name and the roles the password step held back, as a sign-in without a second
+	// factor applies them (provisionLDAPUser).
+	if e.DisplayName != "" && e.DisplayName != user.DisplayName {
+		if updated, err := h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{ID: user.ID, DisplayName: e.DisplayName}); err == nil {
+			user = updated
+		}
+	}
+	if !e.GroupLookupFailed {
+		mapping := make(map[string]string)
+		if len(cfg.GroupRoleMapping) > 0 {
+			_ = json.Unmarshal(cfg.GroupRoleMapping, &mapping)
+		}
+		h.ldapHandler.SyncUserRoles(c, user.ID, e.Groups, mapping, cfg.DefaultRoleID)
 	}
 	return user, nil
 }
