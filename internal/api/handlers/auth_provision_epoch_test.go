@@ -159,7 +159,7 @@ func TestLDAPProvision_TheRowItReturnsCarriesTheEpochItRead(t *testing.T) {
 		t.Helper()
 		a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries})
 		callProvision(t, a, func(c fiber.Ctx) error {
-			user, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, info, typed)
+			user, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, info, typed, nil)
 			return c.SendStatus(http.StatusNoContent)
 		})
 		return user, ok

@@ -58,8 +58,8 @@ const userUpdateReason = "the gate is CONDITIONAL on the body: the handler requi
 
 // registerUserEndpoints declares UserHandler's routes: the four account routes
 // — three a plain global Check (two view:user, one manage:user) and the fourth
-// the conditional Deferred above — and the single sign-on link reset, a global
-// manage:user Check.
+// the conditional Deferred above — and the link resets (single sign-on, every
+// single sign-on account, directory), each a global manage:user Check.
 //
 // What stays in the handlers is what the declaration cannot see: the refusal
 // to touch the system account, the refusal to change your own role or active
@@ -128,6 +128,21 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Permissions: globalCheck("manage", "user"),
 		Parameters:  apischema.Properties{"id": userIDParam},
 		Handler:     h.ResetSSOLink,
+	})
+	reg.Register(Endpoint{
+		Method: fiber.MethodDelete,
+		Path:   userScope + "/:id/directory-link",
+		Description: "Reset a directory (LDAP) account's link to its directory entry: the stored entry " +
+			"identifier (entryUUID or objectGUID) is cleared, so the account's next sign-in or sync binds it " +
+			"again to whichever entry presents its address, and every session of the account ends at once " +
+			"(an access token already issued stays valid until it expires). 400 when the account has no link " +
+			"(a local or SSO account never has one). A caller cannot reset their own. The reset and the end of " +
+			"the sessions are one transaction: an answer that says the link was NOT reset changed nothing; one " +
+			"that says it could not be confirmed may have taken effect, and repeating it is safe.",
+		Group:       "User Management",
+		Permissions: globalCheck("manage", "user"),
+		Parameters:  apischema.Properties{"id": userIDParam},
+		Handler:     h.ResetDirectoryLink,
 	})
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,

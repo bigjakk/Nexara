@@ -65,6 +65,7 @@ var auditClusterExempt = map[string]string{
 	"users.go.Update":                 "users is install-global; no cluster column",
 	"users.go.Delete":                 "users is install-global; no cluster column",
 	"users.go.ResetSSOLink":           "users is install-global; no cluster column",
+	"users.go.ResetDirectoryLink":     "users is install-global; no cluster column",
 	"users.go.ResetAllSSOLinks":       "users is install-global; no cluster column",
 
 	// Roles and their assignments. An assignment may target one cluster via
@@ -90,6 +91,7 @@ var auditClusterExempt = map[string]string{
 	"oidc.go.exchangeFailure":       "a failed SSO sign-in; no cluster in scope",
 	"oidc.go.auditIdentityMismatch": "a failed SSO sign-in; no cluster in scope",
 	"oidc.go.linkOIDCAccount":       "an SSO account bound to its provider identity; no cluster in scope",
+	"auth.go.provisionLDAPUser":     "a directory account bound to its entry, or moved to its address; no cluster in scope",
 	"oidc.go.finishStepUp":          "an SSO account's step-up before enrolling 2FA; no cluster in scope",
 	"oidc.go.refuseStepUp":          "a refused SSO step-up before enrolling 2FA; no cluster in scope",
 	"settings.go.auditSettingWrite": "settings are install-global",

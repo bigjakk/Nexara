@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-ldap/ldap/v3"
+	"github.com/google/uuid"
 )
 
 // Sentinel errors for classified LDAP failures.
@@ -83,6 +84,9 @@ type LDAPUser struct {
 	Email       string
 	DisplayName string
 	Groups      []string
+	// EntryID is the entry's stable identifier in canonical text (entryIDOf), "" when
+	// the directory exposes neither entryUUID nor objectGUID.
+	EntryID string
 	// GroupLookupFailed says the group search did not answer, so Groups says nothing:
 	// a caller must leave the user's roles as they are rather than read "no groups".
 	GroupLookupFailed bool
@@ -264,7 +268,37 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 	}
 	filter := strings.ReplaceAll(c.cfg.UserFilter, "{{username}}", ldap.EscapeFilter(username))
 
-	attrs := []string{"dn", c.cfg.UsernameAttribute, c.cfg.EmailAttribute, c.cfg.DisplayNameAttribute}
+	return c.searchOne(conn, filter)
+}
+
+// SearchUserByEntryID finds the entry whose identifier is id (entryIDOf's form), under
+// the search base and without the user filter, and without its groups: the caller
+// checks the entry against the filter by a name it answers to (SearchUser). Not found
+// is ErrLDAPUserNotFound.
+func (c *LDAPClient) SearchUserByEntryID(id string) (*LDAPUser, error) {
+	filter, err := entryIDFilter(id)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := c.dial()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := c.serviceBind(conn); err != nil {
+		return nil, err
+	}
+	return c.searchOne(conn, filter)
+}
+
+// entryAttributes are the identifiers asked for with every entry: entryUUID (RFC 4530;
+// OpenLDAP, 389) is operational and returned only when named, objectGUID (Active
+// Directory) is binary. A directory ignores one it does not know.
+var entryAttributes = []string{"entryUUID", "objectGUID"}
+
+// searchOne runs a compiled filter under the search base and reads the one entry.
+func (c *LDAPClient) searchOne(conn ldap.Client, filter string) (*LDAPUser, error) {
+	attrs := append([]string{"dn", c.cfg.UsernameAttribute, c.cfg.EmailAttribute, c.cfg.DisplayNameAttribute}, entryAttributes...)
 
 	searchReq := ldap.NewSearchRequest(
 		c.cfg.SearchBaseDN,
@@ -295,7 +329,55 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*LDAPUser, er
 		Username:    entry.GetAttributeValue(c.cfg.UsernameAttribute),
 		Email:       entry.GetAttributeValue(c.cfg.EmailAttribute),
 		DisplayName: entry.GetAttributeValue(c.cfg.DisplayNameAttribute),
+		EntryID:     entryIDOf(entry),
 	}, nil
+}
+
+// entryIDOf is an entry's stable identifier in ONE canonical text form, so that it is
+// only ever compared as text: "objectGUID:" and the GUID as Active Directory prints it
+// (the first three fields little-endian), read from the attribute's 16 raw bytes, or
+// "entryUUID:" and the UUID in lower case. "" when the entry carries neither in a form
+// that parses: the directory then works as before, by name and address.
+func entryIDOf(entry *ldap.Entry) string {
+	if raw := entry.GetRawAttributeValue("objectGUID"); len(raw) == 16 {
+		var b [16]byte
+		copy(b[:], raw)
+		b[0], b[1], b[2], b[3] = b[3], b[2], b[1], b[0]
+		b[4], b[5] = b[5], b[4]
+		b[6], b[7] = b[7], b[6]
+		return "objectGUID:" + uuid.UUID(b).String()
+	}
+	if u, err := uuid.Parse(strings.TrimSpace(entry.GetAttributeValue("entryUUID"))); err == nil {
+		return "entryUUID:" + u.String()
+	}
+	return ""
+}
+
+// entryIDFilter is the search filter that finds the entry an identifier names: an
+// objectGUID as its 16 bytes, each escaped, as Active Directory matches it.
+func entryIDFilter(id string) (string, error) {
+	kind, value, _ := strings.Cut(id, ":")
+	u, err := uuid.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("%w: not an entry identifier", ErrLDAPSearchFailed)
+	}
+	switch kind {
+	case "entryUUID":
+		return "(entryUUID=" + u.String() + ")", nil
+	case "objectGUID":
+		b := u
+		b[0], b[1], b[2], b[3] = b[3], b[2], b[1], b[0]
+		b[4], b[5] = b[5], b[4]
+		b[6], b[7] = b[7], b[6]
+		var f strings.Builder
+		f.WriteString("(objectGUID=")
+		for _, x := range b {
+			fmt.Fprintf(&f, "\\%02x", x)
+		}
+		f.WriteString(")")
+		return f.String(), nil
+	}
+	return "", fmt.Errorf("%w: not an entry identifier", ErrLDAPSearchFailed)
 }
 
 // getUserGroups lists the DNs of the user's groups: none when no group search is

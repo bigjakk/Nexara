@@ -859,6 +859,9 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		if dir.locked != nil {
 			return dir.locked
 		}
+		if err := h.directorySignInNotChecked(c, attempt, &dir); err != nil {
+			return err
+		}
 		auth.RunDummyBcrypt(password)
 		if dir.account != nil {
 			// A name the directory answers to other than the account's address.
@@ -877,6 +880,9 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		}
 		if dir.locked != nil {
 			return dir.locked
+		}
+		if err := h.directorySignInNotChecked(c, attempt, &dir); err != nil {
+			return err
 		}
 		// Pad failure to keep timing roughly aligned with the local-bcrypt
 		// path. LDAP roundtrip dominates wall-clock anyway, so this is a
@@ -974,34 +980,54 @@ func (h *AuthHandler) tryLDAPLogin(c fiber.Ctx, email, password string, out *dir
 	}
 	if err := dir.Authenticate(ldapUser, password); err != nil {
 		slog.Warn("ldap login: authentication failed", "ip", c.IP(), "reason", ldapFailureClass(err))
-		out.account = h.directoryAccount(c, ldapUser, email)
+		out.account = h.directoryAccount(c, ldapCfg.ID, ldapUser, email)
 		return db.User{}, false
 	}
 
-	return h.provisionLDAPUser(c, ldapCfg, ldapUser, email)
+	return h.provisionLDAPUser(c, ldapCfg, ldapUser, email, out)
 }
 
 // directorySignIn is what a directory sign-in learned beyond its answer: the entry's
 // budget (not counted when no entry was found), its lock's 429 when that budget is
-// spent, and the account a failed bind is audited under.
+// spent, and the account a failed bind is audited under. mismatch: the password was
+// right, but the entry's address names an account bound to another entry (account).
 type directorySignIn struct {
-	entry   loginAttempt
-	locked  error
-	account *db.User
+	entry    loginAttempt
+	locked   error
+	account  *db.User
+	mismatch bool
+}
+
+// ldapEntryMismatchMessage is the answer of a sign-in whose entry is not the account's.
+// It names no entry and no address: the person learns what to do, an attacker nothing
+// (it is the SSO identity_mismatch's wording).
+const ldapEntryMismatchMessage = "This sign-in does not match the directory entry your account is linked to. " +
+	"Contact an administrator."
+
+// directorySignInNotChecked answers a directory sign-in that ended without a wrong
+// password, and gives back the attempts it took (the typed name's, a, and the entry's):
+// 403 for an entry that is not the account's, audited as a failed sign-in under that
+// account with the fixed reason identity_mismatch. nil for every other failure, which
+// the caller refuses as before.
+func (h *AuthHandler) directorySignInNotChecked(c fiber.Ctx, a loginAttempt, dir *directorySignIn) error {
+	if !dir.mismatch {
+		return nil
+	}
+	h.handBackLoginAttempt(c, a)
+	h.handBackLoginAttempt(c, dir.entry)
+	slog.Warn("ldap login: refused a sign-in whose directory entry is not the one the account is bound to", "user_id", dir.account.ID)
+	h.recordFailedSignIn(c, a, dir.account, "identity_mismatch")
+	return fiber.NewError(fiber.StatusForbidden, ldapEntryMismatchMessage)
 }
 
 // directoryAccount is the directory account of an entry the search found, looked up
-// as provisionLDAPUser does (the entry's address, else what was typed), or nil.
-func (h *AuthHandler) directoryAccount(c fiber.Ctx, entry *auth.LDAPUser, typed string) *db.User {
-	address := entry.Email
-	if address == "" {
-		address = typed
-	}
-	u, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{Email: address, AuthSource: "ldap"})
-	if err != nil {
+// as provisionLDAPUser does (ldapAccountForEntry), or nil.
+func (h *AuthHandler) directoryAccount(c fiber.Ctx, cfgID uuid.UUID, entry *auth.LDAPUser, typed string) *db.User {
+	acct, err := ldapAccountForEntry(c.Context(), h.queries, cfgID, entry, typed)
+	if err != nil || !acct.Found {
 		return nil
 	}
-	return &u
+	return &acct.User
 }
 
 // ProveDirectoryPassword checks the password of the caller's own directory account
@@ -1149,11 +1175,18 @@ func ldapFailureClass(err error) string {
 }
 
 // provisionLDAPUser turns a directory user who has just authenticated into the
-// account the sign-in is for: it looks the account up by the address the directory
-// reports (the one that was typed when it reports none), creates it on first sight,
-// keeps its display name in step with the directory, refuses a deactivated one, and
-// syncs its RBAC roles from the directory's groups. It returns the row and true, or
-// false when no session may be issued.
+// account the sign-in is for: the account ldapAccountForEntry names (the one bound to
+// the entry's identifier, else the one the entry's address names, the typed name when
+// it reports none), created on first sight and bound to the entry. An account found by
+// address is bound to the entry now when the directory exposes an identifier, unless a
+// check after the directory can still refuse it (a second factor, or a deactivated
+// account): those are bound by the sync, or by a later sign-in. An address that names
+// an account bound to another entry is refused (out.mismatch), with nothing created or
+// bound. A bound account takes its entry's new address when it has changed
+// (followEntryAddress, audited). Then it keeps the display name in step with the
+// directory, refuses a deactivated account, and syncs its RBAC roles from the
+// directory's groups. It returns the row and true, or false when no session may be
+// issued. out may be nil.
 //
 // The row it returns carries the AuthEpoch the session will be conditional on, and
 // that is the epoch of the LAST read of the account after the bind: the lookup's, or,
@@ -1167,62 +1200,65 @@ func ldapFailureClass(err error) string {
 // refused: as far as the epoch can tell, that sign-in began after it. A deactivation
 // is caught either way, by the is_active check below on the same row and, after it,
 // by the insert's own condition.
-func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldapUser *auth.LDAPUser, email string) (db.User, bool) {
-	// Determine the email to use
-	userEmail := ldapUser.Email
-	if userEmail == "" {
-		userEmail = email
+func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldapUser *auth.LDAPUser, email string, out *directorySignIn) (db.User, bool) {
+	if out == nil {
+		out = &directorySignIn{}
+	}
+	refuseMismatch := func(account db.User) (db.User, bool) {
+		out.mismatch, out.account = true, &account
+		return db.User{}, false
 	}
 
-	// Look up or JIT-create the user
-	user, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
-		Email:      userEmail,
-		AuthSource: "ldap",
-	})
+	acct, err := ldapAccountForEntry(c.Context(), h.queries, ldapCfg.ID, ldapUser, email)
+	if errors.Is(err, errLDAPEntryMismatch) {
+		return refuseMismatch(acct.User)
+	}
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("ldap login: failed to look up user", "email", userEmail, "error", err)
-			return db.User{}, false
-		}
-
-		// JIT provision, unless another account already has the address in some case: a
-		// new account must not differ from an existing one only by case. That is refused
-		// like the duplicate key below, by the same second lookup, which finds the account
-		// a concurrent sign-in of this user created and nothing else.
-		taken, takenErr := h.queries.EmailTakenIgnoringCase(c.Context(), userEmail)
-		if takenErr != nil {
-			slog.Warn("ldap login: failed to check the address", "error", takenErr)
-			return db.User{}, false
-		}
-		if taken {
-			err = errEmailTakenInAnotherCase
-		} else {
-			displayName := ldapUser.DisplayName
-			if displayName == "" {
-				displayName = userEmail
-			}
-			user, err = h.queries.CreateLDAPUser(c.Context(), db.CreateLDAPUserParams{
-				Email:       userEmail,
-				DisplayName: displayName,
-			})
+		slog.Warn("ldap login: failed to look up user", "error", err)
+		return db.User{}, false
+	}
+	user := acct.User
+	if !acct.Found {
+		user, acct, err = h.createLDAPUser(c, ldapCfg.ID, ldapUser, email)
+		if errors.Is(err, errLDAPEntryMismatch) {
+			return refuseMismatch(acct.User)
 		}
 		if err != nil {
-			// Handle race condition: another concurrent request may have created this user
-			if isDuplicateKeyError(err) || errors.Is(err, errEmailTakenInAnotherCase) {
-				user, err = h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
-					Email:      userEmail,
-					AuthSource: "ldap",
-				})
-				if err != nil {
-					slog.Warn("ldap login: post-race lookup failed", "email", userEmail, "error", err)
-					return db.User{}, false
-				}
-			} else {
-				slog.Warn("ldap login: JIT provisioning failed", "email", userEmail, "error", err)
+			return db.User{}, false
+		}
+	}
+
+	if !acct.Bound && ldapUser.EntryID != "" && user.IsActive && !user.TotpSecret.Valid {
+		linked, err := h.queries.LinkLDAPEntry(c.Context(), db.LinkLDAPEntryParams{ConfigID: ldapCfg.ID, EntryID: ldapUser.EntryID, ID: user.ID})
+		if err != nil {
+			// Another sign-in or the sync bound it first: what is stored now decides.
+			again, aerr := ldapAccountForEntry(c.Context(), h.queries, ldapCfg.ID, ldapUser, email)
+			switch {
+			case errors.Is(aerr, errLDAPEntryMismatch):
+				return refuseMismatch(again.User)
+			case aerr != nil || !again.Bound:
+				slog.Warn("ldap login: could not bind the account to its directory entry", "user_id", user.ID, "reason", ldapLinkFailureClass(err))
 				return db.User{}, false
+			case again.User.ID != user.ID:
+				return refuseMismatch(user)
+			}
+			linked = again.User
+		} else {
+			details, _ := json.Marshal(map[string]string{"ip": c.IP(), "method": "ldap"})
+			AuditLogAs(c, h.queries, h.eventPub, linked.ID, pgtype.UUID{}, "auth", linked.ID.String(), "ldap_entry_linked", details)
+		}
+		user, acct.Bound = linked, true
+	}
+
+	if acct.Bound {
+		if f, ok := h.ldapHandler.followEntryAddress(c.Context(), ldapCfg.ID, user.ID, user.Email, ldapUser.Email); ok {
+			AuditLogAs(c, h.queries, h.eventPub, user.ID, pgtype.UUID{}, "user", user.ID.String(), ldapAddressFollowedAction, f.details())
+			if f.keptOwnBecause == "" {
+				user.Email = f.to
 			}
 		}
-	} else if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
+	}
+	if ldapUser.DisplayName != "" && ldapUser.DisplayName != user.DisplayName {
 		// Update display name if changed
 		if updated, err := h.queries.UpdateLDAPUserProfile(c.Context(), db.UpdateLDAPUserProfileParams{
 			ID:          user.ID,
@@ -1241,7 +1277,7 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 	}
 
 	if !user.IsActive {
-		slog.Warn("ldap login: account disabled", "email", userEmail, "user_id", user.ID)
+		slog.Warn("ldap login: account disabled", "email", user.Email, "user_id", user.ID)
 		return db.User{}, false
 	}
 
@@ -1258,6 +1294,58 @@ func (h *AuthHandler) provisionLDAPUser(c fiber.Ctx, ldapCfg db.LdapConfig, ldap
 	h.ldapHandler.SyncUserRoles(c, user.ID, ldapUser.Groups, mapping, ldapCfg.DefaultRoleID)
 
 	return user, true
+}
+
+// createLDAPUser creates the account of an entry no account answers to, bound to the
+// entry when the directory exposes an identifier, unless another account already has
+// the address in some case: a new account must not differ from an existing one only by
+// case. That is refused like the duplicate key, by the same second lookup, which finds
+// the account a concurrent sign-in of this user created (and refuses one bound to
+// another entry, errLDAPEntryMismatch) and nothing else. acct says how the account
+// answers to the entry.
+func (h *AuthHandler) createLDAPUser(c fiber.Ctx, cfgID uuid.UUID, ldapUser *auth.LDAPUser, email string) (db.User, ldapAccount, error) {
+	userEmail := ldapUser.Email
+	if userEmail == "" {
+		userEmail = email
+	}
+	taken, err := h.queries.EmailTakenIgnoringCase(c.Context(), userEmail)
+	if err != nil {
+		slog.Warn("ldap login: failed to check the address", "error", err)
+		return db.User{}, ldapAccount{}, err
+	}
+	if taken {
+		err = errEmailTakenInAnotherCase
+	} else {
+		displayName := ldapUser.DisplayName
+		if displayName == "" {
+			displayName = userEmail
+		}
+		params := db.CreateLDAPUserParams{Email: userEmail, DisplayName: displayName, EntryID: ldapUser.EntryID}
+		if ldapUser.EntryID != "" {
+			params.ConfigID = pgtype.UUID{Bytes: cfgID, Valid: true}
+		}
+		var user db.User
+		user, err = h.queries.CreateLDAPUser(c.Context(), params)
+		if err == nil {
+			return user, ldapAccount{User: user, Found: true, Bound: ldapUser.EntryID != ""}, nil
+		}
+	}
+	if !isDuplicateKeyError(err) && !errors.Is(err, errEmailTakenInAnotherCase) {
+		slog.Warn("ldap login: JIT provisioning failed", "email", userEmail, "error", err)
+		return db.User{}, ldapAccount{}, err
+	}
+	// Handle race condition: another concurrent request may have created this user
+	acct, err := ldapAccountForEntry(c.Context(), h.queries, cfgID, ldapUser, email)
+	if err != nil || !acct.Found {
+		if err == nil {
+			err = errors.New("no account after a creation race")
+		}
+		if !errors.Is(err, errLDAPEntryMismatch) {
+			slog.Warn("ldap login: post-race lookup failed", "email", userEmail, "error", err)
+		}
+		return db.User{}, acct, err
+	}
+	return acct.User, acct, nil
 }
 
 // errEmailTakenInAnotherCase is a directory account not provisioned because another

@@ -1412,11 +1412,13 @@ type User struct {
 	Role         string      `json:"role"`
 	AuthSource   string      `json:"auth_source"`
 	// Bumped by every revoke-all of the user's sessions (sign out of all devices, password change, deactivation), in the same transaction as the revoke. A session is created only while this still holds the value the credential check read, so a sign-in whose credential has been replaced since cannot mint one. See queries/sessions.sql CreateSessionAtEpoch
-	AuthEpoch              int64  `json:"auth_epoch"`
-	DeactivatedByDirectory bool   `json:"deactivated_by_directory"`
-	LdapLoginName          string `json:"ldap_login_name"`
-	OidcIssuer             string `json:"oidc_issuer"`
-	OidcSubject            string `json:"oidc_subject"`
+	AuthEpoch              int64       `json:"auth_epoch"`
+	DeactivatedByDirectory bool        `json:"deactivated_by_directory"`
+	LdapLoginName          string      `json:"ldap_login_name"`
+	OidcIssuer             string      `json:"oidc_issuer"`
+	OidcSubject            string      `json:"oidc_subject"`
+	LdapConfigID           pgtype.UUID `json:"ldap_config_id"`
+	LdapEntryID            string      `json:"ldap_entry_id"`
 }
 
 // Per-user starred resources, surfaced above the sidebar tree

@@ -207,6 +207,25 @@ export function useResetSSOLink() {
   });
 }
 
+/**
+ * Clears a directory account's link to its directory entry and ends its
+ * sessions; its next sign-in or sync binds it again by address. A failure is
+ * the global toast's.
+ */
+export function useResetDirectoryLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient.delete(apiPath`/api/v1/users/${id}/directory-link`),
+    onSuccess: () => {
+      toast.success(
+        "Directory link reset. The account's sessions have ended; it is bound again at its next sign-in or sync.",
+      );
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] });
+    },
+  });
+}
+
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({

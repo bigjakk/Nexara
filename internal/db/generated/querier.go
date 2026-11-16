@@ -351,6 +351,9 @@ type Querier interface {
 	// explicit lists on its first pass.)
 	ClearJobCleanupPending(ctx context.Context, id uuid.UUID) error
 	ClearJobNativeCRSPaused(ctx context.Context, id uuid.UUID) error
+	// An administrator's reset of one directory account's binding: its next sign-in or
+	// sync binds it again by address. 0 rows: not a directory account, or not bound.
+	ClearLDAPEntry(ctx context.Context, id uuid.UUID) (int64, error)
 	// An administrator's reset of one SSO account's link: its next sign-in links again by
 	// address. 0 rows: not an SSO account, or not linked.
 	ClearOIDCIdentity(ctx context.Context, id uuid.UUID) (int64, error)
@@ -542,6 +545,9 @@ type Querier interface {
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (Cluster, error)
 	CreateFirewallTemplate(ctx context.Context, arg CreateFirewallTemplateParams) (FirewallTemplate, error)
 	CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigParams) (LdapConfig, error)
+	// A new directory account, bound at creation to the entry that signed in when the
+	// directory exposes an identifier (config_id NULL and entry_id '' when it does not);
+	// users_ldap_entry_key refuses a second account for one entry under one configuration.
 	CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) (User, error)
 	CreateMigrationJob(ctx context.Context, arg CreateMigrationJobParams) (MigrationJob, error)
 	// NUT servers: the upsd instances Nexara reads UPS data from (000131).
@@ -951,6 +957,11 @@ type Querier interface {
 	// CD-ROM bookkeeping, which the reconciler has restored by this point.
 	FinishGuestToolsUpdate(ctx context.Context, arg FinishGuestToolsUpdateParams) error
 	FinishVirtioWinDownload(ctx context.Context, arg FinishVirtioWinDownloadParams) error
+	// Moves a bound directory account to the address its entry now has, unless another
+	// account holds that address in any case (the rule of EmailTakenIgnoringCase): no row
+	// then, and the account keeps the address it has. Only for an account bound under
+	// this configuration, which is what makes the entry its own.
+	FollowLDAPEntryAddress(ctx context.Context, arg FollowLDAPEntryAddressParams) (User, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
 	GetAPIKeyByID(ctx context.Context, id uuid.UUID) (ApiKey, error)
 	GetAlertHistory(ctx context.Context, id uuid.UUID) (AlertHistory, error)
@@ -1330,6 +1341,9 @@ type Querier interface {
 	// case, between plain-ASCII addresses), of the given source.
 	GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmailAndSourceParams) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
+	// The directory account bound to this entry under this configuration, whatever its
+	// address says now.
+	GetUserByLDAPEntry(ctx context.Context, arg GetUserByLDAPEntryParams) (User, error)
 	// The SSO account bound to this provider identity, whatever its address says now.
 	GetUserByOIDCIdentity(ctx context.Context, arg GetUserByOIDCIdentityParams) (User, error)
 	GetUserPermissions(ctx context.Context, userID uuid.UUID) ([]GetUserPermissionsRow, error)
@@ -1564,6 +1578,13 @@ type Querier interface {
 	//
 	// The worker's UPDATE is the statement's own, so the count returned is pairs.
 	LinkHAWorkerTasks(ctx context.Context, arg LinkHAWorkerTasksParams) (int64, error)
+	// Binds a directory account to this entry under this configuration, and only one not
+	// bound under it already: no row when it is of another source or bound under this
+	// configuration (to this entry or another), so two first sign-ins or a sign-in and a
+	// sync that race cannot both write, and a stored binding is never overwritten. An
+	// account bound under another configuration, or one since deleted, is bound again.
+	// users_ldap_entry_key refuses an entry another account holds.
+	LinkLDAPEntry(ctx context.Context, arg LinkLDAPEntryParams) (User, error)
 	// Proxmox runs some actions as more than one task, each with a UPID of its own:
 	// its task log lists them all, and so do Nexara's lists, which is where one action
 	// reads as two or three. The two queries below record which rows belong together,

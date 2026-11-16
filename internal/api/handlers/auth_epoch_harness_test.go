@@ -202,6 +202,21 @@ func (s *epochStore) byIdentity(issuer, subject string) *db.User {
 	return nil
 }
 
+// byLDAPEntry is the account GetUserByLDAPEntry matches: a directory account bound to
+// this entry under this config. Called with the store locked.
+func (s *epochStore) byLDAPEntry(cfg uuid.UUID, entry string) *db.User {
+	for _, u := range s.users {
+		if entry != "" && u.AuthSource == "ldap" && boundUnder(u.LdapConfigID, cfg) && u.LdapEntryID == entry {
+			return u
+		}
+	}
+	return nil
+}
+
+// ldapEntryTaken is users_ldap_entry_key's refusal.
+var ldapEntryTaken = &pgconn.PgError{Code: "23505", ConstraintName: usersLDAPEntryKey,
+	Message: `duplicate key value violates unique constraint "users_ldap_entry_key"`}
+
 func (s *epochStore) afterHook(name string) {
 	if fn := s.after[name]; fn != nil {
 		fn(s)
@@ -274,6 +289,16 @@ func (s *epochStore) doExec(name string, args []any, remember func(func())) (pgc
 		before := *u
 		remember(func() { *u = before })
 		u.OidcIssuer, u.OidcSubject = "", ""
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	case "ClearLDAPEntry":
+		// id; the SQL's WHERE: a bound directory account.
+		u, ok := s.users[args[0].(uuid.UUID)]
+		if !ok || u.AuthSource != "ldap" || !u.LdapConfigID.Valid {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
+		}
+		before := *u
+		remember(func() { *u = before })
+		u.LdapConfigID, u.LdapEntryID = pgtype.UUID{}, ""
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	case "ClearTOTPSecret":
 		if u, ok := s.users[args[0].(uuid.UUID)]; ok {
@@ -413,6 +438,13 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 			ID: uuid.New(), Email: args[0].(string), DisplayName: args[1].(string),
 			IsActive: true, Role: "user", AuthSource: source,
 		}
+		if name == "CreateLDAPUser" {
+			// config_id, entry_id; users_ldap_entry_key refuses a second holder.
+			u.LdapConfigID, u.LdapEntryID = args[2].(pgtype.UUID), args[3].(string)
+			if u.LdapConfigID.Valid && s.byLDAPEntry(u.LdapConfigID.Bytes, u.LdapEntryID) != nil {
+				return authFakeRow{err: ldapEntryTaken}
+			}
+		}
 		if name == "CreateOIDCUser" {
 			// oidc_issuer, oidc_subject; users_oidc_identity_key refuses a second holder.
 			u.OidcIssuer, u.OidcSubject = args[2].(string), args[3].(string)
@@ -445,6 +477,44 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		before := *u
 		remember(func() { *u = before })
 		u.OidcIssuer, u.OidcSubject = iss, sub
+		return authFakeRow{value: *u}
+	case "GetUserByLDAPEntry":
+		// config_id, entry_id.
+		if u := s.byLDAPEntry(args[0].(uuid.UUID), args[1].(string)); u != nil {
+			return authFakeRow{value: *u}
+		}
+		return authFakeRow{err: pgx.ErrNoRows}
+	case "LinkLDAPEntry":
+		// config_id, entry_id, id; the SQL's WHERE: a directory account not bound under
+		// this config, and users_ldap_entry_key.
+		cfg, entry := args[0].(uuid.UUID), args[1].(string)
+		u, ok := s.users[args[2].(uuid.UUID)]
+		if !ok || u.AuthSource != "ldap" || boundUnder(u.LdapConfigID, cfg) || entry == "" {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		if s.byLDAPEntry(cfg, entry) != nil {
+			return authFakeRow{err: ldapEntryTaken}
+		}
+		before := *u
+		remember(func() { *u = before })
+		u.LdapConfigID, u.LdapEntryID = pgtype.UUID{Bytes: cfg, Valid: true}, entry
+		return authFakeRow{value: *u}
+	case "FollowLDAPEntryAddress":
+		// email, id, config_id; the SQL's WHERE: bound under the config, and no other
+		// account has the address in any case.
+		email, cfg := args[0].(string), args[2].(uuid.UUID)
+		u, ok := s.users[args[1].(uuid.UUID)]
+		if !ok || u.AuthSource != "ldap" || !boundUnder(u.LdapConfigID, cfg) {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		for _, o := range s.users {
+			if o.ID != u.ID && strings.EqualFold(o.Email, email) {
+				return authFakeRow{err: pgx.ErrNoRows}
+			}
+		}
+		before := *u
+		remember(func() { *u = before })
+		u.Email = email
 		return authFakeRow{value: *u}
 	case "UpdateLDAPUserProfile", "UpdateOIDCUserProfile":
 		// id, display_name: only for an account of the query's own source, as the SQL's WHERE.
@@ -577,7 +647,8 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		for _, u := range s.users {
 			if u.AuthSource == "ldap" {
 				items = append(items, db.ListLDAPUsersRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
-					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory, LdapLoginName: u.LdapLoginName})
+					Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, DeactivatedByDirectory: u.DeactivatedByDirectory, LdapLoginName: u.LdapLoginName,
+					LdapConfigID: u.LdapConfigID, LdapEntryID: u.LdapEntryID})
 			}
 		}
 		return &authFakeRows{items: items}, nil
@@ -602,7 +673,8 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 		var items []any
 		for _, u := range s.users {
 			items = append(items, db.ListUsersWithRolesRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
-				Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, SsoLinked: u.OidcSubject != ""})
+				Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, SsoLinked: u.OidcSubject != "",
+				DirectoryLinked: u.LdapConfigID.Valid})
 		}
 		return &authFakeRows{items: items}, nil
 	case "ListUserRoles":
@@ -805,6 +877,8 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 	app.Delete("/oidc/links", withRequestParams(t, apischema.Properties{}, nil, uh.ResetAllSSOLinks))
 	app.Delete("/users/:id/sso-link", withRequestParams(t, apischema.Properties{
 		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetSSOLink))
+	app.Delete("/users/:id/directory-link", withRequestParams(t, apischema.Properties{
+		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetDirectoryLink))
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, ah.ConsoleToken))
 	app.Post("/auth/ws-token", withRequestParams(t, apischema.Properties{}, nil, ah.WSToken))
 	app.Get("/probe", func(c fiber.Ctx) error { return a.probe(c) })

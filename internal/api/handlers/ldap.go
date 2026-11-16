@@ -60,6 +60,7 @@ type LDAPHandler struct {
 // ldapDirectory is the part of *auth.LDAPClient that Sync asks.
 type ldapDirectory interface {
 	SearchUser(username string) (*auth.LDAPUser, error)
+	SearchUserByEntryID(id string) (*auth.LDAPUser, error)
 }
 
 // ldapSignInSession is the part of *auth.LDAPSession a sign-in asks: the search for
@@ -536,7 +537,12 @@ func (h *LDAPHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
 				Message: classifyLDAPError(err),
 			})
 		}
-		msg = fmt.Sprintf("User found: %s (%s), %d groups", user.DisplayName, user.Email, len(user.Groups))
+		msg = fmt.Sprintf("User found: %s (%s), %d groups.", user.DisplayName, user.Email, len(user.Groups))
+		if kind, _, ok := strings.Cut(user.EntryID, ":"); ok {
+			msg += " Accounts are bound to their directory entry by its " + kind + "."
+		} else {
+			msg += " The entry has neither entryUUID nor objectGUID, so accounts are matched by sign-in name and address only, as before."
+		}
 	}
 
 	return c.JSON(testConnectionResponse{
@@ -576,6 +582,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 	}
 	if res.ran {
 		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "ldap", id.String(), "ldap_sync", res.auditDetails(err))
+		for _, f := range res.followed {
+			AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", f.userID.String(), ldapAddressFollowedAction, f.details())
+		}
 	}
 	switch {
 	case err == nil:
@@ -638,6 +647,30 @@ type ldapSyncResult struct {
 	synced, disabled, reEnabled, skipped, missing int
 	answered                                      int // searches that answered: found or missing
 	notSignedIn                                   int // no stored sign-in name, and a filter that does not match the address
+	// followed are the accounts whose address moved with their entry's (or could not),
+	// one audit row each.
+	followed []addressFollowed
+}
+
+// ldapAddressFollowedAction is the audit action of an account whose entry's address
+// changed: moved to the new address, or kept on its own when another account has it.
+const ldapAddressFollowedAction = "ldap_entry_address_changed"
+
+// addressFollowed is one account's address change, for its audit row: the directory's
+// addresses (never anything typed), and whether the account took the new one.
+type addressFollowed struct {
+	userID         uuid.UUID
+	from, to       string
+	keptOwnBecause string // "" when the account moved to the new address
+}
+
+func (f addressFollowed) details() json.RawMessage {
+	d := map[string]string{"previous_email": f.from, "email": f.to, "outcome": "updated"}
+	if f.keptOwnBecause != "" {
+		d["outcome"], d["reason"] = "kept", f.keptOwnBecause
+	}
+	raw, _ := json.Marshal(d)
+	return raw
 }
 
 // sameAddress says whether an entry's address is the account's: the same spelling, or,
@@ -712,13 +745,16 @@ func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
 
 // syncConfig runs one sync of a config, under its lease, and says what it did.
 //
-// Every LDAP account is searched for by its address. Only a search that succeeded and
-// found nobody deactivates an account, and ends its sessions; a search that failed
-// leaves the account as it is and is counted as skipped, and a directory that cannot be
-// reached or bound to stops the sync. An account a sync deactivated is re-enabled by a
-// sync that finds it again, after its old sessions are ended (an account deactivated by
-// hand stays inactive: deactivated_by_directory). It stops between accounts when ctx
-// ends, which is how it stops with the process.
+// Every LDAP account is searched for by the name it signs in with (its address when
+// none is stored and the filter matches the address). An account bound to an entry
+// under this config is that entry: found by its identifier when the name finds nobody
+// or someone else, as long as the entry still passes the user filter. Only a search
+// that succeeded and found nobody deactivates an account, and ends its sessions; a
+// search that failed leaves the account as it is and is counted as skipped, and a
+// directory that cannot be reached or bound to stops the sync. An account a sync
+// deactivated is re-enabled by a sync that finds it again, after its old sessions are
+// ended (an account deactivated by hand stays inactive: deactivated_by_directory). It
+// stops between accounts when ctx ends, which is how it stops with the process.
 func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyncResult, err error) {
 	token := uuid.New()
 	cfg, err := h.queries.ClaimLDAPSyncLease(ctx, db.ClaimLDAPSyncLeaseParams{
@@ -781,6 +817,7 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 	type searched struct {
 		dbUser db.ListLDAPUsersRow
 		found  *auth.LDAPUser // nil: the search succeeded and found nobody
+		name   string         // the name the bound entry was found by, when not the stored one
 	}
 	results := make([]searched, 0, len(ldapUsers))
 	missing := 0
@@ -792,40 +829,36 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 		if err := renew(); err != nil {
 			return res, err
 		}
+		bound := boundUnder(dbUser.LdapConfigID, cfg.ID)
 		// The name the person signs in with, which is what the user filter is written
 		// for. An account no sign-in has named yet is searched by its address only when
 		// the filter matches the address; otherwise its search proves nothing either way,
-		// so it is left alone until its next sign-in stores its name.
+		// so it is left alone until its next sign-in stores its name, unless it is bound
+		// to an entry, which is found by its identifier.
 		name := dbUser.LdapLoginName
-		if name == "" {
-			if !byAddress {
-				res.notSignedIn++
-				continue
-			}
+		if name == "" && byAddress {
 			name = dbUser.Email
 		}
-		ldapUser, err := client.SearchUser(name)
-		switch {
-		case errors.Is(err, auth.ErrLDAPUserNotFound):
-			missing++
-			results = append(results, searched{dbUser: dbUser})
-		case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
+		if name == "" && !bound {
+			res.notSignedIn++
+			continue
+		}
+		found, foundBy, outcome, err := findSyncEntry(client, dbUser, name, bound)
+		switch outcome {
+		case syncEntryStop:
 			return res, fmt.Errorf("search the directory: %w", err)
-		case err != nil:
+		case syncEntrySkipped:
 			// The search did not answer whether the user is there: nothing changes.
 			res.skipped++
-			slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
-				"user_id", dbUser.ID, "reason", ldapFailureClass(err))
-		case ldapUser.Email == "":
-			// An entry with no address cannot be told to be this account's: nothing changes.
-			res.skipped++
-		case !sameAddress(ldapUser.Email, dbUser.Email):
-			// The name now finds someone else (a reused uid): this account's entry is
-			// gone, and the other entry's groups are never applied to it.
+			if err != nil {
+				slog.Warn("LDAP sync: a user's search failed; the account is left as it is",
+					"user_id", dbUser.ID, "reason", ldapFailureClass(err))
+			}
+		case syncEntryMissing:
 			missing++
 			results = append(results, searched{dbUser: dbUser})
 		default:
-			results = append(results, searched{dbUser: dbUser, found: ldapUser})
+			results = append(results, searched{dbUser: dbUser, found: found, name: foundBy})
 		}
 	}
 	res.missing, res.answered = missing, len(results)
@@ -859,6 +892,26 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 			res.disabled++
 			slog.Info("LDAP sync: disabled user removed from directory", "email", dbUser.Email)
 			continue
+		}
+
+		// Bound now, by today's rule, when the directory exposes an identifier: the
+		// entry is the one the account's name finds and its address is the account's.
+		// An entry another account holds is that account's: nothing of this one changes.
+		if !boundUnder(dbUser.LdapConfigID, cfg.ID) && ldapUser.EntryID != "" {
+			if _, err := h.queries.LinkLDAPEntry(ctx, db.LinkLDAPEntryParams{ConfigID: cfg.ID, EntryID: ldapUser.EntryID, ID: dbUser.ID}); err != nil {
+				res.skipped++
+				slog.Warn("LDAP sync: could not bind an account to its directory entry; the account is left as it is",
+					"user_id", dbUser.ID, "reason", ldapLinkFailureClass(err))
+				continue
+			}
+		}
+		if r.name != "" {
+			if err := h.queries.SetLDAPLoginName(ctx, db.SetLDAPLoginNameParams{ID: dbUser.ID, LoginName: r.name}); err != nil {
+				slog.Warn("LDAP sync: could not keep the name the account's entry answers to now", "user_id", dbUser.ID, "error", err)
+			}
+		}
+		if f, ok := h.followEntryAddress(ctx, cfg.ID, dbUser.ID, dbUser.Email, ldapUser.Email); ok {
+			res.followed = append(res.followed, f)
 		}
 
 		// A group search that failed says nothing about the user's roles: nothing of
@@ -900,6 +953,185 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 
 	_ = h.queries.UpdateLDAPConfigLastSync(ctx, id)
 	return res, nil
+}
+
+// boundUnder says whether an account's directory binding (users.ldap_config_id) is
+// under this config. An account bound under another config, or one since deleted, is
+// not: it binds again, by today's rule, under the config it signs in or syncs through.
+func boundUnder(configID pgtype.UUID, cfgID uuid.UUID) bool {
+	return configID.Valid && uuid.UUID(configID.Bytes) == cfgID
+}
+
+// errLDAPEntryMismatch is a directory entry whose address names an account bound to
+// another entry: a new person given a departed person's name and address.
+var errLDAPEntryMismatch = errors.New("ldap: the address names an account bound to another directory entry")
+
+// usersLDAPEntryKey is the unique index on users (ldap_config_id, ldap_entry_id)
+// (migration 000152): a binding refused by it is an entry another account holds.
+const usersLDAPEntryKey = "users_ldap_entry_key"
+
+// ldapAccount is ldapAccountForEntry's answer to "which account is this entry".
+type ldapAccount struct {
+	// User is the account: the zero value when Found is false (and, for
+	// errLDAPEntryMismatch, the account the address names, for the audit row).
+	User db.User
+	// Found: a directory account answers to this entry.
+	Found bool
+	// Bound: it answers by the identifier stored on it. Found but not Bound: by its
+	// address, an account not bound under this config yet.
+	Bound bool
+}
+
+// ldapAccountForEntry answers which directory account an entry the directory found
+// under config cfgID is, and writes nothing:
+//   - the account bound to the entry's identifier, whatever its address says now
+//     (Found, Bound);
+//   - else the directory account the entry's address names (the typed name when the
+//     entry has none; GetUserByEmailAndSource), when it is not bound under this config
+//     (Found, not Bound): the caller binds it;
+//   - else none (not Found, nil error).
+//
+// An address that names an account bound under this config to another entry, or bound
+// while this entry carries no identifier, is errLDAPEntryMismatch. The sign-in's rule
+// (provisionLDAPUser) and its failed bind's audit (directoryAccount) both ask it.
+func ldapAccountForEntry(ctx context.Context, q *db.Queries, cfgID uuid.UUID, entry *auth.LDAPUser, typed string) (ldapAccount, error) {
+	if entry.EntryID != "" {
+		u, err := q.GetUserByLDAPEntry(ctx, db.GetUserByLDAPEntryParams{ConfigID: cfgID, EntryID: entry.EntryID})
+		if err == nil {
+			return ldapAccount{User: u, Found: true, Bound: true}, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return ldapAccount{}, fmt.Errorf("lookup user by directory entry: %w", err)
+		}
+	}
+	address := entry.Email
+	if address == "" {
+		address = typed
+	}
+	u, err := q.GetUserByEmailAndSource(ctx, db.GetUserByEmailAndSourceParams{Email: address, AuthSource: "ldap"})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ldapAccount{}, nil
+	}
+	if err != nil {
+		return ldapAccount{}, fmt.Errorf("lookup user: %w", err)
+	}
+	if boundUnder(u.LdapConfigID, cfgID) {
+		return ldapAccount{User: u}, errLDAPEntryMismatch
+	}
+	return ldapAccount{User: u, Found: true}, nil
+}
+
+// ldapLinkFailureClass names why a binding was not written, for the log.
+func ldapLinkFailureClass(err error) string {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return "already_bound"
+	case isDuplicateKeyError(err, usersLDAPEntryKey):
+		return "entry_bound_to_another_account"
+	default:
+		return "database_error"
+	}
+}
+
+// followEntryAddress moves a bound account to its entry's address when the entry's
+// address differs from the account's (sameAddress), and says so for the audit row: a
+// person whose mail changed keeps their one account, which is neither deactivated by a
+// sync nor duplicated by a sign-in. When another account has the new address the
+// account keeps its own, and that is recorded too. ok is false when nothing changed.
+func (h *LDAPHandler) followEntryAddress(ctx context.Context, cfgID, userID uuid.UUID, from, to string) (f addressFollowed, ok bool) {
+	if to == "" || sameAddress(to, from) {
+		return addressFollowed{}, false
+	}
+	f = addressFollowed{userID: userID, from: from, to: to}
+	_, err := h.queries.FollowLDAPEntryAddress(ctx, db.FollowLDAPEntryAddressParams{Email: to, ID: userID, ConfigID: cfgID})
+	switch {
+	case err == nil:
+		slog.Info("LDAP: an account moved to its directory entry's new address", "user_id", userID)
+	case errors.Is(err, pgx.ErrNoRows), isDuplicateKeyError(err):
+		f.keptOwnBecause = "address_in_use"
+	default:
+		slog.Warn("LDAP: could not move an account to its directory entry's new address", "user_id", userID, "error", err)
+		return addressFollowed{}, false
+	}
+	return f, true
+}
+
+// syncEntryOutcome is what a sync's search said about one account.
+type syncEntryOutcome int
+
+const (
+	syncEntryFound   syncEntryOutcome = iota
+	syncEntryMissing                  // the directory answered: the account's entry is not there
+	syncEntrySkipped                  // no answer either way: nothing of the account changes
+	syncEntryStop                     // the directory cannot be reached or bound to: the sync stops
+)
+
+// findSyncEntry is the sync's search for one account. An account not bound under the
+// config is found by today's rule: the entry its name finds, when that entry's address
+// is the account's (sameAddress; a reused name finds someone else, who is never this
+// account). A bound account is the entry whose identifier it holds: the one its name
+// finds when that carries the identifier, else the entry the identifier finds, when it
+// still answers to the user filter by its current name or address (foundBy, for the
+// next sync). A name that finds an entry with no identifier says nothing about a bound
+// account: skipped.
+func findSyncEntry(client ldapDirectory, u db.ListLDAPUsersRow, name string, bound bool) (found *auth.LDAPUser, foundBy string, outcome syncEntryOutcome, err error) {
+	classify := func(err error) syncEntryOutcome {
+		switch {
+		case errors.Is(err, auth.ErrLDAPUserNotFound):
+			return syncEntryMissing
+		case errors.Is(err, auth.ErrLDAPConnection), errors.Is(err, auth.ErrLDAPBindCredentials):
+			return syncEntryStop
+		default:
+			return syncEntrySkipped
+		}
+	}
+	var entry *auth.LDAPUser
+	if name != "" {
+		e, err := client.SearchUser(name)
+		if err != nil && classify(err) != syncEntryMissing {
+			return nil, "", classify(err), err
+		}
+		entry = e
+	}
+	if !bound {
+		switch {
+		case entry == nil:
+			return nil, "", syncEntryMissing, nil
+		case entry.Email == "":
+			// An entry with no address cannot be told to be this account's.
+			return nil, "", syncEntrySkipped, nil
+		case !sameAddress(entry.Email, u.Email):
+			return nil, "", syncEntryMissing, nil
+		}
+		return entry, "", syncEntryFound, nil
+	}
+	if entry != nil {
+		switch entry.EntryID {
+		case u.LdapEntryID:
+			return entry, "", syncEntryFound, nil
+		case "":
+			return nil, "", syncEntrySkipped, nil
+		}
+	}
+	// The name finds nobody, or someone else: the account's own entry, by its identifier.
+	own, err := client.SearchUserByEntryID(u.LdapEntryID)
+	if err != nil {
+		return nil, "", classify(err), err
+	}
+	for _, n := range []string{own.Username, own.Email} {
+		if n == "" || n == name {
+			continue
+		}
+		e, err := client.SearchUser(n)
+		switch {
+		case err == nil && e.EntryID == u.LdapEntryID:
+			return e, n, syncEntryFound, nil
+		case err != nil && classify(err) != syncEntryMissing:
+			return nil, "", classify(err), err
+		}
+	}
+	// The entry is there but the user filter no longer admits it.
+	return nil, "", syncEntryMissing, nil
 }
 
 // RunScheduledSync runs the sync of the config sign-in uses (the oldest enabled one)
@@ -967,6 +1199,17 @@ func (h *LDAPHandler) RunScheduledSync(ctx context.Context) {
 		Details:      res.auditDetails(err),
 	}); err != nil {
 		slog.Warn("LDAP sync: failed to insert the audit row of a scheduled sync", "config_id", cfg.ID, "error", err)
+	}
+	for _, f := range res.followed {
+		if err := audit.Write(actx, h.queries, h.eventPub, db.InsertAuditLogParams{
+			UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+			ResourceType: "user",
+			ResourceID:   f.userID.String(),
+			Action:       ldapAddressFollowedAction,
+			Details:      f.details(),
+		}); err != nil {
+			slog.Warn("LDAP sync: failed to insert the audit row of an address change", "user_id", f.userID, "error", err)
+		}
 	}
 }
 

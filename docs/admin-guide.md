@@ -698,6 +698,8 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 > **StartTLS and `ldaps://` both check the certificate** against the host in the Server URL, unless **Skip TLS Verify** is on. Use the name the certificate was issued for, not an IP address it does not list.
 >
 > **Sync.** The config sign-in uses (the oldest enabled one) is synced every **Sync interval** minutes, 60 by default; 0 turns the scheduled sync off. **Sync Now** syncs any saved config at once. One sync of a config runs at a time: Sync Now answers that one is already running, and a scheduled sync waits for the next minute. A sync disables a user only when the directory answered the search and did not return them, and ends their sessions — but when every account whose search answered is missing, or more than half of them and at least three, it changes nothing at all. So a sync never deactivates the last accounts it can see; deactivate those by hand. A mass miss is a wrong user filter, search base DN or bind account read access far more often than people leaving, so the sync is recorded as failed (`too_many_missing`, with the counts) and **Sync Now** says what to check; a search that fails leaves the user as they are (counted as skipped), and a directory that cannot be reached or bound to stops the sync with nobody disabled. A later sync re-enables a user a sync disabled once the directory has them again, but never someone you deactivated by hand, which includes every LDAP user that was inactive before the upgrade to this release. Scheduled syncs are audited as `ldap_sync` by the system account.
+>
+> **Test** with a test username also says whether the directory gives entries a stable identifier (`entryUUID` on OpenLDAP and 389, `objectGUID` on Active Directory). A directory that has neither works as before, by sign-in name and address only.
 
 #### How LDAP Login Works
 
@@ -711,6 +713,20 @@ The **Test Connection** panel appears only once the config is saved, and tests t
 3. If no local account existed, one is JIT-provisioned with `auth_source=ldap`
 4. LDAP group memberships are mapped to Nexara roles
 5. Every login and sync **replaces** the user's roles: all of them are removed, hand-assigned and cluster-scoped ones included, and only the mapped global roles or the default role are added back. When the group search fails (a timeout, a size limit, no read access to the groups), nothing is replaced: the sign-in keeps the roles the user has, and the sync counts the user as skipped
+
+#### Which directory entry an account is
+
+When the directory gives its entries a stable identifier (`entryUUID`, or `objectGUID`, which Nexara stores in one text form), a directory account is bound to its entry under the configuration it signs in through:
+
+- the account bound to the entry is the account, whatever address the entry has now. When the entry's address has changed, the account takes the new one (audited as `ldap_entry_address_changed`, with both addresses), so a person whose mail changed keeps their one account: the sync no longer deactivates it, and a sign-in with the new address no longer creates a second. When another account already has the new address, in any case, the account keeps its own address and the audit row says `kept`;
+- otherwise, the directory account the entry's address names is bound to the entry and signed in, as sign-in worked before. An account with two-factor authentication, or a deactivated one, is not bound at sign-in; the next sync binds it. A binding written at sign-in is audited as `ldap_entry_linked` under the account;
+- an account bound to **another** entry is refused: a new person given a departed person's name and address cannot sign in to the departed person's account. Nothing is created or bound; the sign-in page says *This sign-in does not match the directory entry your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`, carrying the account's own address and nothing typed. An account bound while the directory now gives its entry no identifier is refused the same way.
+
+A sync searches a bound account by the name it signs in with and accepts only its own entry; when the name finds nobody, or someone else, it looks the entry up by its identifier and accepts it if the user filter still finds it by its current name or address, and from then on searches with that name.
+
+**After the upgrade that added bindings**, no account is bound. Each is bound at its next sign-in or sync by today's rule, its address, so until then it is as exposed as before the upgrade, and no sync deactivates anyone for having no identifier stored. A binding belongs to one configuration: an account bound under a configuration you delete, or under another configuration than the one it now signs in through, is bound again by its address.
+
+**Resetting a link.** On **Admin > Users**, **More > Reset directory link** (offered for a bound directory account) clears the account's binding after a confirmation: its next sign-in or sync binds it again by address. It ends every session of the account and is recorded as `user_directory_link_reset`. You cannot reset your own. Use it when a person's directory entry was deleted and re-created, or after the directory stopped giving entries an identifier.
 
 ### OIDC / SSO
 

@@ -46,7 +46,7 @@ func TestLDAPProvision_RefusesAnAddressAnotherAccountHasInAnotherCase(t *testing
 	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries})
 	var ok bool
 	callProvision(t, a, func(c fiber.Ctx) error {
-		_, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, &auth.LDAPUser{Email: "Alice@Example.com"}, "Alice@Example.com")
+		_, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, &auth.LDAPUser{Email: "Alice@Example.com"}, "Alice@Example.com", nil)
 		return c.SendStatus(http.StatusNoContent)
 	})
 	if ok || len(store.named("CreateLDAPUser")) != 0 {

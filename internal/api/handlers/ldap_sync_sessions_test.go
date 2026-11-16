@@ -113,6 +113,16 @@ func (d fakeDirectory) SearchUser(name string) (*auth.LDAPUser, error) {
 	return nil, fmt.Errorf("%w: no entries matched", auth.ErrLDAPUserNotFound)
 }
 
+// SearchUserByEntryID finds the entry of entries that carries id.
+func (d fakeDirectory) SearchUserByEntryID(id string) (*auth.LDAPUser, error) {
+	for _, e := range d.entries {
+		if e.EntryID == id {
+			return &e, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: no entries matched", auth.ErrLDAPUserNotFound)
+}
+
 // TestLDAPSync_AFailedRevokeIsRetriedBeforeTheReEnable: when ending the sessions
 // fails at the deactivation, nothing retries it while the user is disabled, so the
 // sync that re-enables them must end those sessions first, or it revives them.
@@ -334,7 +344,7 @@ func TestLDAP_AFailedGroupSearchChangesNoRole(t *testing.T) {
 	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries})
 	var ok bool
 	callProvision(t, a, func(c fiber.Ctx) error {
-		_, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, failed, user.Email)
+		_, ok = a.auth.provisionLDAPUser(c, db.LdapConfig{}, failed, user.Email, nil)
 		return c.SendStatus(http.StatusNoContent)
 	})
 	if !ok || len(store.named("RevokeAllUserRoles"))+len(store.named("AssignUserRole")) != 0 {

@@ -62,6 +62,11 @@ export interface UserListItem {
    * caller who holds manage:user.
    */
   sso_linked?: boolean;
+  /**
+   * A directory (LDAP) account bound to its directory entry (entryUUID or
+   * objectGUID). Sent only to a caller who holds manage:user.
+   */
+  directory_linked?: boolean;
   created_at: string;
   updated_at: string;
 }

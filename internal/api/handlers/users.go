@@ -87,8 +87,11 @@ type userListResponse struct {
 	AuthSource  string    `json:"auth_source"`
 	TotpEnabled bool      `json:"totp_enabled"`
 	SSOLinked   *bool     `json:"sso_linked,omitempty"` // see ssoLinkedFor
-	CreatedAt   string    `json:"created_at"`
-	UpdatedAt   string    `json:"updated_at"`
+	// DirectoryLinked says whether a directory account is bound to its directory entry,
+	// shown as sso_linked is (ssoLinkedFor).
+	DirectoryLinked *bool  `json:"directory_linked,omitempty"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // ssoLinkedFor is sso_linked as a caller may see it: whether an SSO account is bound
@@ -132,17 +135,18 @@ func (h *UserHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 			roles = []string{}
 		}
 		resp[i] = userListResponse{
-			ID:          u.ID,
-			Email:       u.Email,
-			DisplayName: u.DisplayName,
-			Role:        u.Role,
-			Roles:       roles,
-			IsActive:    u.IsActive,
-			AuthSource:  u.AuthSource,
-			TotpEnabled: u.TotpEnabled,
-			SSOLinked:   ssoLinkedFor(showLinks, u.SsoLinked),
-			CreatedAt:   u.CreatedAt.Format(time.RFC3339Nano),
-			UpdatedAt:   u.UpdatedAt.Format(time.RFC3339Nano),
+			ID:              u.ID,
+			Email:           u.Email,
+			DisplayName:     u.DisplayName,
+			Role:            u.Role,
+			Roles:           roles,
+			IsActive:        u.IsActive,
+			AuthSource:      u.AuthSource,
+			TotpEnabled:     u.TotpEnabled,
+			SSOLinked:       ssoLinkedFor(showLinks, u.SsoLinked),
+			DirectoryLinked: ssoLinkedFor(showLinks, u.DirectoryLinked),
+			CreatedAt:       u.CreatedAt.Format(time.RFC3339Nano),
+			UpdatedAt:       u.UpdatedAt.Format(time.RFC3339Nano),
 		}
 	}
 
@@ -170,17 +174,18 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return c.JSON(userListResponse{
-		ID:          user.ID,
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		Role:        user.Role,
-		Roles:       roles,
-		IsActive:    user.IsActive,
-		AuthSource:  user.AuthSource,
-		TotpEnabled: user.TotpSecret.Valid,
-		SSOLinked:   ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
-		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
-		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
+		ID:              user.ID,
+		Email:           user.Email,
+		DisplayName:     user.DisplayName,
+		Role:            user.Role,
+		Roles:           roles,
+		IsActive:        user.IsActive,
+		AuthSource:      user.AuthSource,
+		TotpEnabled:     user.TotpSecret.Valid,
+		SSOLinked:       ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
+		DirectoryLinked: ssoLinkedFor(callerManagesUsers(c), user.LdapConfigID.Valid),
+		CreatedAt:       user.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       user.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -330,17 +335,18 @@ func (h *UserHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return c.JSON(userListResponse{
-		ID:          user.ID,
-		Email:       user.Email,
-		DisplayName: user.DisplayName,
-		Role:        user.Role,
-		Roles:       roles,
-		IsActive:    user.IsActive,
-		AuthSource:  user.AuthSource,
-		TotpEnabled: user.TotpSecret.Valid,
-		SSOLinked:   ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
-		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
-		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
+		ID:              user.ID,
+		Email:           user.Email,
+		DisplayName:     user.DisplayName,
+		Role:            user.Role,
+		Roles:           roles,
+		IsActive:        user.IsActive,
+		AuthSource:      user.AuthSource,
+		TotpEnabled:     user.TotpSecret.Valid,
+		SSOLinked:       ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
+		DirectoryLinked: ssoLinkedFor(callerManagesUsers(c), user.LdapConfigID.Valid),
+		CreatedAt:       user.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:       user.UpdatedAt.Format(time.RFC3339Nano),
 	})
 }
 
@@ -562,7 +568,7 @@ func (h *UserHandler) ResetSSOLink(c fiber.Ctx, p *apischema.Params) error {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
 	}
 
-	revoked, unconfirmed, err := h.resetSSOLinks(c, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
+	revoked, unconfirmed, err := h.resetSSOLinks(c, ssoLinkNotResetMessage, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
 		n, err := qx.ClearOIDCIdentity(ctx, id)
 		if err == nil && n == 0 {
 			err = errNotSSOLinked
@@ -590,6 +596,60 @@ func (h *UserHandler) ResetSSOLink(c fiber.Ctx, p *apischema.Params) error {
 	return c.JSON(fiber.Map{"message": "Single sign-on link reset; the account's sessions have ended"})
 }
 
+// errNotDirectoryLinked is a reset of an account that has no directory link to reset.
+var errNotDirectoryLinked = errors.New("the account has no directory link")
+
+// directoryLinkNotResetMessage is the answer of a directory link reset that rolled back.
+const directoryLinkNotResetMessage = "The directory link was NOT reset; the account and its sessions are as they were."
+
+// ResetDirectoryLink handles DELETE /api/v1/users/:id/directory-link: it clears the
+// directory entry an LDAP account is bound to, so that its next sign-in or sync binds it
+// again by address, and ends every session of the account (the entry behind them is in
+// question). The shape of ResetSSOLink.
+func (h *UserHandler) ResetDirectoryLink(c fiber.Ctx, p *apischema.Params) error {
+	id, err := parseParamUUID(p.String("id"))
+	if err != nil {
+		return err
+	}
+	if callerID, _ := c.Locals("user_id").(uuid.UUID); callerID == id {
+		return fiber.NewError(fiber.StatusForbidden, "Cannot reset your own directory link")
+	}
+	user, err := h.queries.GetUserByID(c.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusNotFound, "User not found")
+		}
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to get user")
+	}
+
+	revoked, unconfirmed, err := h.resetSSOLinks(c, directoryLinkNotResetMessage, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
+		n, err := qx.ClearLDAPEntry(ctx, id)
+		if err == nil && n == 0 {
+			err = errNotDirectoryLinked
+		}
+		return []uuid.UUID{id}, err
+	})
+	if errors.Is(err, errNotDirectoryLinked) {
+		return fiber.NewError(fiber.StatusBadRequest, "This account has no directory link to reset")
+	}
+	if err != nil && !unconfirmed {
+		return err
+	}
+	details := map[string]string{"email": user.Email}
+	if unconfirmed {
+		details["outcome"] = "unconfirmed"
+	}
+	raw, _ := json.Marshal(details)
+	h.withFollowUp(c, func() {
+		AuditLog(c, h.queries, h.eventPub, pgtype.UUID{}, "user", id.String(), "user_directory_link_reset", raw)
+	})
+	if err != nil {
+		return err
+	}
+	h.forgetSessions(c, revoked)
+	return c.JSON(fiber.Map{"message": "Directory link reset; the account's sessions have ended"})
+}
+
 // ResetAllSSOLinks handles DELETE /api/v1/oidc/links: the reset of every SSO account's
 // link at once, for after a configuration's issuer has moved and every account bound
 // under the old one is refused. Each account's sessions end, as at a single reset (the
@@ -597,7 +657,7 @@ func (h *UserHandler) ResetSSOLink(c fiber.Ctx, p *apischema.Params) error {
 // audit row.
 func (h *UserHandler) ResetAllSSOLinks(c fiber.Ctx, _ *apischema.Params) error {
 	var cleared int
-	revoked, unconfirmed, err := h.resetSSOLinks(c, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
+	revoked, unconfirmed, err := h.resetSSOLinks(c, ssoLinkNotResetMessage, func(ctx context.Context, qx *db.Queries) ([]uuid.UUID, error) {
 		ids, err := qx.ClearAllOIDCIdentities(ctx)
 		cleared = len(ids)
 		return ids, err
@@ -624,10 +684,11 @@ func (h *UserHandler) ResetAllSSOLinks(c fiber.Ctx, _ *apischema.Params) error {
 // and ends every session of each of those accounts, in ONE transaction, for the reason
 // deactivate gives: a reset whose sessions could not be ended is not done. It returns
 // the revoked sessions, for their Redis rows. unconfirmed is a COMMIT whose answer was
-// lost: the reset may have taken effect, and repeating it is safe.
-func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clearLinks func(context.Context, *db.Queries) ([]uuid.UUID, error)) (revoked []uuid.UUID, unconfirmed bool, err error) {
+// lost: the reset may have taken effect, and repeating it is safe. notReset is the
+// answer of a reset that rolled back. The directory link's reset uses it too.
+func (h *UserHandler) resetSSOLinks(c fiber.Ctx, notReset string, clearLinks func(context.Context, *db.Queries) ([]uuid.UUID, error)) (revoked []uuid.UUID, unconfirmed bool, err error) {
 	if h.pool == nil {
-		return nil, false, fiber.NewError(fiber.StatusInternalServerError, ssoLinkNotResetMessage)
+		return nil, false, fiber.NewError(fiber.StatusInternalServerError, notReset)
 	}
 	d := h.dbTimeout
 	if d <= 0 {
@@ -639,28 +700,28 @@ func (h *UserHandler) resetSSOLinks(c fiber.Ctx, clearLinks func(context.Context
 	// READ COMMITTED, for the reason deactivate pins it.
 	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return nil, false, ssoLinkNotReset(err)
+		return nil, false, ssoLinkNotReset(err, notReset)
 	}
 	defer releaseTx(tx, "reset sso link")()
 	qx := h.queries.WithTx(tx)
 
 	accounts, err := clearLinks(ctx, qx)
 	if err != nil {
-		if errors.Is(err, errNotSSOLinked) {
+		if errors.Is(err, errNotSSOLinked) || errors.Is(err, errNotDirectoryLinked) {
 			return nil, false, err
 		}
-		return nil, false, ssoLinkNotReset(err)
+		return nil, false, ssoLinkNotReset(err, notReset)
 	}
 	for _, id := range accounts {
 		ids, err := auth.RevokeAllUserSessionsIn(ctx, qx, id)
 		if err != nil {
-			return nil, false, ssoLinkNotReset(err)
+			return nil, false, ssoLinkNotReset(err, notReset)
 		}
 		revoked = append(revoked, ids...)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		if !commitOutcomeUnknown(err) {
-			return nil, false, ssoLinkNotReset(err)
+			return nil, false, ssoLinkNotReset(err, notReset)
 		}
 		slog.Error("reset sso link: the commit's outcome is UNCONFIRMED", "error", err)
 		if isTransientDBError(err) {
@@ -679,14 +740,14 @@ const (
 		"or not. Check the account; repeating the reset is safe."
 )
 
-// ssoLinkNotReset answers a reset that rolled back: 503 when the database was away
-// (isTransientDBError), else 500.
-func ssoLinkNotReset(err error) error {
+// ssoLinkNotReset answers a reset that rolled back with message: 503 when the database
+// was away (isTransientDBError), else 500.
+func ssoLinkNotReset(err error, message string) error {
 	slog.Warn("reset sso link: not done; nothing was changed", "error", err)
 	if isTransientDBError(err) {
-		return fiber.NewError(fiber.StatusServiceUnavailable, ssoLinkNotResetMessage)
+		return fiber.NewError(fiber.StatusServiceUnavailable, message)
 	}
-	return fiber.NewError(fiber.StatusInternalServerError, ssoLinkNotResetMessage)
+	return fiber.NewError(fiber.StatusInternalServerError, message)
 }
 
 // forgetSessions drops the Redis rows of revoked sessions under a follow-up deadline.

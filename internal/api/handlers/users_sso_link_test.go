@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction: an administrator's
@@ -23,14 +26,23 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 			}
 		}
 	}
+	bound := func(s *epochStore) {
+		for _, u := range s.users {
+			if u.Email == epochLoginEmail {
+				u.AuthSource, u.LdapConfigID, u.LdapEntryID = "ldap", pgtype.UUID{Bytes: uuid.New(), Valid: true}, entryOfCarol
+			}
+		}
+	}
 	for _, tc := range []struct {
-		name  string
-		tweak func(*epochStore)
-		self  bool
-		all   bool // DELETE /oidc/links
-		want  int
+		name      string
+		tweak     func(*epochStore)
+		self      bool
+		all       bool // DELETE /oidc/links
+		directory bool // DELETE /users/:id/directory-link
+		want      int
 	}{
 		{name: "a linked SSO account", tweak: linked, want: http.StatusOK},
+		{name: "a bound directory account", tweak: bound, directory: true, want: http.StatusOK},
 		{name: "every linked account at once", tweak: linked, all: true, want: http.StatusOK},
 		{name: "the sessions cannot be ended", want: http.StatusInternalServerError, tweak: func(s *epochStore) {
 			linked(s)
@@ -51,6 +63,9 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 			if tc.all {
 				path, action, resource = "/oidc/links", "oidc_links_reset", "links"
 			}
+			if tc.directory {
+				path, action = "/users/"+f.target.ID.String()+"/directory-link", "user_directory_link_reset"
+			}
 			resp := f.a.send(t, http.MethodDelete, path, "",
 				map[string]string{"X-Test-Acting-User": acting.String()}, 20*time.Second)
 			if resp.StatusCode != tc.want {
@@ -64,7 +79,7 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 				}
 				return
 			}
-			if u.OidcIssuer != "" || u.OidcSubject != "" || len(live) != 0 || u.AuthEpoch != before.AuthEpoch+1 {
+			if u.OidcIssuer != "" || u.OidcSubject != "" || u.LdapConfigID.Valid || u.LdapEntryID != "" || len(live) != 0 || u.AuthEpoch != before.AuthEpoch+1 {
 				t.Errorf("issuer %q subject %q, %d live sessions, epoch %d; want cleared, none, %d",
 					u.OidcIssuer, u.OidcSubject, len(live), u.AuthEpoch, before.AuthEpoch+1)
 			}
@@ -75,7 +90,7 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 			}
 			rows, details := f.a.store.auditRowsWritten(), f.a.store.auditDetailsWritten()
 			if len(rows) != 1 || rows[0].action != action || rows[0].resourceID != resource ||
-				rows[0].actor != f.admin.ID || strings.Contains(details[0], epochSubject) {
+				rows[0].actor != f.admin.ID || strings.Contains(details[0], epochSubject) || strings.Contains(details[0], entryOfCarol) {
 				t.Errorf("audit %v %v; want one %s of %s, without the subject", rows, details, action, resource)
 			}
 		})

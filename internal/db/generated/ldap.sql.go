@@ -64,6 +64,21 @@ func (q *Queries) ClaimLDAPSyncLease(ctx context.Context, arg ClaimLDAPSyncLease
 	return i, err
 }
 
+const clearLDAPEntry = `-- name: ClearLDAPEntry :execrows
+UPDATE users SET ldap_config_id = NULL, ldap_entry_id = ''
+WHERE id = $1 AND auth_source = 'ldap' AND ldap_config_id IS NOT NULL
+`
+
+// An administrator's reset of one directory account's binding: its next sign-in or
+// sync binds it again by address. 0 rows: not a directory account, or not bound.
+func (q *Queries) ClearLDAPEntry(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearLDAPEntry, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createLDAPConfig = `-- name: CreateLDAPConfig :one
 INSERT INTO ldap_configs (
     name, enabled, server_url, start_tls, skip_tls_verify,
@@ -153,18 +168,28 @@ func (q *Queries) CreateLDAPConfig(ctx context.Context, arg CreateLDAPConfigPara
 }
 
 const createLDAPUser = `-- name: CreateLDAPUser :one
-INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source)
-VALUES ($1, '', $2, true, 'user', 'ldap')
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source, ldap_config_id, ldap_entry_id)
+VALUES ($1, '', $2, true, 'user', 'ldap', $3::uuid, $4)
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
 
 type CreateLDAPUserParams struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
+	Email       string      `json:"email"`
+	DisplayName string      `json:"display_name"`
+	ConfigID    pgtype.UUID `json:"config_id"`
+	EntryID     string      `json:"entry_id"`
 }
 
+// A new directory account, bound at creation to the entry that signed in when the
+// directory exposes an identifier (config_id NULL and entry_id ” when it does not);
+// users_ldap_entry_key refuses a second account for one entry under one configuration.
 func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) (User, error) {
-	row := q.db.QueryRow(ctx, createLDAPUser, arg.Email, arg.DisplayName)
+	row := q.db.QueryRow(ctx, createLDAPUser,
+		arg.Email,
+		arg.DisplayName,
+		arg.ConfigID,
+		arg.EntryID,
+	)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -182,6 +207,8 @@ func (q *Queries) CreateLDAPUser(ctx context.Context, arg CreateLDAPUserParams) 
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
@@ -208,6 +235,52 @@ DELETE FROM ldap_configs WHERE id = $1
 func (q *Queries) DeleteLDAPConfig(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteLDAPConfig, id)
 	return err
+}
+
+const followLDAPEntryAddress = `-- name: FollowLDAPEntryAddress :one
+UPDATE users SET email = $1::text
+WHERE users.id = $2 AND users.auth_source = 'ldap' AND users.ldap_config_id = $3::uuid
+  AND NOT EXISTS (SELECT 1 FROM users y WHERE y.id <> $2
+      AND (y.email = $1::text
+           OR (octet_length($1::text) = char_length($1::text)
+               AND octet_length(y.email) = char_length(y.email)
+               AND lower(y.email) = lower($1::text))))
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
+`
+
+type FollowLDAPEntryAddressParams struct {
+	Email    string    `json:"email"`
+	ID       uuid.UUID `json:"id"`
+	ConfigID uuid.UUID `json:"config_id"`
+}
+
+// Moves a bound directory account to the address its entry now has, unless another
+// account holds that address in any case (the rule of EmailTakenIgnoringCase): no row
+// then, and the account keeps the address it has. Only for an account bound under
+// this configuration, which is what makes the entry its own.
+func (q *Queries) FollowLDAPEntryAddress(ctx context.Context, arg FollowLDAPEntryAddressParams) (User, error) {
+	row := q.db.QueryRow(ctx, followLDAPEntryAddress, arg.Email, arg.ID, arg.ConfigID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.TotpSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.AuthSource,
+		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
+	)
+	return i, err
 }
 
 const getEnabledLDAPConfig = `-- name: GetEnabledLDAPConfig :one
@@ -283,7 +356,7 @@ func (q *Queries) GetLDAPConfig(ctx context.Context, id uuid.UUID) (LdapConfig, 
 }
 
 const getUserByEmailAndSource = `-- name: GetUserByEmailAndSource :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject FROM users
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id FROM users
 WHERE (users.email = $1::text
        OR (octet_length($1::text) = char_length($1::text)
            AND octet_length(users.email) = char_length(users.email)
@@ -319,6 +392,91 @@ func (q *Queries) GetUserByEmailAndSource(ctx context.Context, arg GetUserByEmai
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
+	)
+	return i, err
+}
+
+const getUserByLDAPEntry = `-- name: GetUserByLDAPEntry :one
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id FROM users
+WHERE ldap_config_id = $1::uuid AND ldap_entry_id = $2
+  AND ldap_entry_id <> '' AND auth_source = 'ldap'
+`
+
+type GetUserByLDAPEntryParams struct {
+	ConfigID uuid.UUID `json:"config_id"`
+	EntryID  string    `json:"entry_id"`
+}
+
+// The directory account bound to this entry under this configuration, whatever its
+// address says now.
+func (q *Queries) GetUserByLDAPEntry(ctx context.Context, arg GetUserByLDAPEntryParams) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByLDAPEntry, arg.ConfigID, arg.EntryID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.TotpSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.AuthSource,
+		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
+	)
+	return i, err
+}
+
+const linkLDAPEntry = `-- name: LinkLDAPEntry :one
+UPDATE users SET ldap_config_id = $1::uuid, ldap_entry_id = $2
+WHERE id = $3 AND auth_source = 'ldap'
+  AND ldap_config_id IS DISTINCT FROM $1::uuid
+  AND $2::text <> ''
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
+`
+
+type LinkLDAPEntryParams struct {
+	ConfigID uuid.UUID `json:"config_id"`
+	EntryID  string    `json:"entry_id"`
+	ID       uuid.UUID `json:"id"`
+}
+
+// Binds a directory account to this entry under this configuration, and only one not
+// bound under it already: no row when it is of another source or bound under this
+// configuration (to this entry or another), so two first sign-ins or a sign-in and a
+// sync that race cannot both write, and a stored binding is never overwritten. An
+// account bound under another configuration, or one since deleted, is bound again.
+// users_ldap_entry_key refuses an entry another account holds.
+func (q *Queries) LinkLDAPEntry(ctx context.Context, arg LinkLDAPEntryParams) (User, error) {
+	row := q.db.QueryRow(ctx, linkLDAPEntry, arg.ConfigID, arg.EntryID, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.IsActive,
+		&i.TotpSecret,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.AuthSource,
+		&i.AuthEpoch,
+		&i.DeactivatedByDirectory,
+		&i.LdapLoginName,
+		&i.OidcIssuer,
+		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
@@ -408,23 +566,26 @@ func (q *Queries) ListLDAPConfigs(ctx context.Context) ([]LdapConfig, error) {
 }
 
 const listLDAPUsers = `-- name: ListLDAPUsers :many
-SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name
+SELECT id, email, display_name, role, is_active, created_at, updated_at, auth_source, deactivated_by_directory, ldap_login_name,
+       ldap_config_id, ldap_entry_id
 FROM users
 WHERE auth_source = 'ldap'
 ORDER BY email
 `
 
 type ListLDAPUsersRow struct {
-	ID                     uuid.UUID `json:"id"`
-	Email                  string    `json:"email"`
-	DisplayName            string    `json:"display_name"`
-	Role                   string    `json:"role"`
-	IsActive               bool      `json:"is_active"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
-	AuthSource             string    `json:"auth_source"`
-	DeactivatedByDirectory bool      `json:"deactivated_by_directory"`
-	LdapLoginName          string    `json:"ldap_login_name"`
+	ID                     uuid.UUID   `json:"id"`
+	Email                  string      `json:"email"`
+	DisplayName            string      `json:"display_name"`
+	Role                   string      `json:"role"`
+	IsActive               bool        `json:"is_active"`
+	CreatedAt              time.Time   `json:"created_at"`
+	UpdatedAt              time.Time   `json:"updated_at"`
+	AuthSource             string      `json:"auth_source"`
+	DeactivatedByDirectory bool        `json:"deactivated_by_directory"`
+	LdapLoginName          string      `json:"ldap_login_name"`
+	LdapConfigID           pgtype.UUID `json:"ldap_config_id"`
+	LdapEntryID            string      `json:"ldap_entry_id"`
 }
 
 func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error) {
@@ -447,6 +608,8 @@ func (q *Queries) ListLDAPUsers(ctx context.Context) ([]ListLDAPUsersRow, error)
 			&i.AuthSource,
 			&i.DeactivatedByDirectory,
 			&i.LdapLoginName,
+			&i.LdapConfigID,
+			&i.LdapEntryID,
 		); err != nil {
 			return nil, err
 		}
@@ -637,7 +800,7 @@ func (q *Queries) UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) er
 const updateLDAPUserProfile = `-- name: UpdateLDAPUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'ldap'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
 
 type UpdateLDAPUserProfileParams struct {
@@ -664,6 +827,8 @@ func (q *Queries) UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserP
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }

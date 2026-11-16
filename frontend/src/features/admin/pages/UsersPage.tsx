@@ -25,6 +25,7 @@ import {
   useUpdateUser,
   useDeleteUser,
   useResetSSOLink,
+  useResetDirectoryLink,
 } from "../api/rbac-queries";
 import { useAdminResetTOTP } from "@/features/settings/api/totp-queries";
 import { RoleAssignDialog } from "../components/RoleAssignDialog";
@@ -45,6 +46,7 @@ export function UsersPage() {
   const deleteUser = useDeleteUser();
   const resetTotp = useAdminResetTOTP();
   const resetSSOLink = useResetSSOLink();
+  const resetDirectoryLink = useResetDirectoryLink();
   const [roleDialogUserId, setRoleDialogUserId] = useState<string | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
@@ -203,6 +205,22 @@ export function UsersPage() {
                                 }}
                               >
                                 Reset SSO link
+                              </DropdownMenuItem>
+                            )}
+                          {user.auth_source === "ldap" &&
+                            user.directory_linked === true && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `Reset the directory link of ${user.email}? Their sessions end now, and their next sign-in or sync binds the account to whichever directory entry presents this address, so make sure it is the address the directory has now.`,
+                                    )
+                                  ) {
+                                    resetDirectoryLink.mutate(user.id);
+                                  }
+                                }}
+                              >
+                                Reset directory link
                               </DropdownMenuItem>
                             )}
                           <DropdownMenuItem

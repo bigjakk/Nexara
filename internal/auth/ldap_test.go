@@ -140,3 +140,33 @@ func TestValidateFilters_AFilterGoLDAPNoLongerCompilesIsNamed(t *testing.T) {
 		t.Errorf("searchUser = %v, want ErrLDAPFilterInvalid", err)
 	}
 }
+
+// TestEntryIDOf_OneCanonicalTextForm: an Active Directory objectGUID is read as its 16
+// raw bytes and printed as AD prints a GUID (first three fields little-endian), an
+// entryUUID in lower case, and anything else is no identifier; the sync's search by
+// identifier turns the text back into the same bytes, each escaped.
+func TestEntryIDOf_OneCanonicalTextForm(t *testing.T) {
+	t.Parallel()
+	guid := []byte{0x03, 0x02, 0x01, 0x00, 0x05, 0x04, 0x07, 0x06, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f}
+	attr := func(name string, raw []byte) *ldap.EntryAttribute {
+		return &ldap.EntryAttribute{Name: name, Values: []string{string(raw)}, ByteValues: [][]byte{raw}}
+	}
+	for _, tc := range []struct {
+		name  string
+		attrs []*ldap.EntryAttribute
+		want  string
+	}{
+		{"objectGUID", []*ldap.EntryAttribute{attr("objectGUID", guid)}, "objectGUID:00010203-0405-0607-0809-0a0b0c0d0e0f"},
+		{"entryUUID", []*ldap.EntryAttribute{attr("entryUUID", []byte("6C0A1F6E-0000-4000-8000-0000000000A1"))}, "entryUUID:6c0a1f6e-0000-4000-8000-0000000000a1"},
+		{"neither", nil, ""},
+		{"an objectGUID of the wrong length", []*ldap.EntryAttribute{attr("objectGUID", guid[:15])}, ""},
+	} {
+		if got := entryIDOf(&ldap.Entry{Attributes: tc.attrs}); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	filter, err := entryIDFilter("objectGUID:00010203-0405-0607-0809-0a0b0c0d0e0f")
+	if want := `(objectGUID=\03\02\01\00\05\04\07\06\08\09\0a\0b\0c\0d\0e\0f)`; err != nil || filter != want {
+		t.Errorf("entryIDFilter = %q, %v; want %q", filter, err, want)
+	}
+}

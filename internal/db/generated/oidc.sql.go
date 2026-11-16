@@ -150,7 +150,7 @@ func (q *Queries) CreateOIDCConfig(ctx context.Context, arg CreateOIDCConfigPara
 const createOIDCUser = `-- name: CreateOIDCUser :one
 INSERT INTO users (email, password_hash, display_name, is_active, role, auth_source, oidc_issuer, oidc_subject)
 VALUES ($1, '', $2, true, 'user', 'oidc', $3, $4)
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
 
 type CreateOIDCUserParams struct {
@@ -186,6 +186,8 @@ func (q *Queries) CreateOIDCUser(ctx context.Context, arg CreateOIDCUserParams) 
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
@@ -262,7 +264,7 @@ func (q *Queries) GetOIDCConfig(ctx context.Context, id uuid.UUID) (OidcConfig, 
 }
 
 const getUserByOIDCIdentity = `-- name: GetUserByOIDCIdentity :one
-SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject FROM users
+SELECT id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id FROM users
 WHERE oidc_issuer = $1 AND oidc_subject = $2
   AND oidc_subject <> '' AND auth_source = 'oidc'
 `
@@ -292,6 +294,8 @@ func (q *Queries) GetUserByOIDCIdentity(ctx context.Context, arg GetUserByOIDCId
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
@@ -300,7 +304,7 @@ const linkOIDCIdentity = `-- name: LinkOIDCIdentity :one
 UPDATE users SET oidc_issuer = $1, oidc_subject = $2
 WHERE id = $3 AND auth_source = 'oidc' AND oidc_subject = '' AND oidc_issuer = ''
   AND $1::text <> '' AND $2::text <> ''
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
 
 type LinkOIDCIdentityParams struct {
@@ -332,6 +336,8 @@ func (q *Queries) LinkOIDCIdentity(ctx context.Context, arg LinkOIDCIdentityPara
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
@@ -517,7 +523,7 @@ func (q *Queries) UpdateOIDCConfig(ctx context.Context, arg UpdateOIDCConfigPara
 const updateOIDCUserProfile = `-- name: UpdateOIDCUserProfile :one
 UPDATE users SET display_name = $2
 WHERE id = $1 AND auth_source = 'oidc'
-RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject
+RETURNING id, email, password_hash, display_name, is_active, totp_secret, created_at, updated_at, role, auth_source, auth_epoch, deactivated_by_directory, ldap_login_name, oidc_issuer, oidc_subject, ldap_config_id, ldap_entry_id
 `
 
 type UpdateOIDCUserProfileParams struct {
@@ -544,6 +550,8 @@ func (q *Queries) UpdateOIDCUserProfile(ctx context.Context, arg UpdateOIDCUserP
 		&i.LdapLoginName,
 		&i.OidcIssuer,
 		&i.OidcSubject,
+		&i.LdapConfigID,
+		&i.LdapEntryID,
 	)
 	return i, err
 }
