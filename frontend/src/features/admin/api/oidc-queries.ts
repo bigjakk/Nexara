@@ -77,6 +77,7 @@ export function useDeleteOIDCConfig() {
 
 export function useTestOIDCConnection() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.post<OIDCTestResponse>(
         apiPath`/api/v1/oidc/configs/${id}/test`,

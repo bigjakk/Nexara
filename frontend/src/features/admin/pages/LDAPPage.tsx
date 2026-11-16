@@ -51,6 +51,7 @@ import {
 } from "@/lib/confirm-gate";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 
 /** The backend's code for an LDAP transport downgrade (ldap.go). */
 const INSECURE_LDAP_TRANSPORT = "insecure_ldap_transport_confirm_required";
@@ -343,12 +344,16 @@ export function LDAPPage() {
     if (testUsername) {
       testPayload.test_username = testUsername;
     }
-    testConnection.mutate(testPayload, {
+    settle(testConnection.mutateAsync(testPayload), {
+      action: `Testing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
       onSuccess: (result) => {
         setTestResult(result);
       },
-      onError: () => {
-        setTestResult({ success: false, message: "Request failed" });
+      onError: (err) => {
+        setTestResult({
+          success: false,
+          message: describeError(err) || "Request failed",
+        });
       },
     });
   };
@@ -356,7 +361,8 @@ export function LDAPPage() {
   const handleSync = () => {
     if (!editingId) return;
     setSyncResult(null);
-    syncLDAP.mutate(editingId, {
+    settle(syncLDAP.mutateAsync(editingId), {
+      action: `Syncing the LDAP configuration "${activeConfig?.name ?? form.name}"`,
       onSuccess: (result) => {
         const parts = [`${String(result.users_synced)} synced`];
         if (result.users_disabled > 0) {
@@ -367,8 +373,9 @@ export function LDAPPage() {
         }
         setSyncResult(`${result.message} (${parts.join(", ")})`);
       },
-      onError: () => {
-        setSyncResult("Sync failed");
+      onError: (err) => {
+        const reason = describeError(err);
+        setSyncResult(reason ? `Sync failed: ${reason}` : "Sync failed");
       },
     });
   };

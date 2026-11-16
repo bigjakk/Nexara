@@ -87,6 +87,7 @@ export function useDeleteLDAPConfig() {
 
 export function useTestLDAPConnection() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({
       id,
       test_username,
@@ -106,6 +107,7 @@ export function useTestLDAPConnection() {
 export function useSyncLDAP() {
   const qc = useQueryClient();
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (id: string) =>
       apiClient.post<LDAPSyncResponse>(
         apiPath`/api/v1/ldap/configs/${id}/sync`,

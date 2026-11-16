@@ -36,12 +36,12 @@ import { AdminNav } from "../components/AdminNav";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { describeError } from "@/lib/api-error";
 import {
   confirmDetailString,
   confirmRequiredFromError,
   type ConfirmRequired,
 } from "@/lib/confirm-gate";
-import { privateAddressWarningFromError } from "@/lib/private-address";
 
 /** The backend's code for a cleartext OIDC callback (oidc.go). */
 const INSECURE_OIDC_REDIRECT = "insecure_oidc_redirect_confirm_required";
@@ -396,19 +396,17 @@ export function OIDCPage() {
   const handleTest = () => {
     if (!editingId) return;
     setTestResult(null);
-    testConnection.mutate(editingId, {
+    settle(testConnection.mutateAsync(editingId), {
+      action: `Testing the OIDC configuration "${activeConfig?.name ?? form.name}"`,
       onSuccess: (result) => {
         setTestResult(result);
       },
       onError: (err) => {
-        // An issuer that now resolves to a private address the configuration
-        // has not confirmed: the server says how to confirm it.
+        // The server's words: for an issuer that now resolves to a private
+        // address the configuration has not confirmed, they say how to confirm it.
         setTestResult({
           success: false,
-          message:
-            privateAddressWarningFromError(err) != null
-              ? err.message
-              : "Request failed",
+          message: describeError(err) || "Request failed",
         });
       },
     });

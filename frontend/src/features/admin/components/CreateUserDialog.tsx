@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useCreateUser } from "../api/rbac-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface CreateUserDialogProps {
   open: boolean;
@@ -25,6 +26,9 @@ export function CreateUserDialog({
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState("");
   const createUser = useCreateUser();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
 
   const handleSubmit = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -44,7 +48,8 @@ export function CreateUserDialog({
       payload.display_name = displayName;
     }
 
-    createUser.mutate(payload, {
+    settle(createUser.mutateAsync(payload), {
+      action: `Creating user ${email}`,
       onSuccess: () => {
         setEmail("");
         setPassword("");
