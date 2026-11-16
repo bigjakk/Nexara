@@ -8,6 +8,15 @@ import { describeError } from "@/lib/api-error";
 const CONNECTION_FAILED =
   "The request failed — check your connection and try again.";
 
+/**
+ * Spread into a hook's useMutation options to opt it out of the app's global
+ * error toast (lib/query-client.ts), for a mutation whose every caller shows
+ * its failure itself and settles it through useSaveOutcome. A hook that any
+ * caller leaves to the toast must not use it: that caller's failures would go
+ * unreported.
+ */
+export const errorsHandledLocally = { onError: () => undefined };
+
 /** What a save does when it settles; see useSaveOutcome. */
 export interface SaveOutcome<T> {
   /**
