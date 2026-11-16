@@ -1,4 +1,4 @@
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import type { ReportRun, ReportSchedule } from "@/types/api";
 
 /** The newest finished run: the one a reader can open. */
@@ -21,7 +21,7 @@ export function latestCompletedRun(
 export function reportsSummary(
   schedules: readonly ReportSchedule[] | undefined,
   runs: readonly ReportRun[] | undefined,
-  ago: (iso: string) => string = formatRelativeTime,
+  ago: (iso: string) => string = formatDateTime,
 ): string {
   if (schedules === undefined || runs === undefined) {
     return "Generate a report now, or schedule one and have it emailed.";

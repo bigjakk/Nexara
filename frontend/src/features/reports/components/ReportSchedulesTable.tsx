@@ -17,9 +17,10 @@ import {
 } from "../api/report-queries";
 import { useAuth } from "@/hooks/useAuth";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatExactDateTime } from "@/lib/format";
 import type { ReportSchedule } from "@/types/api";
 import { reportTypeLabel, periodLabel } from "../report-types";
+import { DateTime } from "@/components/DateTime";
 
 interface ReportSchedulesTableProps {
   onEdit?: (schedule: ReportSchedule) => void;
@@ -115,20 +116,18 @@ export function ReportSchedulesTable({ onEdit }: ReportSchedulesTableProps) {
                 </TableCell>
                 <TableCell className="py-2">
                   <div className="whitespace-nowrap">
-                    {s.next_run_at
-                      ? new Date(s.next_run_at).toLocaleString()
-                      : "—"}
+                    <DateTime value={s.next_run_at} />
                   </div>
                   <div
                     className="text-[12.5px] text-muted-foreground"
                     title={
                       s.last_run_at
-                        ? new Date(s.last_run_at).toLocaleString()
+                        ? formatExactDateTime(s.last_run_at)
                         : undefined
                     }
                   >
                     {s.last_run_at
-                      ? `last ran ${formatRelativeTime(s.last_run_at)}`
+                      ? `last ran ${formatDateTime(s.last_run_at)}`
                       : "never run"}
                   </div>
                 </TableCell>

@@ -47,6 +47,8 @@ import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ReportRun } from "@/types/api";
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "./ReportEmailDialog";
+import { DateTime } from "@/components/DateTime";
+import { formatDateTime, formatExactDateTime } from "@/lib/format";
 
 /** A run's state in words. A finished run is the ordinary case and stays plain. */
 function RunStatus({ run }: { run: ReportRun }) {
@@ -168,7 +170,7 @@ export function ReportRunsTable() {
                   </TableCell>
                   <TableCell className="py-2">
                     <div className="whitespace-nowrap">
-                      {new Date(run.created_at).toLocaleString()}
+                      <DateTime value={run.created_at} />
                     </div>
                     <div className="text-[12.5px] text-muted-foreground">
                       {run.schedule_id ? "By a schedule" : "On demand"}
@@ -193,7 +195,7 @@ export function ReportRunsTable() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-muted-foreground"
-                            aria-label={`Actions for ${label}, ${new Date(run.created_at).toLocaleString()}`}
+                            aria-label={`Actions for ${label}, ${formatExactDateTime(run.created_at)}`}
                             title="Actions"
                           >
                             <MoreHorizontal className="h-4 w-4" />
@@ -277,7 +279,7 @@ export function ReportRunsTable() {
             <AlertDialogTitle>Delete this report run?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `${reportTypeLabel(deleteTarget.report_type)} for ${clusterName(deleteTarget.cluster_id)}, created ${new Date(deleteTarget.created_at).toLocaleString()}. The stored HTML and CSV are removed; this cannot be undone.`
+                ? `${reportTypeLabel(deleteTarget.report_type)} for ${clusterName(deleteTarget.cluster_id)}, created ${formatDateTime(deleteTarget.created_at)}. The stored HTML and CSV are removed; this cannot be undone.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

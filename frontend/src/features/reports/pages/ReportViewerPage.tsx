@@ -47,6 +47,7 @@ import {
 } from "../api/report-queries";
 import { reportTypeLabel, periodLabel, runFileName } from "../report-types";
 import { ReportEmailDialog } from "../components/ReportEmailDialog";
+import { DateTime } from "@/components/DateTime";
 
 /** How the facts line names a run's state, and the dot it draws for it. */
 const RUN_STATE: Record<string, { dot: string; label: string }> = {
@@ -168,9 +169,9 @@ export function ReportViewerPage() {
             )}
             <Fact label="Period">{period}</Fact>
             <Fact label="Generated">
-              {run.completed_at
-                ? new Date(run.completed_at).toLocaleString()
-                : new Date(run.created_at).toLocaleString()}
+              <DateTime
+                value={run.completed_at ? run.completed_at : run.created_at}
+              />
             </Fact>
             <Fact label="Source">
               {run.schedule_id ? "A schedule" : "On demand"}

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
 import { CalendarClock } from "lucide-react";
-import { formatRelativeTime } from "@/lib/format";
+import { formatDateTime, formatExactDateTime } from "@/lib/format";
 import type { ReportRun } from "@/types/api";
 import { REPORT_TYPES, type ReportTypeInfo } from "../report-types";
 
@@ -111,9 +111,9 @@ function CatalogueEntry({
           <Link
             to={`/reports/runs/${latest.id}`}
             className="text-primary hover:underline"
-            title={new Date(latest.created_at).toLocaleString()}
+            title={formatExactDateTime(latest.created_at)}
           >
-            Open the run from {formatRelativeTime(latest.created_at)}
+            Open the run from {formatDateTime(latest.created_at)}
           </Link>
         ) : (
           <span className="text-muted-foreground/75">Never run</span>
