@@ -42,6 +42,23 @@ vi.mock("@/features/tasks/api/tasks-queries", async (importOriginal) => ({
 }));
 
 vi.mock("../api/vm-queries", () => ({
+  useBlockJobs: () => ({
+    data: {
+      running: true,
+      jobs: [
+        {
+          device: "drive-scsi0",
+          type: "mirror",
+          completed: 1,
+          total: 4,
+          speed_limit: 0,
+        },
+      ],
+      unparsed: [],
+    },
+    error: null,
+    dataUpdatedAt: 0,
+  }),
   useVM: () => ({
     data: mockCurrentVM,
     isLoading: false,
@@ -295,6 +312,29 @@ describe("VMDetailPage", () => {
     );
     useAuthStore.setState({ user: null, permissions: [] });
   });
+
+  // The block-job route asks only view:vm; without the History tab, where
+  // the live jobs sit, they show on the Overview, and never twice.
+  it.each([
+    [["view:vm"], 1],
+    [["view:vm", "view:audit", "view:task"], 0],
+  ])(
+    "with %o shows %i block-job card on a running VM's Overview",
+    (permissions, cards) => {
+      useAuthStore.setState({
+        user: {
+          id: "u1",
+          email: "u@example.test",
+          display_name: "U",
+          role: "user",
+        },
+        permissions,
+      });
+      renderPage();
+      expect(screen.queryAllByTestId("block-job")).toHaveLength(cards);
+      useAuthStore.setState({ user: null, permissions: [] });
+    },
+  );
 
   // Guest tools are a Windows-only concept, and this page is the one place the
   // guest's OS is classified — VMGuestToolsCard trusts the gate rather than

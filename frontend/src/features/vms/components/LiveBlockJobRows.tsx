@@ -1,5 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { UsageBar } from "@/components/UsageBar";
+import { Panel } from "@/components/page/Panel";
 import { formatBytes, formatBytesPerSecond } from "@/lib/format";
 import { ApiClientError } from "@/lib/api-client";
 import { useBlockJobs } from "../api/vm-queries";
@@ -105,5 +106,31 @@ export function LiveBlockJobRows({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The same rows as a card of their own, for the Overview of someone who may
+ * view the VM but has no History tab (view:audit and view:task): the block-job
+ * route asks only view:vm. The same query as the History tab's, and nothing
+ * shows while there is no job.
+ */
+export function LiveBlockJobsCard({
+  clusterId,
+  vmId,
+}: {
+  clusterId: string;
+  vmId: string;
+}) {
+  const { data, error } = useBlockJobs(clusterId, vmId, true);
+  if (!error && !data?.running) return null;
+  return (
+    <Panel flush title="Block jobs">
+      <table className="w-full">
+        <tbody>
+          <LiveBlockJobRows clusterId={clusterId} vmId={vmId} colSpan={1} />
+        </tbody>
+      </table>
+    </Panel>
   );
 }

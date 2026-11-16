@@ -70,6 +70,7 @@ import { SchedulePanel } from "../components/SchedulePanel";
 import { BackupPanel } from "../components/BackupPanel";
 import { VeeamProtectionCard } from "../components/VeeamProtectionCard";
 import { GuestHistoryTab } from "../components/GuestHistoryTab";
+import { LiveBlockJobsCard } from "../components/LiveBlockJobRows";
 import { GuestRecentPanel } from "../components/GuestRecentPanel";
 import type { ResourceKind } from "../types/vm";
 import type { ResourceStatus } from "@/features/inventory/types/inventory";
@@ -440,6 +441,13 @@ export function VMDetailPage() {
                   ostype={vm.ostype}
                 />
               )}
+              {/* Without the History tab, where the live block jobs sit,
+                  they are shown here instead. */}
+              {!canHistory &&
+                kind === "vm" &&
+                normalizedStatus === "running" && (
+                  <LiveBlockJobsCard clusterId={clusterId} vmId={vmId} />
+                )}
             </div>
             <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-4">
               {/* Desktop-only: a phone has the Console button, and a live
