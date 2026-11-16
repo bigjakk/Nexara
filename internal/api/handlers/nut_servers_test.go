@@ -260,6 +260,33 @@ func TestUpsIssues(t *testing.T) {
 	}
 }
 
+// Connected means the last poll succeeded and is recent: a success the
+// poller stopped refreshing keeps its last_poll_at and no error.
+func TestNutServerConnected(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	polled := func(ago time.Duration) db.NutServer {
+		return db.NutServer{Enabled: true, LastPollAt: pgtype.Timestamptz{Time: now.Add(-ago), Valid: true}}
+	}
+	failing, disabled := polled(time.Second), polled(time.Second)
+	failing.LastPollError, disabled.Enabled = "connection refused", false
+	for _, tc := range []struct {
+		name string
+		s    db.NutServer
+		want bool
+	}{
+		{"polled just now", polled(5 * time.Second), true},
+		{"last success an hour old", polled(time.Hour), false},
+		{"last poll failed", failing, false},
+		{"never polled", db.NutServer{Enabled: true}, false},
+		{"disabled", disabled, false},
+	} {
+		if got := nutServerConnected(tc.s, 10*time.Second, now); got != tc.want {
+			t.Errorf("%s: connected = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // The estimate is labelled, and a reading older than the stale window is
 // flagged, its state served as unknown rather than as the last one seen.
 func TestBuildUpsDevice_EstimatesPowerAndFlagsStaleReadings(t *testing.T) {

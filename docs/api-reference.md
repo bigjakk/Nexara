@@ -1909,7 +1909,7 @@ not counted at all, since that is lost track of rather than failed.
 |--------|------|-------------|
 | POST | `/nut-servers` | Add a NUT server. It is probed before it is stored, so a typo in the address is a failed create |
 | POST | `/nut-servers/probe` | Test a connection without saving it: upsd and protocol versions, the TLS fingerprint, and the UPSes it reports |
-| GET | `/nut-servers` | List NUT servers. The username is returned only to `manage:ups` holders, the password never |
+| GET | `/nut-servers` | List NUT servers. The username is returned only to `manage:ups` holders, the password never. `connected` is true while the last poll succeeded within the stale window (three poll intervals, at least two minutes) |
 | GET | `/nut-servers/:id` | Get a NUT server |
 | PUT | `/nut-servers/:id` | Update a NUT server. Every field is optional; a change to how Nexara connects re-probes, a rename or `enabled` toggle does not |
 | DELETE | `/nut-servers/:id` | Remove a NUT server and the UPS readings and events collected from it |

@@ -17,6 +17,8 @@ export interface NutServer {
   protocol_version: string;
   last_poll_at: string | null;
   last_poll_error: string;
+  /** The last poll succeeded and is recent, which last_poll_at alone does not say. */
+  connected: boolean;
   /**
    * When upsd last took a command from the stored account: upsd checks an
    * account only when a command runs, so this is the only proof it may.

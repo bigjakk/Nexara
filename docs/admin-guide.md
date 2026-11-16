@@ -1453,7 +1453,7 @@ Changing the host or port of a saved server requires re-entering its password: a
 ### What the Power Page Shows
 
 - **Devices** — a card per UPS with its status, charge, runtime, load, power and input voltage. A power figure marked **≈** is estimated from load × the UPS's rated power, for a UPS that does not measure it. While any UPS is on battery, a banner names it and the shortest runtime left.
-- **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test** button that checks a saved server's connection.
+- **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test** button that checks a saved server's connection. **Connected** means the last poll succeeded within three poll intervals (and at least two minutes); a server whose last success is older reads **Not polled lately**.
 - **Power events** — outages, low battery, overloads, bypass, voltage correction, a battery that needs replacing, lost contact, stale driver data, and self-test results. Expand a row for the lowest charge and runtime and the peak load seen during it.
 
 Click a UPS for its detail page: charts of charge, runtime, load and input voltage over 1 hour to 7 days (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), every variable upsd reports with its description, the UPS's own events, its maintenance windows, and its **History** (see A UPS's History). The search palette (Ctrl+K) finds a UPS by its name, description, model or NUT server, and the Power page by "power", "ups" or "nut", for a holder of a global `view:ups`.

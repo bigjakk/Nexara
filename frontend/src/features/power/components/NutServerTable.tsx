@@ -29,11 +29,17 @@ interface Ctx {
   onDelete: (s: NutServer) => void;
 }
 
-function serverStatus(s: NutServer): { label: string; rank: number; variant: "healthy" | "secondary" | "destructive" } {
-  if (!s.enabled) return { label: "Disabled", rank: 1, variant: "secondary" };
+function serverStatus(s: NutServer): {
+  label: string;
+  rank: number;
+  variant: "healthy" | "secondary" | "warning" | "destructive";
+} {
+  if (!s.enabled) return { label: "Disabled", rank: 2, variant: "secondary" };
   if (s.last_poll_error !== "") return { label: "Failing", rank: 0, variant: "destructive" };
-  if (s.last_poll_at === null) return { label: "Waiting", rank: 2, variant: "secondary" };
-  return { label: "Connected", rank: 3, variant: "healthy" };
+  if (s.last_poll_at === null) return { label: "Waiting", rank: 3, variant: "secondary" };
+  // A success the poller has not repeated lately is not a live connection.
+  if (!s.connected) return { label: "Not polled lately", rank: 1, variant: "warning" };
+  return { label: "Connected", rank: 4, variant: "healthy" };
 }
 
 /** Its own mutation per row, so two rows tested at once each keep their result. */

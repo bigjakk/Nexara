@@ -26,6 +26,7 @@ export function nutServer(over: Partial<NutServer> = {}): NutServer {
     protocol_version: "1.3",
     last_poll_at: "2026-11-02T03:19:00Z",
     last_poll_error: "",
+    connected: true,
     commands_verified_at: null,
     created_at: "2026-11-01T00:00:00Z",
     updated_at: "2026-11-01T00:00:00Z",

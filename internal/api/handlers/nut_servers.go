@@ -110,6 +110,9 @@ type nutServerResponse struct {
 	ProtocolVersion string     `json:"protocol_version"`
 	LastPollAt      *time.Time `json:"last_poll_at"`
 	LastPollError   string     `json:"last_poll_error"`
+	// Connected is whether the last poll succeeded and is recent: a server
+	// whose poller stopped keeps its old last_poll_at and no error.
+	Connected bool `json:"connected"`
 	// CommandsVerifiedAt is when upsd last took a command from the stored
 	// account: the only proof it may run them, since upsd checks an account
 	// only when a command runs.
@@ -118,7 +121,7 @@ type nutServerResponse struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
-func toNutServerResponse(s db.NutServer, includeUsername bool) nutServerResponse {
+func (h *NutHandler) toNutServerResponse(s db.NutServer, includeUsername bool) nutServerResponse {
 	resp := nutServerResponse{
 		ID: s.ID, Name: s.Name, Host: s.Host, Port: s.Port,
 		HasPassword: s.PasswordEncrypted != "",
@@ -133,11 +136,21 @@ func toNutServerResponse(s db.NutServer, includeUsername bool) nutServerResponse
 		t := s.LastPollAt.Time
 		resp.LastPollAt = &t
 	}
+	resp.Connected = nutServerConnected(s, h.pollInterval, time.Now())
 	if s.CommandsVerifiedAt.Valid {
 		t := s.CommandsVerifiedAt.Time
 		resp.CommandsVerifiedAt = &t
 	}
 	return resp
+}
+
+// nutServerConnected says the last poll succeeded: SetNutServerPolled clears
+// the error a failed poll records, and a success older than the stale window
+// is a poller that stopped (NUT_POLL_INTERVAL=0, or a re-enabled server not
+// yet polled again), not a live connection.
+func nutServerConnected(s db.NutServer, pollInterval time.Duration, now time.Time) bool {
+	return s.Enabled && s.LastPollError == "" && s.LastPollAt.Valid &&
+		now.Sub(s.LastPollAt.Time) <= nut.StaleAfter(pollInterval)
 }
 
 // nutProbeResponse is what a connection test found.
@@ -369,7 +382,7 @@ func (h *NutHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	}
 	h.audit(c, server, "nut_server_created", map[string]any{"devices": len(probe.Devices)})
 	h.changed(c)
-	return c.Status(fiber.StatusCreated).JSON(toNutServerResponse(server, true))
+	return c.Status(fiber.StatusCreated).JSON(h.toNutServerResponse(server, true))
 }
 
 func nutWriteError(err error, verb string) error {
@@ -392,7 +405,7 @@ func (h *NutHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	}
 	resp := make([]nutServerResponse, len(servers))
 	for i, s := range servers {
-		resp[i] = toNutServerResponse(s, full)
+		resp[i] = h.toNutServerResponse(s, full)
 	}
 	return RespondItems(c, resp)
 }
@@ -407,7 +420,7 @@ func (h *NutHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	return c.JSON(toNutServerResponse(server, full))
+	return c.JSON(h.toNutServerResponse(server, full))
 }
 
 // Update handles PUT /api/v1/nut-servers/:id. Every field is optional. A
@@ -546,7 +559,7 @@ func (h *NutHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		"enabled":             server.Enabled,
 	})
 	h.changed(c)
-	return c.JSON(toNutServerResponse(server, true))
+	return c.JSON(h.toNutServerResponse(server, true))
 }
 
 // boolStr turns "is there a password" into a non-empty marker for the
