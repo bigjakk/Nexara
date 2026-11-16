@@ -122,18 +122,19 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
 
   return (
     <Panel
-      title="Evaluation"
+      title={t("drsEvaluateButton.evaluation")}
       aside={
         isBalanced ? (
-          "Cluster balanced"
+          t("drsEvaluateButton.clusterBalanced")
         ) : isImbalancedNoMoves ? (
           <span className={VERDICT_WARN}>
-            Imbalanced, no beneficial migrations
+            {t("drsEvaluateButton.imbalancedNoBeneficialMigrations")}
           </span>
         ) : isImbalancedWithMoves ? (
           <span className={VERDICT_WARN}>
-            {results.length}{" "}
-            {results.length === 1 ? "recommendation" : "recommendations"}
+            {t("drsEvaluateButton.recommendationCount", {
+              count: results.length,
+            })}
           </span>
         ) : undefined
       }
@@ -149,15 +150,14 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
           ) : (
             <Play className="mr-2 h-4 w-4" />
           )}
-          Run Evaluation
+          {t("drsEvaluateButton.runEvaluation")}
         </Button>
       }
     >
       <div className="space-y-4">
         {!evaluated && !evaluation.isError && (
           <p className="text-sm text-muted-foreground">
-            Score the nodes now and see what DRS would move. Nothing is migrated
-            unless the mode is Automatic.
+            {t("drsEvaluateButton.scoreTheNodesNowAnd")}
           </p>
         )}
 
@@ -169,7 +169,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
         */}
         {evaluation.isError && (
           <p className="text-sm text-destructive">
-            {errorMessage || "Evaluation failed."}
+            {errorMessage || t("drsEvaluateButton.evaluationFailed")}
           </p>
         )}
 
@@ -178,11 +178,11 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div>
               <p className="font-medium">
-                Evaluation skipped: Proxmox native CRS active
+                {t("drsEvaluateButton.evaluationSkippedProxmoxNativeCRS")}
               </p>
               <p className="mt-1 text-muted-foreground">
                 {blockReason ||
-                  "Proxmox native CRS auto-rebalance is enabled on this cluster, so Nexara automatic migrations are paused. Switch DRS to Advisory mode to generate recommendations without migrating."}
+                  t("drsEvaluateButton.proxmoxNativeCRSAutoRebalance")}
               </p>
             </div>
           </div>
@@ -195,7 +195,7 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
               <div className="space-y-3">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                   <span className="text-[12.5px] font-medium text-muted-foreground">
-                    Node load scores
+                    {t("drsEvaluateButton.nodeLoadScores")}
                   </span>
                   <span
                     className={cn(
@@ -205,7 +205,10 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                         : "text-muted-foreground",
                     )}
                   >
-                    Variance: {pct(imbalance)} / Threshold: {pct(threshold)}
+                    {t(
+                      "drsEvaluateButton.varianceImbalanceThresholdThreshold",
+                      { imbalance: pct(imbalance), threshold: pct(threshold) },
+                    )}
                   </span>
                 </div>
                 <div className="divide-y">
@@ -220,8 +223,14 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                           {pct(ns.score)}
                         </span>
                       </div>
-                      <LoadBar value={ns.cpu_load} label="CPU" />
-                      <LoadBar value={ns.mem_load} label="Mem" />
+                      <LoadBar
+                        value={ns.cpu_load}
+                        label={t("drsEvaluateButton.cpu")}
+                      />
+                      <LoadBar
+                        value={ns.mem_load}
+                        label={t("drsEvaluateButton.mem")}
+                      />
                     </div>
                   ))}
                 </div>
@@ -231,8 +240,10 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             {/* Balanced message */}
             {isBalanced && (
               <p className="text-sm text-muted-foreground">
-                Load variance ({pct(imbalance)}) is within the configured
-                threshold ({pct(threshold)}). No migrations needed.
+                {t("drsEvaluateButton.loadVarianceImbalanceIsWithin", {
+                  imbalance: pct(imbalance),
+                  threshold: pct(threshold),
+                })}
               </p>
             )}
 
@@ -253,11 +264,10 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             {/* Imbalanced but no moves help */}
             {isImbalancedNoMoves && heldNodes.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Load variance ({pct(imbalance)}) exceeds the threshold (
-                {pct(threshold)}), but no single VM migration would improve the
-                balance. This typically happens when nodes have very few VMs or
-                when workloads are too large relative to the load difference:
-                moving any one VM would overshoot and make things worse.
+                {t("drsEvaluateButton.loadVarianceImbalanceExceedsThe", {
+                  imbalance: pct(imbalance),
+                  threshold: pct(threshold),
+                })}
               </p>
             )}
 
@@ -265,15 +275,11 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
             {isImbalancedWithMoves && (
               <div className="space-y-2">
                 <span className="text-[12.5px] font-medium text-muted-foreground">
-                  Recommended migrations
+                  {t("drsEvaluateButton.recommendedMigrations")}
                 </span>
                 {queued && (
                   <p className="text-xs text-muted-foreground">
-                    Automatic mode: an evaluation has been queued. The scheduler
-                    re-plans against live cluster state on its next pass
-                    (usually within a minute) and executes what it finds then,
-                    so the moves below are the plan as of now and may differ.
-                    Results appear in DRS history.
+                    {t("drsEvaluateButton.automaticModeAnEvaluationHas")}
                   </p>
                 )}
                 <ul className="divide-y text-sm">
@@ -288,7 +294,10 @@ export function EvaluateButton({ clusterId }: EvaluateButtonProps) {
                         </span>
                         <span className="text-muted-foreground">
                           {" "}
-                          {rec.from} &rarr; {rec.to}
+                          {t("drsEvaluateButton.fromTo", {
+                            from: rec.from,
+                            to: rec.to,
+                          })}
                         </span>
                       </div>
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">

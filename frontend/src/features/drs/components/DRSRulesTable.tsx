@@ -30,6 +30,7 @@ import {
 } from "../api/drs-queries";
 import type { DRSRule } from "../types/drs";
 import { Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface DRSRulesTableProps {
   clusterId: string;
@@ -38,6 +39,7 @@ interface DRSRulesTableProps {
 }
 
 export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
+  const { t } = useTranslation("clusters");
   const manualQuery = useDRSRules(clusterId);
   const haQuery = useHARules(clusterId);
   const manualRules = manualQuery.data;
@@ -103,36 +105,38 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
     <>
       <Panel
         flush
-        title="Placement rules"
+        title={t("drsRulesTable.placementRules")}
         aside={
           allRules.length > 0
-            ? `${String(allRules.length)}, DRS and Proxmox HA rules together`
+            ? t("drsRulesTable.lengthDRSAndProxmoxHA", {
+                length: String(allRules.length),
+              })
             : undefined
         }
         actions={actions}
       >
         <QueryFailureNote
           query={manualQuery}
-          subject="this cluster's DRS rules"
+          subject={t("drsRulesTable.thisClusterSDRSRules")}
           identity={clusterId}
           className="mb-2 px-[18px]"
         />
         <QueryFailureNote
           query={haQuery}
-          subject="this cluster's HA rules"
+          subject={t("drsRulesTable.thisClusterSHARules")}
           identity={clusterId}
           className="mb-2 px-[18px]"
         />
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Type</TableHead>
-              <TableHead>VM IDs</TableHead>
-              <TableHead>Node names</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>{t("drsRulesTable.type")}</TableHead>
+              <TableHead>{t("drsRulesTable.vmIDs")}</TableHead>
+              <TableHead>{t("drsRulesTable.nodeNames")}</TableHead>
+              <TableHead>{t("drsRulesTable.source")}</TableHead>
+              <TableHead>{t("drsRulesTable.status")}</TableHead>
               <TableHead className="w-24">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("drsRulesTable.actions")}</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -144,12 +148,12 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
                   className="py-6 text-center text-muted-foreground"
                 >
                   {stillLoading
-                    ? "Loading rules..."
+                    ? t("drsRulesTable.loadingRules")
                     : bothRead
-                      ? "No rules configured"
+                      ? t("drsRulesTable.noRulesConfigured")
                       : eitherFailed
-                        ? "Rules could not be listed"
-                        : "Rules have not been read yet"}
+                        ? t("drsRulesTable.rulesCouldNotBeListed")
+                        : t("drsRulesTable.rulesHaveNotBeenRead")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -176,12 +180,16 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
                   </TableCell>
                   <TableCell>
                     <span className="text-muted-foreground">
-                      {rule.source === "ha" ? "HA" : "Manual"}
+                      {rule.source === "ha"
+                        ? t("drsRulesTable.ha")
+                        : t("drsRulesTable.manual")}
                     </span>
                   </TableCell>
                   <TableCell>
                     <Badge variant={rule.enabled ? "healthy" : "secondary"}>
-                      {rule.enabled ? "Enabled" : "Disabled"}
+                      {rule.enabled
+                        ? t("drsRulesTable.enabled")
+                        : t("drsRulesTable.disabled")}
                     </Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-right">
@@ -198,11 +206,20 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
                     ) : (
                       <ClusterHistoryButton
                         history={clusterHistories.drsRule(clusterId, rule.id)}
-                        title={`${rule.rule_type} rule`}
+                        title={t("drsRulesTable.ruleTypeRule", {
+                          ruleType: rule.rule_type,
+                        })}
                       />
                     )}
                     <Button
-                      aria-label={`Delete ${rule.rule_type} rule for ${rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", ")}`}
+                      aria-label={t(
+                        "drsRulesTable.deleteRuleTypeRuleForHaRuleName",
+                        {
+                          ruleType: rule.rule_type,
+                          haRuleName:
+                            rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", "),
+                        },
+                      )}
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:text-destructive"
@@ -228,11 +245,11 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Rule</DialogTitle>
+            <DialogTitle>{t("drsRulesTable.deleteRule")}</DialogTitle>
             <DialogDescription>
               {deleteTarget?.source === "ha"
-                ? "This will delete the HA rule from Proxmox. This action cannot be undone."
-                : "Are you sure you want to delete this rule? This action cannot be undone."}
+                ? t("drsRulesTable.thisWillDeleteTheHA")
+                : t("drsRulesTable.areYouSureYouWant")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -242,14 +259,16 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
                 setDeleteTarget(null);
               }}
             >
-              Cancel
+              {t("drsRulesTable.cancel")}
             </Button>
             <Button
               variant="destructive"
               onClick={handleDelete}
               disabled={isDeleting}
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting
+                ? t("drsRulesTable.deleting")
+                : t("drsRulesTable.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

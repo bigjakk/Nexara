@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
+import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Panel } from "@/components/page/Panel";
 import {
@@ -76,7 +76,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
 
   if (isLoading) {
     return (
-      <Panel title="DRS configuration">
+      <Panel title={t("drsConfigCard.drsConfiguration")}>
         <Skeleton className="h-64 w-full" />
       </Panel>
     );
@@ -112,38 +112,39 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
 
   return (
     <SettingsSection
-      title="DRS configuration"
-      description="How Nexara spreads guests across this cluster's nodes."
+      title={t("drsConfigCard.drsConfiguration")}
+      description={t("drsConfigCard.howNexaraSpreadsGuestsAcross")}
     >
       {nativeRebalance && (
         <div className="pb-3.5">
-          <WarningCallout title="Proxmox native Dynamic Load Balancer is active">
+          <WarningCallout
+            title={t("drsConfigCard.proxmoxNativeDynamicLoadBalancer")}
+          >
             <p>
-              This cluster&apos;s Proxmox CRS is auto-rebalancing HA-managed
-              guests. Nexara DRS <strong>Automatic</strong> mode is disabled to
-              avoid conflicting migrations; <strong>Advisory</strong> still
-              works as a read-only second opinion. Manage the native balancer
-              under{" "}
-              <Link
-                to={`/clusters/${clusterId}?tab=options`}
-                className="underline"
-              >
-                Datacenter &rarr; Options &rarr; CRS
-              </Link>
-              .
+              <Trans
+                t={t}
+                i18nKey="drsConfigCard.thisClusterSProxmoxCRS"
+                components={{
+                  strong: <strong />,
+                  strong2: <strong />,
+                  link: (
+                    <Link
+                      to={`/clusters/${clusterId}?tab=options`}
+                      className="underline"
+                    />
+                  ),
+                }}
+              />
             </p>
           </WarningCallout>
         </div>
       )}
       <SettingRow
-        label="Mode"
+        label={t("drsConfigCard.mode")}
         description={
-          <>
-            Disabled turns DRS off. Advisory logs recommendations without
-            acting. Automatic will live-migrate VMs.
-            {nativeRebalance &&
-              " Automatic is unavailable while Proxmox native CRS rebalancing is on."}
-          </>
+          nativeRebalance
+            ? t("drsConfigCard.disabledTurnsDRSOffAdvisoryNative")
+            : t("drsConfigCard.disabledTurnsDRSOffAdvisory")
         }
         htmlFor="drs-mode"
       >
@@ -157,21 +158,25 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="disabled">Disabled: do nothing</SelectItem>
-            <SelectItem value="advisory">Advisory: recommend only</SelectItem>
+            <SelectItem value="disabled">
+              {t("drsConfigCard.disabledDoNothing")}
+            </SelectItem>
+            <SelectItem value="advisory">
+              {t("drsConfigCard.advisoryRecommendOnly")}
+            </SelectItem>
             <SelectItem value="automatic" disabled={nativeRebalance}>
-              Automatic: migrate VMs
+              {t("drsConfigCard.automaticMigrateVMs")}
             </SelectItem>
           </SelectContent>
         </Select>
       </SettingRow>
 
       <SettingRow
-        label="CPU weight"
-        description="How much each resource type influences balance scoring. The two weights must sum to 1.0."
+        label={t("drsConfigCard.cpuWeight")}
+        description={t("drsConfigCard.howMuchEachResourceType")}
       >
         <Slider
-          aria-label="CPU weight"
+          aria-label={t("drsConfigCard.cpuWeight")}
           className="min-w-0 flex-1"
           value={[cpuWeight]}
           onValueChange={([v]) => {
@@ -186,11 +191,11 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         </span>
       </SettingRow>
       <SettingRow
-        label="Memory weight"
-        description="A higher memory weight means DRS prioritizes evening out memory usage."
+        label={t("drsConfigCard.memoryWeight")}
+        description={t("drsConfigCard.aHigherMemoryWeightMeans")}
       >
         <Slider
-          aria-label="Memory weight"
+          aria-label={t("drsConfigCard.memoryWeight")}
           className="min-w-0 flex-1"
           value={[memWeight]}
           onValueChange={([v]) => {
@@ -205,27 +210,28 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         </span>
         {weightsOff && (
           <p className="w-full text-sm text-destructive sm:text-right">
-            Weights must sum to 1.0 (current: {(weightSum * 100).toFixed(0)}
-            %)
+            {t("drsConfigCard.weightsMustSumTo1", {
+              weightSum: (weightSum * 100).toFixed(0),
+            })}
           </p>
         )}
       </SettingRow>
 
       <SettingRow
-        label="Imbalance threshold"
+        label={t("drsConfigCard.imbalanceThreshold")}
         description={
           <>
             {threshold <= 0.15
-              ? "Aggressive: triggers on small load differences between nodes."
+              ? t("drsConfigCard.aggressiveTriggersOnSmallLoad")
               : threshold <= 0.3
-                ? "Balanced: triggers when node loads diverge moderately."
-                : "Conservative: only triggers on large load imbalances."}{" "}
-            Lower values cause more frequent migrations.
+                ? t("drsConfigCard.balancedTriggersWhenNodeLoads")
+                : t("drsConfigCard.conservativeOnlyTriggersOnLarge")}{" "}
+            {t("drsConfigCard.lowerValuesCauseMoreFrequent")}
           </>
         }
       >
         <Slider
-          aria-label="Imbalance threshold"
+          aria-label={t("drsConfigCard.imbalanceThreshold")}
           className="min-w-0 flex-1"
           value={[threshold]}
           onValueChange={([v]) => {
@@ -241,14 +247,15 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       </SettingRow>
 
       <SettingRow
-        label="Evaluation interval"
+        label={t("drsConfigCard.evaluationInterval")}
         description={
-          <>
-            How often DRS checks cluster balance.
-            {evalInterval >= 300
-              ? ` Every ${String(Math.round(evalInterval / 60))} minutes.`
-              : ` Every ${String(evalInterval)} seconds.`}
-          </>
+          evalInterval >= 300
+            ? t("drsConfigCard.evaluationIntervalMinutes", {
+                minutes: String(Math.round(evalInterval / 60)),
+              })
+            : t("drsConfigCard.evaluationIntervalSeconds", {
+                seconds: String(evalInterval),
+              })
         }
         htmlFor="eval-interval"
       >
@@ -263,7 +270,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           }}
         />
         <span className="whitespace-nowrap text-sm text-muted-foreground">
-          seconds
+          {t("drsConfigCard.seconds")}
         </span>
       </SettingRow>
 
@@ -289,14 +296,11 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       </SettingRow>
 
       <SettingRow
-        label="Include containers in balancing"
+        label={t("drsConfigCard.includeContainersInBalancing")}
         description={
           includeContainers ? (
             <Caution>
-              Container migration requires downtime. Unlike VMs which support
-              live migration, containers must be stopped, moved, and restarted.
-              Only enable this if container downtime during rebalancing is
-              acceptable.
+              {t("drsConfigCard.containerMigrationRequiresDowntimeUnlike")}
             </Caution>
           ) : undefined
         }
@@ -309,15 +313,10 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
         />
       </SettingRow>
       <SettingRow
-        label="Never migrate Veeam's own guests"
+        label={t("drsConfigCard.neverMigrateVeeamSOwn")}
         description={
           excludeVeeamWorkers ? undefined : (
-            <Caution>
-              DRS may then migrate a Veeam worker appliance mid-backup, which
-              fails the job running on it and leaves nothing behind but a failed
-              session. Veeam&apos;s guests are still counted toward node load
-              either way.
-            </Caution>
+            <Caution>{t("drsConfigCard.drsMayThenMigrateA")}</Caution>
           )
         }
         htmlFor="exclude-veeam-workers"
@@ -332,14 +331,14 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
       <SettingsFooter>
         {saveStatus === "saved" && (
           <span className="text-sm text-muted-foreground">
-            Saved successfully
+            {t("drsConfigCard.savedSuccessfully")}
           </span>
         )}
         {saveStatus === "error" && (
           <span className="text-sm text-destructive">
             {updateConfig.error instanceof Error
               ? updateConfig.error.message
-              : "Failed to save"}
+              : t("drsConfigCard.failedToSave")}
           </span>
         )}
         <Button
@@ -347,7 +346,9 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           onClick={handleSave}
           disabled={updateConfig.isPending || weightsOff}
         >
-          {updateConfig.isPending ? "Saving..." : "Save Configuration"}
+          {updateConfig.isPending
+            ? t("drsConfigCard.saving")
+            : t("drsConfigCard.saveConfiguration")}
         </Button>
       </SettingsFooter>
     </SettingsSection>

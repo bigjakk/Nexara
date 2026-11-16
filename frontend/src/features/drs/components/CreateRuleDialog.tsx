@@ -28,6 +28,7 @@ import {
 import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 import type { RuleType } from "../types/drs";
 import { Plus, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 type RuleTarget = "manual" | "ha";
 
@@ -36,6 +37,7 @@ interface CreateRuleDialogProps {
 }
 
 export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
+  const { t } = useTranslation("clusters");
   const [open, setOpen] = useState(false);
   const [chosenTarget, setTarget] = useState<RuleTarget>("manual");
   const [ruleType, setRuleType] = useState<RuleType>("affinity");
@@ -107,7 +109,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
   };
 
   const handleSubmit = () => {
-    const on = cluster?.name ? ` on ${cluster.name}` : "";
+    const clusterName = cluster?.name;
     const outcome = {
       onSuccess: resetForm,
       // Shown by the dialog, from the mutation's state.
@@ -127,7 +129,15 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           node_names: selectedNodes,
           enabled,
         }),
-        { action: `Creating HA rule ${ruleName}${on}`, ...outcome },
+        {
+          action: clusterName
+            ? t("drsCreateRuleDialog.creatingHARuleOn", {
+                ruleName,
+                clusterName,
+              })
+            : t("drsCreateRuleDialog.creatingHARule", { ruleName }),
+          ...outcome,
+        },
       );
     } else {
       settle(
@@ -137,7 +147,12 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           node_names: selectedNodes,
           enabled,
         }),
-        { action: `Creating a DRS rule${on}`, ...outcome },
+        {
+          action: clusterName
+            ? t("drsCreateRuleDialog.creatingADRSRuleOn", { clusterName })
+            : t("drsCreateRuleDialog.creatingADRSRule"),
+          ...outcome,
+        },
       );
     }
   };
@@ -156,18 +171,18 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="mr-2 h-4 w-4" />
-          Add Rule
+          {t("drsCreateRuleDialog.addRule")}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Create DRS Rule</DialogTitle>
+          <DialogTitle>{t("drsCreateRuleDialog.createDRSRule")}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           {haRulesSupported && (
             <div className="space-y-2">
-              <Label>Target</Label>
+              <Label>{t("drsCreateRuleDialog.target")}</Label>
               <Select
                 value={target}
                 onValueChange={(v) => {
@@ -178,8 +193,12 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="manual">Nexara Only</SelectItem>
-                  <SelectItem value="ha">Proxmox HA</SelectItem>
+                  <SelectItem value="manual">
+                    {t("drsCreateRuleDialog.nexaraOnly")}
+                  </SelectItem>
+                  <SelectItem value="ha">
+                    {t("drsCreateRuleDialog.proxmoxHA")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -187,7 +206,9 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
 
           {target === "ha" && (
             <div className="space-y-2">
-              <Label htmlFor="rule-name">Rule Name</Label>
+              <Label htmlFor="rule-name">
+                {t("drsCreateRuleDialog.ruleName")}
+              </Label>
               <Input
                 id="rule-name"
                 placeholder="my-ha-rule"
@@ -200,7 +221,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           )}
 
           <div className="space-y-2">
-            <Label>Rule Type</Label>
+            <Label>{t("drsCreateRuleDialog.ruleType")}</Label>
             <Select
               value={ruleType}
               onValueChange={(v) => {
@@ -211,9 +232,15 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="affinity">Affinity</SelectItem>
-                <SelectItem value="anti-affinity">Anti-Affinity</SelectItem>
-                <SelectItem value="pin">Pin</SelectItem>
+                <SelectItem value="affinity">
+                  {t("drsCreateRuleDialog.affinity")}
+                </SelectItem>
+                <SelectItem value="anti-affinity">
+                  {t("drsCreateRuleDialog.antiAffinity")}
+                </SelectItem>
+                <SelectItem value="pin">
+                  {t("drsCreateRuleDialog.pin")}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -221,17 +248,19 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           {/* VM Selection */}
           <div className="space-y-2">
             <Label>
-              VMs{" "}
+              {t("drsCreateRuleDialog.vms")}{" "}
               {selectedVmIds.length > 0 && (
                 <span className="text-muted-foreground">
-                  ({selectedVmIds.length} selected)
+                  {t("drsCreateRuleDialog.lengthSelected", {
+                    length: selectedVmIds.length,
+                  })}
                 </span>
               )}
             </Label>
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search VMs..."
+                placeholder={t("drsCreateRuleDialog.searchVMs")}
                 className="pl-7"
                 value={vmSearch}
                 onChange={(e) => {
@@ -242,7 +271,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
             <div className="max-h-40 overflow-y-auto rounded-md border p-1">
               {filteredVMs.length === 0 ? (
                 <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                  No VMs found
+                  {t("drsCreateRuleDialog.noVMsFound")}
                 </div>
               ) : (
                 filteredVMs.map((vm) => (
@@ -273,17 +302,19 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           {ruleType === "pin" && (
             <div className="space-y-2">
               <Label>
-                Nodes{" "}
+                {t("drsCreateRuleDialog.nodes")}{" "}
                 {selectedNodes.length > 0 && (
                   <span className="text-muted-foreground">
-                    ({selectedNodes.length} selected)
+                    {t("drsCreateRuleDialog.lengthSelected", {
+                      length: selectedNodes.length,
+                    })}
                   </span>
                 )}
               </Label>
               <div className="relative">
                 <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
-                  placeholder="Search nodes..."
+                  placeholder={t("drsCreateRuleDialog.searchNodes")}
                   className="pl-7"
                   value={nodeSearch}
                   onChange={(e) => {
@@ -294,7 +325,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
               <div className="max-h-32 overflow-y-auto rounded-md border p-1">
                 {filteredNodes.length === 0 ? (
                   <div className="px-2 py-3 text-center text-sm text-muted-foreground">
-                    No nodes found
+                    {t("drsCreateRuleDialog.noNodesFound")}
                   </div>
                 ) : (
                   filteredNodes.map((node) => (
@@ -327,7 +358,9 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
                 setEnabled(checked === true);
               }}
             />
-            <Label htmlFor="rule-enabled">Enabled</Label>
+            <Label htmlFor="rule-enabled">
+              {t("drsCreateRuleDialog.enabled")}
+            </Label>
           </div>
         </div>
 
@@ -335,7 +368,7 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
           <p className="text-sm text-destructive">
             {activeMutation.error instanceof Error
               ? activeMutation.error.message
-              : "Failed to create rule"}
+              : t("drsCreateRuleDialog.failedToCreateRule")}
           </p>
         )}
 
@@ -346,10 +379,12 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
               setOpen(false);
             }}
           >
-            Cancel
+            {t("drsCreateRuleDialog.cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={isPending || !isValid}>
-            {isPending ? "Creating..." : "Create Rule"}
+            {isPending
+              ? t("drsCreateRuleDialog.creating")
+              : t("drsCreateRuleDialog.createRule")}
           </Button>
         </DialogFooter>
       </DialogContent>

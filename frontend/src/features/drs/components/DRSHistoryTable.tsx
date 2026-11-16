@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { useDRSHistory } from "../api/drs-queries";
 import { DateTime } from "@/components/DateTime";
+import { useTranslation, Trans } from "react-i18next";
 
 interface DRSHistoryTableProps {
   clusterId: string;
@@ -46,12 +47,13 @@ function formatDate(dateStr: string | null) {
 }
 
 export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
+  const { t } = useTranslation("clusters");
   const [limit, setLimit] = useState(25);
   const { data: history, isLoading } = useDRSHistory(clusterId, limit);
 
   if (isLoading) {
     return (
-      <Panel title="Migrations">
+      <Panel title={t("drsHistoryTable.migrations")}>
         <Skeleton className="h-48 w-full" />
       </Panel>
     );
@@ -60,18 +62,23 @@ export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
   return (
     <Panel
       flush
-      title="Migrations"
-      aside="What DRS moved or recommended, newest first"
+      title={t("drsHistoryTable.migrations")}
+      aside={t("drsHistoryTable.whatDRSMovedOrRecommended")}
       actions={
         <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">Show</span>
+          <span className="text-sm text-muted-foreground">
+            {t("drsHistoryTable.show")}
+          </span>
           <Select
             value={String(limit)}
             onValueChange={(v) => {
               setLimit(Number(v));
             }}
           >
-            <SelectTrigger className="h-8 w-20" aria-label="Entries to show">
+            <SelectTrigger
+              className="h-8 w-20"
+              aria-label={t("drsHistoryTable.entriesToShow")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -80,20 +87,22 @@ export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
               <SelectItem value="100">100</SelectItem>
             </SelectContent>
           </Select>
-          <span className="text-sm text-muted-foreground">entries</span>
+          <span className="text-sm text-muted-foreground">
+            {t("drsHistoryTable.entries")}
+          </span>
         </div>
       }
     >
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>VM</TableHead>
-            <TableHead>Source</TableHead>
-            <TableHead>Target</TableHead>
-            <TableHead>Reason</TableHead>
-            <TableHead>Score</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Time</TableHead>
+            <TableHead>{t("drsHistoryTable.vm")}</TableHead>
+            <TableHead>{t("drsHistoryTable.source")}</TableHead>
+            <TableHead>{t("drsHistoryTable.target")}</TableHead>
+            <TableHead>{t("drsHistoryTable.reason")}</TableHead>
+            <TableHead>{t("drsHistoryTable.score")}</TableHead>
+            <TableHead>{t("drsHistoryTable.status")}</TableHead>
+            <TableHead>{t("drsHistoryTable.time")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -103,7 +112,7 @@ export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
                 colSpan={7}
                 className="py-6 text-center text-muted-foreground"
               >
-                No history entries
+                {t("drsHistoryTable.noHistoryEntries")}
               </TableCell>
             </TableRow>
           ) : (
@@ -128,11 +137,18 @@ export function DRSHistoryTable({ clusterId }: DRSHistoryTableProps) {
                     {entry.reason}
                   </TableCell>
                   <TableCell className="text-sm">
-                    {entry.score_before.toFixed(2)} &rarr;{" "}
-                    {entry.score_after.toFixed(2)}
-                    <span className="ml-1 text-muted-foreground">
-                      ({improvement}%)
-                    </span>
+                    <Trans
+                      t={t}
+                      i18nKey="drsHistoryTable.scoreBeforeScoreAfterSpanImprovementSpan"
+                      values={{
+                        scoreBefore: entry.score_before.toFixed(2),
+                        scoreAfter: entry.score_after.toFixed(2),
+                        improvement,
+                      }}
+                      components={{
+                        span: <span className="ml-1 text-muted-foreground" />,
+                      }}
+                    />
                   </TableCell>
                   <TableCell>
                     <Badge variant={statusVariant(entry.status)}>
