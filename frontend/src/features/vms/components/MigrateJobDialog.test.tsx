@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { clearTokens } from "@/lib/api-client";
 import { queryClient } from "@/lib/query-client";
 import {
@@ -19,6 +20,8 @@ import { emptyPerSessionStores } from "@/test/per-session-stores";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import { MigrateJobDialog } from "./MigrateJobDialog";
+
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 /**
  * Creating a migration job and running its pre-flight check are two requests,
@@ -61,12 +64,12 @@ async function sessionEnds() {
   await signInAs(VIEWER);
 }
 
-async function pressCreate(status = "running") {
-  const user = userEvent.setup();
-  const view = render(
+/** The dialog as VMDetailPage keeps it: mounted, open or closed. */
+function dialog(status: string, open = true) {
+  return (
     <QueryClientProvider client={queryClient}>
       <MigrateJobDialog
-        open
+        open={open}
         onOpenChange={() => undefined}
         clusterId={CLUSTER}
         resourceId="guest-01"
@@ -76,8 +79,13 @@ async function pressCreate(status = "running") {
         currentNode="pve-01"
         status={status}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+async function pressCreate(status = "running") {
+  const user = userEvent.setup();
+  const view = render(dialog(status));
   const button = await screen.findByRole("button", {
     name: "Run pre-flight checks",
   });
@@ -158,6 +166,29 @@ describe("MigrateJobDialog, creating a job and checking it", () => {
 
     expect(checkCallers).toEqual([ADMIN.id]);
   });
+});
+
+// The dialog stays mounted while closed: a check sent for a create that landed
+// then is nobody's to show, so its failure is toasted, and not left behind for
+// the reopened dialog.
+it("toasts a pre-flight check that fails after the dialog was closed, once", async () => {
+  server.routes[CHECK] = () =>
+    json({ error: "bad_request", message: "Refused for a reason" }, 400);
+  await signInAs(ADMIN);
+  const view = await pressCreate();
+  view.rerender(dialog("running", false));
+
+  created.resolve(json({ id: "job-01", status: "pending" }));
+  await waitFor(() => {
+    expect(toast.error).toHaveBeenCalledWith(
+      "Checking the migration of linux01 failed: Refused for a reason",
+    );
+  });
+  await flush();
+  expect(toast.error).toHaveBeenCalledTimes(1);
+
+  view.rerender(dialog("running"));
+  expect(screen.queryByText("Refused for a reason")).toBeNull();
 });
 
 describe("MigrateJobDialog, a stopped HA guest", () => {

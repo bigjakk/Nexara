@@ -2,7 +2,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { ViewMigrationsLink } from "@/features/migrations/components/ViewMigrationsLink";
-import { apiClient } from "@/lib/api-client";
+import { toast } from "sonner";
+import { apiClient, sessionScope } from "@/lib/api-client";
+import { describeError } from "@/lib/api-error";
 import { apiPath } from "@/lib/api-path";
 import {
   Dialog,
@@ -239,6 +241,9 @@ export function MigrateJobDialog({
   // Mutation hooks
   const createMutation = useCreateMigration(true);
   const checkMutation = useRunPreFlightCheck(true);
+  // The check of a job whose create landed after the dialog closed: its own
+  // instance, so its state never shows in the dialog when it is reopened.
+  const lateCheck = useRunPreFlightCheck(true);
   const settle = useSaveOutcome(open);
   const executeMutation = useExecuteMigration();
   const { data: job } = useMigrationJob(jobId);
@@ -334,35 +339,43 @@ export function MigrateJobDialog({
     // and needs manage:migration, not ownership of the job: sent after the
     // session changed hands it would run as whoever is signed in next, on the
     // previous user's job. useSaveOutcome drops a create that lands after that.
-    // Closed before the create answered, the job is still checked.
-    const check = (id: string, onChecked?: () => void) => {
-      settle(checkMutation.mutateAsync(id), {
-        action: t("migrationCheckAction", { name: vmName }),
-        ...(onChecked ? { onSuccess: onChecked } : {}),
-        onError: () => undefined, // shown below from the mutation's state
-      });
-    };
+    // Closed before the create answered, the job is still checked, and a
+    // failed check is toasted: nothing on screen shows it.
+    const ended = sessionScope();
+    const checkAction = t("migrationCheckAction", { name: vmName });
     settle(createMutation.mutateAsync(req), {
       action: t("migrationCreateAction", { name: vmName }),
       onSuccess: (created) => {
         setJobId(created.id);
-        check(created.id, () => {
-          setStep("preflight");
+        settle(checkMutation.mutateAsync(created.id), {
+          action: checkAction,
+          onSuccess: () => {
+            setStep("preflight");
+          },
+          onError: () => undefined, // shown below from the mutation's state
         });
       },
       onLateSuccess: (created) => {
-        check(created.id);
+        lateCheck.mutateAsync(created.id).then(undefined, (err: unknown) => {
+          if (ended()) return;
+          toast.error(
+            `${checkAction} failed: ${describeError(err) || "the request failed."}`,
+          );
+        });
       },
       onError: () => undefined, // shown below from the mutation's state
     });
   }
 
   function handleExecute() {
-    void executeMutation.mutateAsync(jobId).then(() => {
-      setStep("progress");
-      // Trigger task panel to pick up the new task_history entry from the backend.
-      void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
-    });
+    executeMutation.mutateAsync(jobId).then(
+      () => {
+        setStep("progress");
+        // Trigger task panel to pick up the new task_history entry from the backend.
+        void queryClient.invalidateQueries({ queryKey: ["recent-activity"] });
+      },
+      () => undefined, // reported by the app's error toast
+    );
   }
 
   function updateStorageMapping(sourcePool: string, targetPool: string) {
