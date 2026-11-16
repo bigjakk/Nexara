@@ -533,6 +533,13 @@ func (s *epochStore) doQuery(name string, args []any) (pgx.Rows, error) {
 			}
 		}
 		return &authFakeRows{items: items}, nil
+	case "ListUsersWithRoles":
+		var items []any
+		for _, u := range s.users {
+			items = append(items, db.ListUsersWithRolesRow{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
+				Role: u.Role, IsActive: u.IsActive, AuthSource: u.AuthSource, SsoLinked: u.OidcSubject != ""})
+		}
+		return &authFakeRows{items: items}, nil
 	case "ListUserIDsByRole":
 		return &authFakeRows{}, nil
 	case "GetUserScopedPermissions":
@@ -712,6 +719,7 @@ func newEpochApp(t *testing.T, store *epochStore, opts epochOptions) *epochApp {
 		app.Post("/auth/totp/recovery-codes/regenerate", withRequestParams(t, totpConfirmSetupMirror(), nil, a.totp.RegenerateRecoveryCodes))
 	}
 	app.Put("/users/:id", withRequestParams(t, epochUserUpdateMirror(), []string{"id"}, uh.Update))
+	app.Get("/users", withRequestParams(t, apischema.Properties{}, nil, uh.List))
 	app.Delete("/oidc/links", withRequestParams(t, apischema.Properties{}, nil, uh.ResetAllSSOLinks))
 	app.Delete("/users/:id/sso-link", withRequestParams(t, apischema.Properties{
 		"id": {Type: apischema.String, Format: "uuid", Source: apischema.SourcePath}}, []string{"id"}, uh.ResetSSOLink))

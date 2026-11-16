@@ -84,9 +84,32 @@ type userListResponse struct {
 	IsActive    bool      `json:"is_active"`
 	AuthSource  string    `json:"auth_source"`
 	TotpEnabled bool      `json:"totp_enabled"`
-	SSOLinked   bool      `json:"sso_linked"` // bound to a provider identity, which is never returned
+	SSOLinked   *bool     `json:"sso_linked,omitempty"` // see ssoLinkedFor
 	CreatedAt   string    `json:"created_at"`
 	UpdatedAt   string    `json:"updated_at"`
+}
+
+// ssoLinkedFor is sso_linked as a caller may see it: whether an SSO account is bound
+// to its provider identity (the identity is never returned), and only for a caller
+// who holds manage:user. Next to the roles and the 2FA flag the list carries, it names
+// the unclaimed accounts a first sign-in could take, which a Viewer (view:user) must
+// not learn. nil omits the field.
+func ssoLinkedFor(show, linked bool) *bool {
+	if !show {
+		return nil
+	}
+	return &linked
+}
+
+// callerManagesUsers is whether the caller holds global manage:user; a check that
+// cannot answer is a no.
+func callerManagesUsers(c fiber.Ctx) bool {
+	eng, userID, ok := engineFromContext(c)
+	if !ok {
+		return false
+	}
+	allowed, err := eng.HasGlobalPermission(c.Context(), userID, "manage", "user")
+	return err == nil && allowed
 }
 
 // List handles GET /api/v1/users.
@@ -95,6 +118,7 @@ func (h *UserHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to list users")
 	}
+	showLinks := callerManagesUsers(c)
 
 	resp := make([]userListResponse, len(users))
 	for i, u := range users {
@@ -114,7 +138,7 @@ func (h *UserHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 			IsActive:    u.IsActive,
 			AuthSource:  u.AuthSource,
 			TotpEnabled: u.TotpEnabled,
-			SSOLinked:   u.SsoLinked,
+			SSOLinked:   ssoLinkedFor(showLinks, u.SsoLinked),
 			CreatedAt:   u.CreatedAt.Format(time.RFC3339Nano),
 			UpdatedAt:   u.UpdatedAt.Format(time.RFC3339Nano),
 		}
@@ -146,7 +170,7 @@ func (h *UserHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
-		SSOLinked:   user.OidcSubject != "",
+		SSOLinked:   ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
 		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})
@@ -279,7 +303,7 @@ func (h *UserHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		IsActive:    user.IsActive,
 		AuthSource:  user.AuthSource,
 		TotpEnabled: user.TotpSecret.Valid,
-		SSOLinked:   user.OidcSubject != "",
+		SSOLinked:   ssoLinkedFor(callerManagesUsers(c), user.OidcSubject != ""),
 		CreatedAt:   user.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   user.UpdatedAt.Format(time.RFC3339Nano),
 	})

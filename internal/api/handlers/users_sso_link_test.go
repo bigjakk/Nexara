@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -78,5 +79,20 @@ func TestResetSSOLink_ClearsTheLinkAndEndsTheSessionsInOneTransaction(t *testing
 				t.Errorf("audit %v %v; want one %s of %s, without the subject", rows, details, action, resource)
 			}
 		})
+	}
+}
+
+// TestUserList_SaysWhichAccountsAreLinkedOnlyToAUserManager: sso_linked names the
+// unclaimed SSO accounts, so a caller without manage:user (a Viewer) gets no such field.
+func TestUserList_SaysWhichAccountsAreLinkedOnlyToAUserManager(t *testing.T) {
+	t.Parallel()
+	for role, want := range map[string]bool{"admin": true, "viewer": false} {
+		f := newDeactivationFixture(t, epochOptions{}, nil)
+		resp := f.a.send(t, http.MethodGet, "/users", "",
+			map[string]string{"X-Test-Acting-User": f.admin.ID.String(), "X-Test-Acting-Role": role}, 20*time.Second)
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK || strings.Contains(string(raw), `"sso_linked"`) != want {
+			t.Errorf("%s: %d %s; want sso_linked present %t", role, resp.StatusCode, raw, want)
+		}
 	}
 }

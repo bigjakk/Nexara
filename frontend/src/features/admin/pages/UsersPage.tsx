@@ -111,11 +111,12 @@ export function UsersPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">
                     {SOURCE_LABELS[user.auth_source] ?? "Local"}
-                    {user.auth_source === "oidc" && !user.sso_linked && (
-                      <div className="whitespace-nowrap text-[12.5px]">
-                        Not linked yet
-                      </div>
-                    )}
+                    {user.auth_source === "oidc" &&
+                      user.sso_linked === false && (
+                        <div className="whitespace-nowrap text-[12.5px]">
+                          Not linked yet
+                        </div>
+                      )}
                   </TableCell>
                   <TableCell>
                     {user.totp_enabled ? (
@@ -187,21 +188,22 @@ export function UsersPage() {
                               Reset 2FA
                             </DropdownMenuItem>
                           )}
-                          {user.auth_source === "oidc" && user.sso_linked && (
-                            <DropdownMenuItem
-                              onClick={() => {
-                                if (
-                                  confirm(
-                                    `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address.`,
-                                  )
-                                ) {
-                                  resetSSOLink.mutate(user.id);
-                                }
-                              }}
-                            >
-                              Reset SSO link
-                            </DropdownMenuItem>
-                          )}
+                          {user.auth_source === "oidc" &&
+                            user.sso_linked === true && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `Reset the SSO link of ${user.email}? Their sessions end now, and their next SSO sign-in links the account to whichever identity presents this address.`,
+                                    )
+                                  ) {
+                                    resetSSOLink.mutate(user.id);
+                                  }
+                                }}
+                              >
+                                Reset SSO link
+                              </DropdownMenuItem>
+                            )}
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
                             onClick={() => {
