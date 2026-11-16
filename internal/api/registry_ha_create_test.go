@@ -52,7 +52,8 @@ type haCreatePVERequest struct {
 // request and answers each with an empty success envelope — or, for a request
 // named in replies ("METHOD /api2/json/path"), with that JSON as its data.
 // sequence answers the same request differently each time it comes, in order, before
-// replies does; the word "refuse" in it refuses that one request.
+// replies does; the word "refuse" in it refuses that one request, and "unrouted"
+// (in either) answers PVE's 501 for a path it does not have.
 type haCreatePVE struct {
 	mu       sync.Mutex
 	seen     []haCreatePVERequest
@@ -89,6 +90,11 @@ func (p *haCreatePVE) serve(t *testing.T) string {
 		if data == "refuse" {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"data":null,"message":"refused\n"}`))
+			return
+		}
+		if data == "unrouted" { // PVE's dispatcher on a path it has no handler for
+			w.WriteHeader(http.StatusNotImplemented)
+			_, _ = w.Write([]byte(`{"data":null,"message":"Method '` + key + `' not implemented\n"}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"data":` + data + `}`))

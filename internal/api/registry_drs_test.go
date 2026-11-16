@@ -641,6 +641,40 @@ func TestDRSCreateHARuleForwardsEnabled(t *testing.T) {
 	}
 }
 
+// PVE 8 has no HA rules (pve-ha-manager 4.0.x; rules arrived in 5.0.2, PVE 9.0):
+// a known older version is refused before Proxmox is asked, and an unknown one
+// that Proxmox answers with its 501 gets the same 400, not the 501.
+func TestDRSCreateHARuleRefusedWithoutHARules(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name      string
+		version   string // the cluster row's pve_version; "" leaves no row to read
+		wantCalls int
+	}{
+		{name: "PVE 8 on record", version: "8.4", wantCalls: 0},
+		{name: "version not known, Proxmox answers 501", wantCalls: 1},
+	} {
+		pve := &haCreatePVE{replies: map[string]string{"POST /api2/json/cluster/ha/rules": "unrouted"}}
+		dbtx := &haCreateDBTX{}
+		if tt.version != "" {
+			dbtx.models = map[string]any{"GetCluster :one": db.Cluster{PveVersion: tt.version}}
+		}
+		e := declaredEndpoint(t, fiber.MethodPost, drsScope+"/ha-rules")
+		e.Handler = handlers.NewDRSHandler(db.New(dbtx), haCreateEncKey, nil, nil).CreateHARule
+		app := newHAStandInApp(t, e, pve, dbtx, map[string]bool{"manage:drs": true})
+		req := jsonRequest(http.MethodPost, drsRoute(drsScope+"/ha-rules"),
+			`{"rule_name":"ha-rule01","rule_type":"anti-affinity","vm_ids":[100,101]}`)
+		req.Header.Set("X-Test-User", "yes")
+		status, env := send(t, app, req)
+		if status != fiber.StatusBadRequest || !strings.Contains(env.Message, "9.0 or newer") {
+			t.Errorf("%s: status = %d (%q), want 400 naming PVE 9.0", tt.name, status, env.Message)
+		}
+		if len(pve.seen) != tt.wantCalls {
+			t.Errorf("%s: Proxmox received %d requests, want %d", tt.name, len(pve.seen), tt.wantCalls)
+		}
+	}
+}
+
 // A Nexara rule created without "enabled" is created enabled, as the dialog's
 // default sends it.
 func TestDRSCreateRuleDefaultsToEnabled(t *testing.T) {

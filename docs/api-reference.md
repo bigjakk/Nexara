@@ -2091,7 +2091,7 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | POST | `/clusters/:id/drs/evaluate` | Trigger DRS evaluation. The answer's `held_nodes[]` (`node`, `uptime_seconds`, `holdoff_seconds`) names the nodes left alone because they booted within the hold-off |
 | GET | `/clusters/:id/drs/history` | List DRS evaluation history |
 | GET | `/clusters/:id/drs/ha-rules` | List HA-aware DRS rules |
-| POST | `/clusters/:id/drs/ha-rules` | Create HA-aware DRS rule |
+| POST | `/clusters/:id/drs/ha-rules` | Create HA-aware DRS rule. `400` on a cluster older than Proxmox VE 9.0, which has no HA rules |
 | DELETE | `/clusters/:id/drs/ha-rules/:name` | Delete HA-aware DRS rule |
 
 ### Rolling Updates

@@ -273,9 +273,10 @@ func registerDRSEndpoints(reg *Registry, h *handlers.DRSHandler) {
 		Handler:     h.ListHARules,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPost,
-		Path:        drsScope + "/ha-rules",
-		Description: "Create a Proxmox HA rule from DRS's vocabulary. Requires manage:drs, not manage:ha.",
+		Method: fiber.MethodPost,
+		Path:   drsScope + "/ha-rules",
+		Description: "Create a Proxmox HA rule from DRS's vocabulary. Requires manage:drs, not manage:ha. " +
+			"Refused with 400 on a cluster older than Proxmox VE 9.0, which has no HA rules.",
 		Group:       "DRS",
 		Permissions: clusterCheck("manage", "drs"),
 		Parameters: clusterParams(apischema.Properties{

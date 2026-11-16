@@ -19,8 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useCreateDRSRule, useCreateHARule } from "../api/drs-queries";
-import { useClusterVMs } from "@/features/clusters/api/cluster-queries";
-import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
+import {
+  useCluster,
+  useClusterNodes,
+  useClusterVMs,
+} from "@/features/clusters/api/cluster-queries";
+import { isPVEAtLeast, PVE_FEATURES } from "@/lib/pve-version";
 import type { RuleType } from "../types/drs";
 import { Plus, Search } from "lucide-react";
 
@@ -32,7 +36,7 @@ interface CreateRuleDialogProps {
 
 export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
   const [open, setOpen] = useState(false);
-  const [target, setTarget] = useState<RuleTarget>("manual");
+  const [chosenTarget, setTarget] = useState<RuleTarget>("manual");
   const [ruleType, setRuleType] = useState<RuleType>("affinity");
   const [ruleName, setRuleName] = useState("");
   const [selectedVmIds, setSelectedVmIds] = useState<number[]>([]);
@@ -43,6 +47,14 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
 
   const { data: vms } = useClusterVMs(clusterId);
   const { data: nodes } = useClusterNodes(clusterId);
+  const { data: cluster } = useCluster(clusterId);
+  // Proxmox HA rules arrived in PVE 9.0; on PVE 8 every create answers 501.
+  // A version not known yet offers only Nexara rules, as the HA tab does.
+  const haRulesSupported = isPVEAtLeast(
+    cluster?.pve_version ?? "",
+    PVE_FEATURES.HA_RULES,
+  );
+  const target: RuleTarget = haRulesSupported ? chosenTarget : "manual";
 
   const createManualRule = useCreateDRSRule(clusterId);
   const createHARule = useCreateHARule(clusterId);
@@ -138,23 +150,25 @@ export function CreateRuleDialog({ clusterId }: CreateRuleDialogProps) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Target</Label>
-            <Select
-              value={target}
-              onValueChange={(v) => {
-                setTarget(v as RuleTarget);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="manual">Nexara Only</SelectItem>
-                <SelectItem value="ha">Proxmox HA</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {haRulesSupported && (
+            <div className="space-y-2">
+              <Label>Target</Label>
+              <Select
+                value={target}
+                onValueChange={(v) => {
+                  setTarget(v as RuleTarget);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Nexara Only</SelectItem>
+                  <SelectItem value="ha">Proxmox HA</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {target === "ha" && (
             <div className="space-y-2">

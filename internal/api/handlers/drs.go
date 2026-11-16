@@ -783,6 +783,27 @@ func (h *DRSHandler) ListHARules(c fiber.Ctx, p *apischema.Params) error {
 	return RespondItems(c, resp)
 }
 
+// haRulesUnsupportedMessage is CreateHARule's 400 on a cluster without HA
+// rules. pve-ha-manager added them in 5.0.2 (PVE 9.0, trixie); every PVE 8
+// release ships 4.0.x, where /cluster/ha/rules is unrouted and answers 501.
+const haRulesUnsupportedMessage = "Proxmox HA rules need Proxmox VE 9.0 or newer, and this cluster runs an " +
+	"older release. Create a Nexara rule instead."
+
+// requireHARules refuses an HA rule on a cluster whose recorded version is
+// older than 9.0. A version not known yet (or a failed read) lets the request
+// through, and Proxmox's 501 is answered with the same 400 by the caller.
+func (h *DRSHandler) requireHARules(c fiber.Ctx, clusterID uuid.UUID) error {
+	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
+	if err != nil {
+		return nil // best-effort: the 501 mapping below still answers
+	}
+	if _, _, _, known := proxmox.ParseVersion(cluster.PveVersion); known &&
+		!proxmox.VersionAtLeast(cluster.PveVersion, proxmox.CapHARules) {
+		return fiber.NewError(fiber.StatusBadRequest, haRulesUnsupportedMessage)
+	}
+	return nil
+}
+
 // CreateHARule handles POST /api/v1/clusters/:cluster_id/drs/ha-rules.
 func (h *DRSHandler) CreateHARule(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
@@ -832,12 +853,19 @@ func (h *DRSHandler) CreateHARule(c fiber.Ctx, p *apischema.Params) error {
 		params.Disable = 1
 	}
 
+	if err := h.requireHARules(c, clusterID); err != nil {
+		return err
+	}
+
 	client, err := h.createProxmoxClient(c, clusterID)
 	if err != nil {
 		return err
 	}
 
 	if err := client.CreateHARule(c.Context(), haRuleType, params); err != nil {
+		if proxmox.IsHARulesUnsupportedError(err) {
+			return fiber.NewError(fiber.StatusBadRequest, haRulesUnsupportedMessage)
+		}
 		return mapProxmoxError(err)
 	}
 
