@@ -31,7 +31,7 @@ import {
   confirmRequiredFromError,
   type ConfirmRequired,
 } from "@/lib/confirm-gate";
-import { useSSHCredentials } from "@/features/rolling-updates/api/rolling-update-queries";
+import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-queries";
 
 /** The backend's code for the SSH trust reset (clusters.go). */
 const SSH_TRUST_RESET = "ssh_trust_reset_confirm_required";
@@ -107,14 +107,13 @@ export function EditClusterDialog({
   // pinned host keys no longer describe the machines Nexara would reach.
   //
   // The server refuses with a 422 until the reset is acknowledged, and THAT is
-  // what drives the confirmation below — not this query. The query needs
-  // manage:ssh_credentials, which a caller holding only manage:cluster does not
-  // have; driving the prompt from it would leave that caller staring at a
-  // refusal with no control to satisfy it, unable to change the address at all.
-  // It is used only for the advance notice, which is a nicety for callers who
-  // can read it.
-  const { data: sshCreds } = useSSHCredentials(cluster.id);
-  const sshResetForeseen = addressChanged && sshCreds != null;
+  // what drives the confirmation below — not this query, which a caller
+  // holding only manage:cluster may be refused; driving the prompt from it
+  // would leave that caller unable to change the address at all. It is used
+  // only for the advance notice, and asks only whether a credential is set:
+  // nothing of the stored credential reaches this dialog.
+  const { configured: sshConfigured } = useSSHConfigured(cluster.id);
+  const sshResetForeseen = addressChanged && sshConfigured;
 
   // The server's refusal, once it arrives. Re-submitting with the
   // acknowledgement is the only way past it, for every caller.
@@ -332,9 +331,8 @@ export function EditClusterDialog({
                   </p>
                   <p className="text-sm text-muted-foreground">
                     Node addresses are learned from this API, so the stored SSH
-                    credential (<strong>{sshCreds.username}</strong>) and every
-                    pinned host key were entrusted to machines this cluster is
-                    leaving. Saving clears both. Re-enter the credential and
+                    credential and every pinned host key were entrusted to
+                    machines this cluster is leaving. Saving clears both. Re-enter the credential and
                     re-pin each node before the next rolling update.
                   </p>
                 </div>
