@@ -91,10 +91,11 @@ func TestAccessCreateUserAuditRow(t *testing.T) {
 			want: created(url.Values{"userid": {"alice@pve"}, "enable": {"1"}, "expire": {"0"}}, "alice@pve",
 				`{"enable":true,"expire":0,"has_password":false,"userid":"alice@pve"}`)},
 		{
-			name:      "a create Proxmox refuses answers with an error and writes no audit row",
+			// User.pm's create dies "user '$username' already exists": a conflict, not a gateway failure.
+			name:      "a duplicate Proxmox refuses answers 409 and writes no audit row",
 			body:      `{"userid": "alice@pve", "password": "` + accessCreatePassword + `", "comment": "sentinel-comment"}`,
 			pveStatus: http.StatusInternalServerError, pveBody: `{"data":null,"message":"user 'alice@pve' already exists\n"}`,
-			want: auditWant{method: http.MethodPost, path: usersPath,
+			want: auditWant{status: fiber.StatusConflict, method: http.MethodPost, path: usersPath,
 				form: url.Values{"userid": {"alice@pve"}, "password": {accessCreatePassword}, "comment": {"sentinel-comment"}}},
 		},
 	}

@@ -607,7 +607,7 @@ func (h *AccessHandler) CreateUser(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 	if err := pxClient.CreateAccessUser(c.Context(), req); err != nil {
-		return mapProxmoxError(err)
+		return mapDuplicateNameError("A user with that ID already exists", err)
 	}
 
 	// Whether the account has a password is useful audit context — a
