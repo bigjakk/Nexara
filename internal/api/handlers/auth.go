@@ -850,7 +850,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
 			h.forgetLoginFailures(c, dir.entry)
-			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil)
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "")
 		}
 		if dir.locked != nil {
 			return dir.locked
@@ -869,7 +869,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 		if ldapUser, ok := h.tryLDAPLogin(c, email, password, &dir); ok {
 			h.forgetLoginFailures(c, attempt)
 			h.forgetLoginFailures(c, dir.entry)
-			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil)
+			return h.issueOrTOTP(c, ldapUser, ldapUser.AuthEpoch, "ldap_login", nil, "")
 		}
 		if dir.locked != nil {
 			return dir.locked
@@ -904,7 +904,7 @@ func (h *AuthHandler) Login(c fiber.Ctx, p *apischema.Params) error {
 	// new epoch together, and a change that lands during the comparison (bcrypt takes
 	// the better part of a hundred milliseconds) leaves the session below to be
 	// refused, not minted on the password that has just been replaced.
-	return h.issueOrTOTP(c, user, user.AuthEpoch, "login", nil)
+	return h.issueOrTOTP(c, user, user.AuthEpoch, "login", nil, "")
 }
 
 // tryLDAPLogin attempts LDAP authentication. Returns the DB user and true on success.
@@ -2686,7 +2686,7 @@ func (h *AuthHandler) OIDCTokenExchange(c fiber.Ctx, p *apischema.Params) error 
 		return fiber.NewError(fiber.StatusForbidden, "Account is disabled")
 	}
 
-	return h.issueOrTOTP(c, user, epoch, "oidc_login", deferred)
+	return h.issueOrTOTP(c, user, epoch, "oidc_login", deferred, exchangeData[oidcExchangeCallbackEmailKey])
 }
 
 // exchangeBindingDigest is the browser binding's digest an exchange code was stored
@@ -2711,13 +2711,15 @@ func exchangeBindingDigest(stored string) string {
 // factor; it goes into the pending token. Such a sign-in is never issued tokens here:
 // when the account no longer has a second factor (reset since the callback), or no
 // second step is wired, it is refused and the next sign-in finishes at the callback.
-func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditAction string, sso *pendingSSOIdentity) error {
+// callbackEmail, when not "", is an SSO callback's oidc_callback row that waits for the
+// session: it rides in the pending token, or is written here once tokens are issued.
+func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string) error {
 	if sso != nil && (!user.TotpSecret.Valid || h.totpHandler == nil) {
 		slog.Warn("oidc token exchange: a sign-in left for its second factor has none to pass; refusing it", "user_id", user.ID)
 		return fiber.NewError(fiber.StatusUnauthorized, oidcCouldNotCompleteMessage)
 	}
 	if user.TotpSecret.Valid && h.totpHandler != nil {
-		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, epoch, auditAction, sso)
+		token, err := h.totpHandler.CreateTOTPPendingToken(c.Context(), user.ID, epoch, auditAction, sso, callbackEmail)
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to create TOTP challenge")
 		}
@@ -2726,7 +2728,13 @@ func (h *AuthHandler) issueOrTOTP(c fiber.Ctx, user db.User, epoch int64, auditA
 			TOTPPendingToken: token,
 		})
 	}
-	return h.issueTokens(c, user, epoch, auditAction)
+	if err := h.issueTokens(c, user, epoch, auditAction); err != nil {
+		return err
+	}
+	if callbackEmail != "" {
+		auditOIDCCallback(c, h.queries, h.eventPub, user.ID, callbackEmail)
+	}
+	return nil
 }
 
 // profileResponse is the response for GET /api/v1/auth/me.

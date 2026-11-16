@@ -119,6 +119,9 @@ type totpPendingLogin struct {
 	AuditAction string              `json:"audit_action"`
 	AuthEpoch   *int64              `json:"auth_epoch"`
 	SSO         *pendingSSOIdentity `json:"sso,omitempty"`
+	// OIDCCallbackEmail is the address of an SSO callback's oidc_callback row, written
+	// once the session exists; "" for none.
+	OIDCCallbackEmail string `json:"oidc_callback_email,omitempty"`
 }
 
 // NewTOTPHandler creates a new TOTP handler.
@@ -737,7 +740,14 @@ func (h *TOTPHandler) VerifyLogin(c fiber.Ctx, p *apischema.Params) error {
 	// nothing issued): the user signs in again. The epoch-source guard
 	// (TestGuard_TheSessionsEpochIsAlwaysTheOneTheCheckRead) holds this argument to
 	// exactly `*pending.AuthEpoch`, and user.AuthEpoch to that comparison alone.
-	return h.issueTokens(c, user, *pending.AuthEpoch, pending.AuditAction)
+	if err := h.issueTokens(c, user, *pending.AuthEpoch, pending.AuditAction); err != nil {
+		return err
+	}
+	// The SSO callback's row, now that the sign-in it records exists.
+	if pending.OIDCCallbackEmail != "" {
+		auditOIDCCallback(c, h.queries, h.eventPub, user.ID, pending.OIDCCallbackEmail)
+	}
+	return nil
 }
 
 // AdminReset handles DELETE /api/v1/users/:id/totp — admin resets user's TOTP.
@@ -775,8 +785,9 @@ func (h *TOTPHandler) AdminReset(c fiber.Ctx, p *apischema.Params) error {
 // CreateTOTPPendingToken generates a random token and stores it in Redis with user
 // data, among it epoch: the user's auth epoch as the credential check that earned
 // this challenge read it. VerifyLogin creates the session against that value.
-// sso, when not nil, is the identity of an SSO sign-in VerifyLogin is to finish.
-func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string, sso *pendingSSOIdentity) (string, error) {
+// sso, when not nil, is the identity of an SSO sign-in VerifyLogin is to finish, and
+// callbackEmail the address of the oidc_callback row it writes once a session exists.
+func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UUID, epoch int64, auditAction string, sso *pendingSSOIdentity, callbackEmail string) (string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return "", fmt.Errorf("generate pending token: %w", err)
@@ -788,6 +799,8 @@ func (h *TOTPHandler) CreateTOTPPendingToken(ctx context.Context, userID uuid.UU
 		AuditAction: auditAction,
 		AuthEpoch:   &epoch,
 		SSO:         sso,
+
+		OIDCCallbackEmail: callbackEmail,
 	})
 
 	key := fmt.Sprintf("totp:pending:%s", token)

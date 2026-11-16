@@ -56,6 +56,11 @@ const oidcExchangeBindingKey = "binding"
 // JSON), present only for such a sign-in.
 const oidcExchangeIdentityKey = "sso_identity"
 
+// oidcExchangeCallbackEmailKey is the key, in the same JSON, of the address the
+// callback's oidc_callback row records, for a sign-in whose row waits for its second
+// factor (an account with one, bound or not): the row is written once a session exists.
+const oidcExchangeCallbackEmailKey = "oidc_callback_email"
+
 // pendingSSOIdentity is what finishOIDCSignIn needs from a callback whose sign-in waits
 // for a second factor: the identity the provider verified there, and the configuration
 // it came through. It is server-side only: it travels in the exchange record and then in
@@ -1062,20 +1067,27 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 	// Store short-lived exchange code in Redis (5 second TTL), with the digest of the
 	// browser binding's secret: the exchange refuses a code this browser was not given
 	// (oidcExchangeBinding).
+	// An account with a second factor, or a sign-in left for one, has its oidc_callback
+	// row written once the code has passed and a session exists, not here.
+	callbackEmail := ""
+	if user.TotpSecret.Valid || deferred != nil {
+		callbackEmail = userInfo.Email
+	}
+
 	secure := oidcBindingSecure(cfg.RedirectUri)
 	secret, record, err := newBinding(secure)
 	if err == nil {
-		exchangeCode, err = h.storeExchange(c.Context(), user, record, deferred)
+		exchangeCode, err = h.storeExchange(c.Context(), user, record, deferred, callbackEmail)
 	}
 	if err != nil {
 		slog.Error("OIDC callback: could not store the exchange code", "user_id", user.ID, "error", err)
 		return db.User{}, "", "Internal error"
 	}
 	oidcExchangeBinding.set(c, exchangeCode, secret, secure)
-	// The callback's row is written where the sign-in is finished: here, or for a sign-in
-	// left for its second factor once the code passes (FinishSignInAfterSecondFactor).
-	if finish {
-		h.auditOIDCCallback(c, user.ID, userInfo.Email)
+	// The callback's row is written where the sign-in is finished: here for an account with
+	// no second factor, else once a session exists after the code (VerifyLogin).
+	if callbackEmail == "" {
+		auditOIDCCallback(c, h.queries, h.eventPub, user.ID, userInfo.Email)
 	}
 	return user, exchangeCode, ""
 }
@@ -1083,9 +1095,9 @@ func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, 
 // auditOIDCCallback writes the oidc_callback row of a finished SSO sign-in, through the
 // shared path so the row is published and forwarded to syslog like every other: c.Locals
 // has no user on a callback, hence AuditLogAs.
-func (h *OIDCHandler) auditOIDCCallback(c fiber.Ctx, userID uuid.UUID, email string) {
+func auditOIDCCallback(c fiber.Ctx, queries *db.Queries, eventPub *events.Publisher, userID uuid.UUID, email string) {
 	details, _ := json.Marshal(map[string]string{"email": email, "ip": c.IP()})
-	AuditLogAs(c, h.queries, h.eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "oidc_callback", details)
+	AuditLogAs(c, queries, eventPub, userID, pgtype.UUID{}, "auth", userID.String(), "oidc_callback", details)
 }
 
 // oidcExchangeTTL is how long the code Callback redirects the browser with can be
@@ -1103,8 +1115,9 @@ const oidcExchangeTTL = 5 * time.Second
 // outlived by it. binding is the record of the secret the browser's binding
 // cookie holds (oidcExchangeBinding), kept under oidcExchangeBindingKey. deferred, when
 // not nil, is the identity of a sign-in left to finish after the second factor, kept
-// under oidcExchangeIdentityKey.
-func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding string, deferred *pendingSSOIdentity) (string, error) {
+// under oidcExchangeIdentityKey; callbackEmail, when not "", the address of an
+// oidc_callback row that waits for the second factor, under oidcExchangeCallbackEmailKey.
+func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding string, deferred *pendingSSOIdentity, callbackEmail string) (string, error) {
 	code, err := auth.GenerateRandomString(32)
 	if err != nil {
 		return "", fmt.Errorf("generating the exchange code: %w", err)
@@ -1120,6 +1133,9 @@ func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding s
 			return "", fmt.Errorf("encoding the sign-in's identity: %w", err)
 		}
 		record[oidcExchangeIdentityKey] = string(identity)
+	}
+	if callbackEmail != "" {
+		record[oidcExchangeCallbackEmailKey] = callbackEmail
 	}
 	data, _ := json.Marshal(record)
 	if err := h.rdb.Set(ctx, "oidc:exchange:"+code, string(data), oidcExchangeTTL).Err(); err != nil {
@@ -1350,7 +1366,6 @@ func (h *OIDCHandler) FinishSignInAfterSecondFactor(c fiber.Ctx, userID uuid.UUI
 		slog.Error("oidc sign-in after the second factor: could not finish it", "user_id", userID, "error", err)
 		return db.User{}, fiber.NewError(fiber.StatusInternalServerError, oidcCouldNotCompleteMessage)
 	}
-	h.auditOIDCCallback(c, finished.ID, identity.Email)
 	return finished, nil
 }
 

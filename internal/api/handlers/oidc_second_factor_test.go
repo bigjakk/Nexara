@@ -43,7 +43,8 @@ func ssoSecondFactorStart(t *testing.T, a *epochApp, info *auth.OIDCUserInfo) st
 // TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses: an unlinked SSO account with a
 // second factor is linked, and its roles replaced from the provider's groups, only after
 // the code passes, with the identity the callback verified; a wrong code changes nothing;
-// and an account another identity took in between is refused with no session.
+// and an account another identity took in between is refused with no session. An account
+// already bound is synced at the callback, but its oidc_callback row waits for the code.
 func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 	t.Parallel()
 	adminRole, operatorRole := uuid.New(), uuid.New()
@@ -52,6 +53,7 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 		groups     []string
 		wrongFirst bool
 		taken      bool // another identity links the account between the callback and the code
+		bound      bool // the account is bound to the identity already
 		wantRole   uuid.UUID
 	}{
 		{name: "linked and synced after the code, untouched after a wrong one", groups: []string{"admins"},
@@ -59,11 +61,16 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 		{name: "dropped from the group mapped to Admin: the role is gone", groups: []string{"operators"},
 			wantRole: operatorRole},
 		{name: "another identity took the account: refused", groups: []string{"admins"}, taken: true},
+		{name: "a bound account: its sign-in row waits for the code", groups: []string{"admins"},
+			bound: true, wrongFirst: true, wantRole: adminRole},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			user, plain := epochTOTPUser(t, "carol@example.com", 2)
 			user.AuthSource, user.PasswordHash = "oidc", ""
+			if tc.bound {
+				user.OidcIssuer, user.OidcSubject = epochIssuer, epochSubject
+			}
 			store := newEpochStore(user)
 			mapping, _ := json.Marshal(map[string]string{"admins": adminRole.String(), "operators": operatorRole.String()})
 			store.oidcConfig = &db.OidcConfig{ID: uuid.New(), Enabled: true, IssuerUrl: epochIssuer, GroupRoleMapping: mapping}
@@ -75,6 +82,9 @@ func TestSSOSignIn_IsFinishedOnlyOnceTheSecondFactorPasses(t *testing.T) {
 				t.Helper()
 				if n := callbackRows(store); n != 0 {
 					t.Errorf("%s: %d oidc_callback rows before the sign-in was finished", when, n)
+				}
+				if tc.bound {
+					return
 				}
 				got := store.user(user.ID)
 				if got.OidcSubject != "" && !tc.taken || len(store.named("RevokeAllUserRoles")) != 0 || got.DisplayName != user.DisplayName {
