@@ -100,11 +100,16 @@ import { useVMContextMenuStore } from "@/stores/vm-context-menu-store";
  *                          its cluster, route and name — drawn by AppShell.
  *
  *   kept (the browser's)   why
- *   theme-store, sidebar-store (layout; its expanded keys are opaque ids),
+ *   sidebar-store (layout; its expanded keys are opaque ids),
  *   branding-store (the installation's, the same for everyone),
  *   changelog-store (which release notes this browser showed),
- *   preferences-store (display settings applied before sign-in — the login
- *   page's language and accent — and holding no data of anyone's),
+ *   preferences-store and theme-store: the last user's display settings,
+ *   saved with their account, and kept on purpose: they are what the login
+ *   page is drawn in (its language, accent and theme), and they name nothing
+ *   of the estate. They are not the next user's: LoadSavedPreferences puts
+ *   that user's saved ones in their place once they sign in (the defaults,
+ *   for one with none saved; for one who never picked a theme, the theme
+ *   stays as this browser last showed it).
  *   health-mute-store (issue-type names, a standing setting "until the user
  *   restores it"), and the column layouts and presets in localStorage.
  *
