@@ -19,9 +19,10 @@ import {
 } from "@/components/ui/select";
 import { Play } from "lucide-react";
 import { useGenerateReport } from "../api/report-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import type { ReportParameters } from "@/types/api";
-import { REPORT_TYPES, reportTypeInfo } from "../report-types";
+import { REPORT_TYPES, reportTypeInfo, reportTypeLabel } from "../report-types";
 import { ReportParametersFields } from "./ReportParametersFields";
 
 interface ReportGenerateDialogProps {
@@ -48,7 +49,9 @@ export function ReportGenerateDialog({
   const [clusterId, setClusterId] = useState("");
   const [timeRangeHours, setTimeRangeHours] = useState(168);
   const [parameters, setParameters] = useState<ReportParameters>({});
-  const generateReport = useGenerateReport();
+  const generateReport = useGenerateReport(true);
+  // Each catalogue card opens this dialog for its own type.
+  const settle = useSaveOutcome(open ? (initialType ?? true) : false);
   const errorMessage =
     generateReport.error instanceof Error ? generateReport.error.message : "";
 
@@ -75,18 +78,20 @@ export function ReportGenerateDialog({
 
   const handleGenerate = () => {
     if (!clusterId || !reportType) return;
-    generateReport.mutate(
-      {
+    settle(
+      generateReport.mutateAsync({
         report_type: reportType,
         cluster_id: clusterId,
         time_range_hours: timeRangeHours,
         parameters,
-      },
+      }),
       {
+        action: `Generating the ${reportTypeLabel(reportType)} report`,
         onSuccess: (run) => {
           setOpen(false);
           void navigate(`/reports/runs/${run.id}`);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   };

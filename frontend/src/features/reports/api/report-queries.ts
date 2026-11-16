@@ -85,9 +85,15 @@ export interface GenerateReportRequest {
   parameters?: ReportParameters | undefined;
 }
 
-export function useGenerateReport() {
+/**
+ * `errorsShownByCaller`: the caller shows a failure itself and settles it
+ * through useSaveOutcome, so the app's error toast stays out of it. Left
+ * false, the toast reports it.
+ */
+export function useGenerateReport(errorsShownByCaller = false) {
   const qc = useQueryClient();
   return useMutation({
+    ...(errorsShownByCaller ? errorsHandledLocally : {}),
     mutationFn: (data: GenerateReportRequest) =>
       apiClient.post<ReportRun>(apiPath`/api/v1/reports/generate`, data),
     onSuccess: () => {
@@ -146,6 +152,7 @@ export interface EmailReportRunRequest {
 
 export function useEmailReportRun() {
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ id, ...body }: EmailReportRunRequest) =>
       apiClient.post<unknown>(apiPath`/api/v1/reports/runs/${id}/email`, body),
   });

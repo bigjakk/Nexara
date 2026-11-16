@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import { useEmailReportRun } from "../api/report-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { ReportRun } from "@/types/api";
 
 interface ReportEmailDialogProps {
@@ -42,6 +43,7 @@ export function ReportEmailDialog({
   const [withCSV, setWithCSV] = useState(false);
   const [sent, setSent] = useState(false);
   const send = useEmailReportRun();
+  const settle = useSaveOutcome(run?.id ?? null);
 
   useEffect(() => {
     if (!open) return;
@@ -59,17 +61,19 @@ export function ReportEmailDialog({
 
   const handleSend = () => {
     if (!run || !channelId) return;
-    send.mutate(
-      {
+    settle(
+      send.mutateAsync({
         id: run.id,
         channel_id: channelId,
         recipients: parsedRecipients,
         with_csv: withCSV,
-      },
+      }),
       {
+        action: "Emailing the report",
         onSuccess: () => {
           setSent(true);
         },
+        onError: () => undefined, // shown below from the mutation's state
       },
     );
   };
