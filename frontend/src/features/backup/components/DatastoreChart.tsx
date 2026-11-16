@@ -27,23 +27,16 @@ import {
 } from "./chart-style";
 import { USAGE_TIMEFRAMES, type UsageTimeframe } from "./datastore-timeframes";
 import { DATA_COLOR } from "@/lib/chart-colors";
-import { formatBytes } from "@/lib/format";
+import {
+  formatAxisClock,
+  formatAxisDay,
+  formatBytes,
+  formatExactDateTime,
+} from "@/lib/format";
 
-// Built once. Constructing an Intl formatter dwarfs the cost of using one.
-const CLOCK_FMT = new Intl.DateTimeFormat(undefined, {
-  hour: "2-digit",
-  minute: "2-digit",
-});
-const DAY_FMT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-});
-
-// Both branches are module-level constants, so the tickFormatter prop keeps a
-// stable identity across renders instead of handing Recharts a fresh closure
-// every time.
-const formatAxisClock = (ts: number): string => CLOCK_FMT.format(ts);
-const formatAxisDay = (ts: number): string => DAY_FMT.format(ts);
+// Both branches are module-level functions (lib/format.ts), so the
+// tickFormatter prop keeps a stable identity across renders instead of handing
+// Recharts a fresh closure every time.
 
 // A clock reading repeated across seven days names no point in particular, so
 // the longer windows label by date instead — the same split DatastoreIOChart
@@ -143,7 +136,7 @@ function UsageAreaChart({
               consults the axis tickFormatter, so without this the header
               reads "1757116800000". */}
           <Tooltip
-            labelFormatter={(label) => new Date(Number(label)).toLocaleString()}
+            labelFormatter={(label) => formatExactDateTime(Number(label))}
             formatter={(value: unknown) =>
               typeof value === "number" ? formatBytes(value) : "0"
             }

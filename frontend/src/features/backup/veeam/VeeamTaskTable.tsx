@@ -1,4 +1,4 @@
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatTime as formatClockTime } from "@/lib/format";
 import { useVeeamSessionTasks } from "../api/backup-queries";
 import { StateText } from "../components/StateText";
 import { resultTone } from "./veeam-format";
@@ -23,7 +23,7 @@ function formatTime(value: string | null): string {
   if (value == null || value === "") return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleTimeString();
+  return formatClockTime(parsed);
 }
 
 /**

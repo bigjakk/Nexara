@@ -4,7 +4,12 @@ import { Stat, StatStrip, type StatTone } from "@/components/page/StatStrip";
 import { Segmented } from "@/components/ui/segmented";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
-import { formatBytes, formatPercent, formatRelativeTime } from "@/lib/format";
+import {
+  formatBytes,
+  formatDateTime,
+  formatExactDate,
+  formatPercent,
+} from "@/lib/format";
 import { usageLevel } from "@/lib/usage-level";
 import {
   useDatastoreConfig,
@@ -79,7 +84,7 @@ const VIEW_OPTIONS = [
 ] as const;
 
 function ago(unixSeconds: number): string {
-  return formatRelativeTime(new Date(unixSeconds * 1000).toISOString());
+  return formatDateTime(unixSeconds * 1000);
 }
 
 function gcSub(last: LastRun | null): string | undefined {
@@ -206,7 +211,7 @@ function DatastorePanel({
           value={formatBytes(ds.avail)}
           sub={
             forecast.fullDate
-              ? `Full around ${forecast.fullDate.toLocaleDateString()}`
+              ? `Full around ${formatExactDate(forecast.fullDate)}`
               : forecast.points.length > 0
                 ? `Not full within ${String(FORECAST_HORIZON_DAYS)} days`
                 : undefined

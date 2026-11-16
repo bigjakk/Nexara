@@ -12,7 +12,11 @@ import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { DATA_COLOR } from "@/lib/chart-colors";
 import { usePBSDatastoreRRD } from "../api/backup-queries";
 import type { PBSDatastoreRRDEntry } from "../types/backup";
-import { formatBytesPerSecond } from "@/lib/format";
+import {
+  formatAxisClock,
+  formatAxisDay,
+  formatBytesPerSecond,
+} from "@/lib/format";
 import {
   AXIS_TICK,
   SECOND_SERIES_COLOR,
@@ -31,11 +35,10 @@ function formatIOPS(value: number): string {
 }
 
 function formatTime(ts: number, timeframe: string): string {
-  const d = new Date(ts * 1000);
   if (timeframe === "week" || timeframe === "month") {
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    return formatAxisDay(ts * 1000);
   }
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatAxisClock(ts * 1000);
 }
 
 interface DatastoreIOViewProps {

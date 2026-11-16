@@ -2,6 +2,7 @@ import { StateText } from "../components/StateText";
 import { useVeeamSessionLogs } from "../api/backup-queries";
 import type { VeeamSession } from "../types/backup";
 import { resultTone } from "./veeam-format";
+import { formatTime as formatClockTime } from "@/lib/format";
 
 interface VeeamSessionLogProps {
   serverId: string;
@@ -14,7 +15,7 @@ function formatTime(value: string | null): string {
   if (value == null || value === "") return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleTimeString();
+  return formatClockTime(parsed);
 }
 
 /**

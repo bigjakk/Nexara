@@ -39,10 +39,10 @@ import { describeSchedule } from "../lib/schedule";
 import { BackupJobDialog } from "./BackupJobDialog";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { backupHistories } from "@/features/history/lib/backup-histories";
+import { DateTime } from "@/components/DateTime";
 
-function formatNextRun(ts?: number): string {
-  if (!ts) return "-";
-  return new Date(ts * 1000).toLocaleString();
+function formatNextRun(ts?: number) {
+  return <DateTime value={ts === undefined ? null : ts * 1000} fallback="-" />;
 }
 
 /** Mirrors the dialog's guest-selection modes, in the same precedence. */

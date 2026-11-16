@@ -12,10 +12,10 @@ import { Play } from "lucide-react";
 import { useRunSyncJob } from "../api/backup-queries";
 import type { PBSSyncJob } from "../types/backup";
 import { RunState } from "./StateText";
+import { DateTime } from "@/components/DateTime";
 
-function formatUnixTime(ts: number): string {
-  if (ts === 0) return "-";
-  return new Date(ts * 1000).toLocaleString();
+function formatUnixTime(ts: number) {
+  return <DateTime value={ts * 1000} fallback="-" />;
 }
 
 interface SyncJobTableProps {

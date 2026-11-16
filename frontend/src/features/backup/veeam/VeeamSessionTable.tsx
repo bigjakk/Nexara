@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { formatBytes, formatDateTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -26,6 +26,7 @@ import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamSessionLog } from "./VeeamSessionLog";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamSession } from "../types/backup";
+import { DateTime } from "@/components/DateTime";
 
 interface VeeamSessionTableProps {
   sessions: VeeamSession[];
@@ -131,7 +132,7 @@ const COLUMNS: ColumnDef<VeeamSession, SessionSortKey, SessionCtx>[] = [
     label: "Started",
     width: 170,
     sortValue: (session) => toEpoch(session.creation_time),
-    cell: (session) => formatDateTime(session.creation_time),
+    cell: (session) => <DateTime value={session.creation_time} />,
   },
   {
     key: "duration",
@@ -237,7 +238,7 @@ export function VeeamSessionTable({
                   <ExpandedDetailRow colSpan={layout.columns.length}>
                     <DefGrid>
                       <DetailField label="Finished">
-                        {formatDateTime(session.end_time)}
+                        <DateTime value={session.end_time} />
                       </DetailField>
                       <DetailField label="Bottleneck">
                         {bottleneckLabel(session.bottleneck)}

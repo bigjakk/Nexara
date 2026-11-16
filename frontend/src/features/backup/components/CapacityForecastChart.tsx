@@ -11,7 +11,12 @@ import {
   ReferenceLine,
 } from "recharts";
 import { DATA_COLOR } from "@/lib/chart-colors";
-import { formatBytes } from "@/lib/format";
+import {
+  formatAxisDay,
+  formatBytes,
+  formatExactDate,
+  formatExactDateTime,
+} from "@/lib/format";
 import {
   FORECAST_HORIZON_DAYS,
   type CapacityForecast,
@@ -25,15 +30,8 @@ import {
   unbroken,
 } from "./chart-style";
 
-// Module-scoped, not rebuilt per call: constructing an Intl formatter is far
-// more expensive than using one, and an axis formatter is called per tick.
-const DATE_FMT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-});
-
 function formatDate(ts: number): string {
-  return DATE_FMT.format(ts);
+  return formatAxisDay(ts);
 }
 
 /**
@@ -70,7 +68,7 @@ export function CapacityForecastView({
       <p className="pb-2 text-[12.5px] text-muted-foreground">
         {fullDate ? (
           <span className="font-medium text-red-700 dark:text-red-400">
-            Projected full: {fullDate.toLocaleDateString()}
+            Projected full: {formatExactDate(fullDate)}
           </span>
         ) : (
           `No capacity issue projected (${String(FORECAST_HORIZON_DAYS)}d)`
@@ -123,7 +121,7 @@ export function CapacityForecastView({
             />
             <Tooltip
               labelFormatter={(label) =>
-                new Date(Number(label)).toLocaleString()
+                formatExactDateTime(Number(label))
               }
               formatter={(value: unknown, name: unknown) => [
                 formatBytes(

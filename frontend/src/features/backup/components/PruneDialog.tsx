@@ -14,14 +14,15 @@ import { Label } from "@/components/ui/label";
 import { Scissors } from "lucide-react";
 import { usePruneDatastore } from "../api/backup-queries";
 import type { PBSPruneResult } from "../types/backup";
+import { DateTime } from "@/components/DateTime";
 
 interface PruneDialogProps {
   pbsId: string;
   store: string;
 }
 
-function formatUnixTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString();
+function formatUnixTime(ts: number) {
+  return <DateTime value={ts * 1000} />;
 }
 
 /** The five retention counts, in the order PBS applies them. */

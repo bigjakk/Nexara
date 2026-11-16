@@ -3,16 +3,14 @@ import { Badge } from "@/components/ui/badge";
 import { DetailField } from "@/components/DetailField";
 import { DefGrid } from "@/components/page/Panel";
 import type { VeeamProbeResult } from "../types/backup";
+import { formatDate as formatDateOnly } from "@/lib/format";
 
 interface VeeamProbeSummaryProps {
   probe: VeeamProbeResult;
 }
 
 function formatDate(value: string): string {
-  if (value === "") return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString();
+  return formatDateOnly(value, "-");
 }
 
 /**

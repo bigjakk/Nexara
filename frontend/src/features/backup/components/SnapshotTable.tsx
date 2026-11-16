@@ -35,9 +35,10 @@ import {
 } from "../api/backup-queries";
 import { usePermissions } from "@/hooks/usePermissions";
 import { formatBytes } from "@/lib/format";
+import { DateTime } from "@/components/DateTime";
 
-function formatUnixTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString();
+function formatUnixTime(ts: number) {
+  return <DateTime value={ts * 1000} />;
 }
 
 function snapKey(snap: PBSSnapshot): string {
@@ -290,9 +291,7 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                           {formatUnixTime(snap.backup_time)}
                         </DetailField>
                         <DetailField label="Last seen">
-                          {snap.last_seen_at
-                            ? new Date(snap.last_seen_at).toLocaleString()
-                            : "-"}
+                          <DateTime value={snap.last_seen_at} fallback="-" />
                         </DetailField>
                         <DetailField label="Size">
                           {formatBytes(snap.size)}

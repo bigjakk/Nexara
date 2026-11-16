@@ -2,6 +2,7 @@ import { PropertyList, PropertyRow } from "@/components/page/Panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDatastoreConfig, usePruneJobs } from "../api/backup-queries";
 import { RETENTION_KEYS, summarizePrune } from "../lib/prune-summary";
+import { DateTime } from "@/components/DateTime";
 
 interface DatastoreConfigProps {
   pbsId: string;
@@ -71,12 +72,12 @@ export function DatastoreConfig({ pbsId, store }: DatastoreConfigProps) {
       )}
       {prune.lastRun && (
         <PropertyRow label="Last prune">
-          {new Date(prune.lastRun.at * 1000).toLocaleString()}
+          <DateTime value={prune.lastRun.at * 1000} />
         </PropertyRow>
       )}
       {prune.nextRun != null && (
         <PropertyRow label="Next prune">
-          {new Date(prune.nextRun * 1000).toLocaleString()}
+          <DateTime value={prune.nextRun * 1000} />
         </PropertyRow>
       )}
       {prune.failedJob && (

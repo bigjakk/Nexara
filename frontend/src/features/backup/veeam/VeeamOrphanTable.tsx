@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { formatBytes, formatDateTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -21,6 +21,7 @@ import { DefGrid, Panel } from "@/components/page/Panel";
 import { StateText } from "../components/StateText";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
 import type { VeeamOrphanedObject } from "../types/backup";
+import { DateTime } from "@/components/DateTime";
 
 /** Epoch ms, so date columns order chronologically rather than by their text. */
 function toEpoch(value: string | null): number | null {
@@ -98,7 +99,9 @@ const COLUMNS: ColumnDef<VeeamOrphanedObject, OrphanSortKey, OrphanCtx>[] = [
     label: "Newest point",
     width: 190,
     sortValue: (object) => toEpoch(object.latest_restore_point),
-    cell: (object) => formatDateTime(object.latest_restore_point, "Never"),
+    cell: (object) => (
+      <DateTime value={object.latest_restore_point} fallback="Never" />
+    ),
   },
 ];
 
@@ -233,7 +236,7 @@ function OrphanDetail({
           {formatBytes(object.size_bytes)}
         </DetailField>
         <DetailField label="Last seen">
-          {formatDateTime(object.last_seen_at, "Never")}
+          <DateTime value={object.last_seen_at} fallback="Never" />
         </DetailField>
         {object.last_run_failed && (
           <DetailField label="Last run">

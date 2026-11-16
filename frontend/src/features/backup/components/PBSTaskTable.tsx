@@ -21,6 +21,7 @@ import {
   type PBSTaskOutcome,
 } from "../lib/pbs-live-tasks";
 import { StateText } from "./StateText";
+import { DateTime } from "@/components/DateTime";
 
 const PAGE_SIZE = 25;
 
@@ -32,9 +33,8 @@ const STATUS_FILTER_OUTCOME: Record<string, PBSTaskOutcome | undefined> = {
   error: "failed",
 };
 
-function formatTime(unix: number): string {
-  if (!unix) return "-";
-  return new Date(unix * 1000).toLocaleString();
+function formatTime(unix: number) {
+  return <DateTime value={unix * 1000} fallback="-" />;
 }
 
 function formatDuration(start: number, end?: number): string {

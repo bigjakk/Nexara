@@ -1,7 +1,6 @@
 import { AlertTriangle, CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatAction } from "@/components/layout/activity-columns";
-import { formatDateTime } from "@/lib/format";
 import { historyActor } from "@/features/history/lib/history";
 import type { HistoryEntry } from "@/features/history/types/history";
 import {
@@ -11,6 +10,7 @@ import {
   type PBSTaskOutcome,
 } from "../lib/pbs-live-tasks";
 import type { PBSTask } from "../types/backup";
+import { DateTime } from "@/components/DateTime";
 
 const OUTCOME_ICON: Record<PBSTaskOutcome, React.ReactNode> = {
   running: <Loader2 className="h-3.5 w-3.5 animate-spin text-info" />,
@@ -105,9 +105,7 @@ export function PBSLiveTaskRows({
                     ? t("live.startedInNexara", { user: historyActor(trigger) })
                     : task.user}
                   {" · "}
-                  {formatDateTime(
-                    new Date(task.starttime * 1000).toISOString(),
-                  )}
+                  <DateTime value={task.starttime * 1000} />
                 </span>
               </div>
             </td>

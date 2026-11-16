@@ -7,11 +7,11 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { formatDateTime } from "@/lib/format";
 import { useVeeamSessions } from "../api/backup-queries";
 import type { VeeamSession } from "../types/backup";
 import { sessionResultLabel } from "./veeam-format";
 import { latestRuns, runIsActive } from "./veeam-live-runs";
+import { DateTime } from "@/components/DateTime";
 
 function runIcon(session: VeeamSession) {
   if (runIsActive(session)) {
@@ -111,7 +111,7 @@ export function VeeamLiveRunRows({
                 )}
                 <span className="ml-auto text-xs text-muted-foreground">
                   {run.initiated_by !== "" && `${run.initiated_by} · `}
-                  {formatDateTime(run.creation_time)}
+                  <DateTime value={run.creation_time} />
                 </span>
               </div>
             </td>

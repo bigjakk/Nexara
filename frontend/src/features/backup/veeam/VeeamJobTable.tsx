@@ -1,6 +1,6 @@
 import { Fragment } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
-import { formatBytes, formatDateTime } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -25,6 +25,7 @@ import { ClusterHistoryButton } from "@/features/history/components/ClusterHisto
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { VeeamTaskTable } from "./VeeamTaskTable";
 import type { VeeamJob } from "../types/backup";
+import { DateTime } from "@/components/DateTime";
 
 interface VeeamJobTableProps {
   jobs: VeeamJob[];
@@ -174,14 +175,14 @@ const COLUMNS: ColumnDef<VeeamJob, JobSortKey, JobCtx>[] = [
     label: "Last run",
     width: 170,
     sortValue: (job) => toEpoch(job.last_run),
-    cell: (job) => formatDateTime(job.last_run, "Never"),
+    cell: (job) => <DateTime value={job.last_run} fallback="Never" />,
   },
   {
     key: "nextRun",
     label: "Next run",
     width: 170,
     sortValue: (job) => toEpoch(job.next_run),
-    cell: (job) => formatDateTime(job.next_run, "Never"),
+    cell: (job) => <DateTime value={job.next_run} fallback="Never" />,
   },
   {
     key: "repository",

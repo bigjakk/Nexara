@@ -12,7 +12,7 @@ import { Panel } from "@/components/page/Panel";
 import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { Segmented } from "@/components/ui/segmented";
 import { DATA_COLOR } from "@/lib/chart-colors";
-import { formatBytes, formatPercent } from "@/lib/format";
+import { formatAxisDayClock, formatBytes, formatPercent } from "@/lib/format";
 import { usageLevel } from "@/lib/usage-level";
 import { useVeeamRepositoryMetrics } from "../api/backup-queries";
 import {
@@ -91,12 +91,7 @@ function RepositoryPanel({
   const level = usageLevel(usedPct);
 
   const chartData = metrics.map((m) => ({
-    time: new Date(m.time).toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    time: formatAxisDayClock(Date.parse(m.time)),
     used: m.used_bytes,
     capacity: m.capacity_bytes,
   }));

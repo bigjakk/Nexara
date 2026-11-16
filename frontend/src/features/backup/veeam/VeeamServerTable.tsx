@@ -2,7 +2,6 @@ import { Fragment, useState } from "react";
 import { TableBody, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Pencil, PlugZap, Trash2 } from "lucide-react";
-import { formatDateTime } from "@/lib/format";
 import { byId } from "@/hooks/useTableSort";
 import type { ColumnDef } from "@/hooks/useColumnLayout";
 import { useDataTable } from "@/hooks/useDataTable";
@@ -26,6 +25,7 @@ import {
   veeamServerStatus,
   type VeeamServerStatus,
 } from "./veeam-server-status";
+import { DateTime } from "@/components/DateTime";
 
 interface VeeamServerTableProps {
   servers: VeeamServer[];
@@ -341,10 +341,10 @@ export function VeeamServerTable({
                             : "Not verified"}
                       </DetailField>
                       <DetailField label="Last sync">
-                        {formatDateTime(server.last_sync_at, "Never")}
+                        <DateTime value={server.last_sync_at} fallback="Never" />
                       </DetailField>
                       <DetailField label="Added">
-                        {formatDateTime(server.created_at, "Never")}
+                        <DateTime value={server.created_at} fallback="Never" />
                       </DetailField>
                     </DefGrid>
 
