@@ -60,10 +60,12 @@ func SetCookieSecureMode(mode string) {
 //   - "always": always Secure — for TLS deployments behind a reverse proxy
 //     where scheme detection (X-Forwarded-Proto) is unreliable.
 //   - "never": never Secure — explicit opt-in for plain-HTTP lab use.
-//   - "auto" (default): Secure when the request is HTTPS. c.Protocol() honors
-//     X-Forwarded-Proto only from a TRUSTED_PROXIES upstream, and the flag is
-//     downgraded on plain-HTTP so homelab IP-only deploys don't have the browser
-//     silently drop the cookie ("Set-Cookie disappears" is a worse failure mode).
+//   - "auto" (default): Secure when the request is HTTPS: c.Scheme(), which is
+//     https for TLS Nexara ends itself, and honors X-Forwarded-Proto only from a
+//     TRUSTED_PROXIES upstream. The flag is downgraded on plain-HTTP so homelab
+//     IP-only deploys don't have the browser silently drop the cookie
+//     ("Set-Cookie disappears" is a worse failure mode). Not c.Protocol(): in
+//     Fiber v3 that is the HTTP version ("HTTP/1.1"), which left auto never Secure.
 func refreshCookieSecure(c fiber.Ctx) bool {
 	switch cookieSecureMode {
 	case "always":
@@ -71,7 +73,7 @@ func refreshCookieSecure(c fiber.Ctx) bool {
 	case "never":
 		return false
 	default:
-		return c.Protocol() == "https"
+		return c.Scheme() == "https"
 	}
 }
 
