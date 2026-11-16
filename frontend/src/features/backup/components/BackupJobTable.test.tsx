@@ -129,6 +129,20 @@ describe("BackupJobTable — permissions", () => {
   });
 });
 
+// A disabled job does not run, whatever next-run Proxmox reports for it.
+it.each([
+  [1, false],
+  [0, true],
+])("with enabled=%s shows no next run: %s", (enabled, none) => {
+  renderTable([job({ enabled, "next-run": 1_900_000_000 })]);
+  const headers = screen.getAllByRole("columnheader");
+  const col = headers.findIndex((h) => h.textContent === "Next run");
+  const row = screen.getByText(JOB_ID).closest("tr");
+  if (!row) throw new Error("no row");
+  const cell = within(row).getAllByRole("cell")[col];
+  expect(cell?.textContent === "-").toBe(none);
+});
+
 describe("BackupJobTable — Run now", () => {
   // The Proxmox GUI asks "Start the selected backup job now?" before a run,
   // and so does this. The assertion that matters is that NOTHING is sent until

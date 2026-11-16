@@ -177,7 +177,9 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                     )}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
-                    {formatNextRun(job["next-run"])}
+                    {/* Proxmox reports a next-run for a disabled job too,
+                        which does not run. */}
+                    {isEnabled ? formatNextRun(job["next-run"]) : "-"}
                   </TableCell>
                   <TableCell>
                     <div
