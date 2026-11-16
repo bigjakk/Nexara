@@ -28,6 +28,7 @@
   "openShell": "Open Shell",
   "editCluster": "Edit Cluster",
   "editClusterDesc": "Update the configuration for {{name}}.",
+  "savedButUnreachable": "Saved cluster {{name}}, but Nexara could not reach it: {{message}}. Check the API URL and the token.",
   "tokenId": "Token ID",
   "tokenSecret": "Token Secret (leave blank to keep current)",
   "tokenSecretPlaceholder": "Unchanged",

@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useUpdateCluster } from "@/features/dashboard/api/dashboard-queries";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +37,7 @@ import { useSSHConfigured } from "@/features/rolling-updates/api/rolling-update-
 
 /** The backend's code for the SSH trust reset (clusters.go). */
 const SSH_TRUST_RESET = "ssh_trust_reset_confirm_required";
-import type { ClusterResponse } from "@/types/api";
+import type { ClusterResponse, UpdateClusterResponse } from "@/types/api";
 
 interface FingerprintResponse {
   fingerprint: string;
@@ -75,6 +77,20 @@ export function EditClusterDialog({
   const [allowPrivate, setAllowPrivate] = useState(false);
 
   const updateMutation = useUpdateCluster();
+  const { t } = useTranslation("clusters");
+  // The save went through, but Nexara could not reach the cluster with what
+  // was saved. The dialog closes on a save, so this outlives it in a toast.
+  const warnUnreachable = ({
+    connectivity,
+  }: Partial<UpdateClusterResponse>) => {
+    if (connectivity === undefined || connectivity.reachable) return;
+    toast.warning(
+      t("savedButUnreachable", {
+        name: cluster.name,
+        message: connectivity.message,
+      }),
+    );
+  };
 
   // The hook opts out of the global error toast, because the open dialog shows
   // its failure itself; the save settles through its promise, so that one that
@@ -236,10 +252,12 @@ export function EditClusterDialog({
       action: `Saving cluster ${cluster.name}`,
       // Not once the dialog is gone: onOpenChange(false) would close whichever
       // dialog the parent has opened in this one's place.
-      onSuccess: () => {
+      onSuccess: (result) => {
+        warnUnreachable(result);
         onOpenChange(false);
         resetFingerprintState();
       },
+      onLateSuccess: warnUnreachable,
       onError: (err) => {
         const warn = privateAddressWarningFromError(err);
         if (warn != null) {
@@ -267,10 +285,6 @@ export function EditClusterDialog({
       },
     });
   }
-
-  const connectivityData = updateMutation.data?.connectivity;
-  const showConnectivityWarning =
-    connectivityData != null && !connectivityData.reachable;
 
   return (
     <Dialog
@@ -512,22 +526,6 @@ export function EditClusterDialog({
                   : "Update failed"}
               </p>
             )}
-
-          {showConnectivityWarning && (
-            <div className="rounded-lg bg-amber-500/10 p-3">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 dark:text-amber-500 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                    Connectivity Issue
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {connectivityData.message}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           <DialogFooter>
             <Button

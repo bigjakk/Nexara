@@ -3,12 +3,14 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { toast } from "sonner";
 import { EditClusterDialog } from "./EditClusterDialog";
 import type { ClusterResponse } from "@/types/api";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
+vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
 const mockedPut = vi.mocked(apiClient.put);
 const mockedGet = vi.mocked(apiClient.get);
@@ -184,5 +186,27 @@ describe("EditClusterDialog stored credentials", () => {
     expect(mockedGet.mock.calls.map((c) => c[0])).toEqual([
       "/api/v1/clusters/cluster-1/ssh-credentials/configured",
     ]);
+  });
+});
+
+describe("EditClusterDialog after a save", () => {
+  // The save closes the dialog, so the warning it drew for an unreachable
+  // cluster could never be seen: it is a toast now.
+  it("warns that the saved cluster could not be reached", async () => {
+    vi.clearAllMocks();
+    mockedGet.mockResolvedValue([]);
+    mockedPut.mockResolvedValueOnce({
+      cluster: CLUSTER,
+      connectivity: { reachable: false, message: "connection refused" },
+    });
+    const user = render();
+
+    await moveAddressAndSave(user);
+
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Saved cluster cluster02, but Nexara could not reach it: connection refused. Check the API URL and the token.",
+      );
+    });
   });
 });
