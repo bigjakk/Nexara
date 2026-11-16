@@ -799,8 +799,7 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// private-address confirmation the forced allow_private_address gives.
 	"POST " + pbsScope:                             sweepRefusedAddress("api_url"),
 	"POST " + veeamScope:                           sweepRefusedAddress("base_url"),
-	// The sweep itself replaces this one with a loopback TLS listener.
-	"POST " + clustersScope + "/fetch-fingerprint": sweepRefusedAddress("api_url"),
+	"POST " + clustersScope + "/fetch-fingerprint": sweepRefusedAddress("api_url"), // the sweep gives it a TLS listener
 	"PUT " + virtioWinGlobalScope + "/mirror":      sweepRefusedAddress("base_url"),
 	"POST " + nutServerScope:                       sweepRefusedHost(),
 	"POST " + nutServerScope + "/probe":            sweepRefusedHost(),
@@ -1298,10 +1297,8 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 	tlsServer := httptest.NewTLSServer(http.NotFoundHandler())
 	t.Cleanup(tlsServer.Close)
 	fingerprintRoute := "POST " + clustersScope + "/fetch-fingerprint"
-	overrides := maps.Clone(sweepRouteOverrides)
 	fetch := sweepRefusedAddress("api_url")
 	fetch.values["api_url"] = tlsServer.URL
-	overrides[fingerprintRoute] = fetch
 
 	type sweepSkip struct {
 		route  string
@@ -1330,7 +1327,10 @@ func TestGuard_EveryRegistryRouteDispatchesWithoutPanicking(t *testing.T) {
 		route := e.Method + " " + e.Path
 		gated := sweepGated(e)
 		for _, v := range sweepVariants {
-			req := synthesizeSweepRequestWith(e, v.includeOptional, overrides[route])
+			req := synthesizeSweepRequest(e, v.includeOptional)
+			if route == fingerprintRoute {
+				req = synthesizeSweepRequestWith(e, v.includeOptional, fetch)
+			}
 			if !req.ok {
 				skips = append(skips, sweepSkip{route: route, pass: v.name, reason: req.reason})
 				continue
