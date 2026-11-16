@@ -144,8 +144,7 @@ func registerTOTPEndpoints(reg *Registry, h *handlers.TOTPHandler) {
 			"that uses up the limit locks sign-in too), 503 when the attempt cannot be counted or the directory " +
 			"cannot be reached. An account that signs in through single sign-on has no password: it " +
 			"first confirms a fresh sign-in at its identity provider (POST /auth/totp/setup/sso-step-up), " +
-			"and this route uses that confirmation up; without one it is 403. Any other account must have " +
-			"signed in within the last 10 minutes, and is answered 403, saying to sign in again, otherwise.",
+			"and this route uses that confirmation up; without one it is 403.",
 		Group:       "Two-Factor Authentication",
 		Permissions: Permissions{SelfService: "enrolls the caller's own second factor"},
 		Parameters: apischema.Properties{

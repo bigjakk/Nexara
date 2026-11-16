@@ -889,38 +889,22 @@ func TestTOTPSetup_ProvesTheCurrentPasswordInChangePasswordsBudget(t *testing.T)
 	}
 }
 
-// TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn: an account of another
-// source has no Nexara password to prove (its hash is empty), so beginning a setup asks
-// instead that the session it came with began within totpFreshSignIn. A password it sends
-// is not looked at, and counts nothing.
-func TestTOTPSetup_AnAccountWithNoNexaraPasswordNeedsARecentSignIn(t *testing.T) {
+// TestTOTPSetup_AnAccountWithNoWayToProveItIsTheOwnerIsRefused: an account that is
+// neither local, LDAP nor SSO has nothing to prove, and a session begun a minute ago is
+// no proof either: a token stolen within minutes of a sign-in must not begin a setup.
+func TestTOTPSetup_AnAccountWithNoWayToProveItIsTheOwnerIsRefused(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name     string
-		signedIn time.Duration // how long ago the session began
-		status   int
-	}{
-		{"a sign-in a minute ago", time.Minute, http.StatusOK},
-		{"a sign-in an hour ago", time.Hour, http.StatusForbidden},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			a, _ := lockoutAppWith(t, "redis", func(s *raceStore) {
-				s.user.AuthSource, s.user.PasswordHash = "other", "" // neither local, LDAP nor SSO
-				s.session.CreatedAt = time.Now().Add(-tc.signedIn)
-			}, raceOptions{})
+	a, _ := lockoutAppWith(t, "redis", func(s *raceStore) {
+		s.user.AuthSource, s.user.PasswordHash = "other", ""
+		s.session.CreatedAt = time.Now().Add(-time.Minute)
+	}, raceOptions{})
 
-			resp, _ := a.postTimed(t, "/auth/totp/setup", `{"current_password":"anything"}`, "", map[string]string{
-				"X-Test-Acting-User": a.store.user.ID.String(), "X-Test-Session": a.store.session.ID.String(),
-			}, 10*time.Second)
+	resp, _ := a.postTimed(t, "/auth/totp/setup", `{"current_password":"anything"}`, "", map[string]string{
+		"X-Test-Acting-User": a.store.user.ID.String(), "X-Test-Session": a.store.session.ID.String(),
+	}, 10*time.Second)
 
-			if resp.StatusCode != tc.status {
-				t.Errorf("status = %d, want %d", resp.StatusCode, tc.status)
-			}
-			if a.redis.Exists(passwordFailKey(a.store.user.ID)) {
-				t.Error("the password it sent was counted: an account with no Nexara password has none to guess")
-			}
-		})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -1255,13 +1239,6 @@ func TestPasswordLockoutFiguresAreTheDocumentedOnes(t *testing.T) {
 	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_auth.go", "internal/api/registry_totp.go"} {
 		if !strings.Contains(strings.ToLower(authProse(t, file)), want) {
 			t.Errorf("%s does not say %q: the prose and passwordLockoutThreshold, passwordLockoutWindow and passwordLockoutDuration have drifted", file, want)
-		}
-	}
-	// And the 2FA setup's window for an account with no Nexara password.
-	fresh := fmt.Sprintf("signed in within the last %d minutes", int(totpFreshSignIn/time.Minute))
-	for _, file := range []string{"docs/api-reference.md", "internal/api/registry_totp.go"} {
-		if !strings.Contains(authProse(t, file), fresh) {
-			t.Errorf("%s does not say %q: the prose and totpFreshSignIn have drifted", file, fresh)
 		}
 	}
 }

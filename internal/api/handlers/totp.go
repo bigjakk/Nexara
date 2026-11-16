@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
@@ -48,28 +46,20 @@ const (
 	totpRecoveryLockoutThreshold = 5
 	totpRecoveryLockoutWindow    = 60 * time.Minute
 	totpRecoveryLockoutDuration  = 30 * time.Minute
-
-	// totpFreshSignIn is how recent a sign-in must be to begin enrolling a second
-	// factor on an account that has no Nexara password to prove: one that signs in
-	// through LDAP or single sign-on (see confirmItIsTheOwner).
-	totpFreshSignIn = 10 * time.Minute
 )
 
 // The answers of a setup that cannot go on until the caller proves it is the owner.
 const (
 	totpPasswordRequiredMessage          = "Enter your current password to set up two-factor authentication."
 	totpDirectoryPasswordRequiredMessage = "Enter your directory password to set up two-factor authentication."
+	totpNoProofMessage                   = "Two-factor authentication cannot be set up for this account: it has no password or identity provider to confirm it is you."
 	totpSSOStepUpRequiredMessage         = "Confirm with your identity provider first: your account signs in through single sign-on, " +
 		"so Nexara asks you to sign in there again before it sets up two-factor authentication."
 )
 
-var totpSignInAgainMessage = fmt.Sprintf("To set up two-factor authentication, sign out and sign in again, then start within %d minutes: "+
-	"your account signs in through LDAP or single sign-on, so Nexara has no password of yours to confirm and asks for a recent sign-in instead.",
-	int(totpFreshSignIn/time.Minute))
-
 var totpCodePattern = regexp.MustCompile(`^\d{6}$`)
 
-// All 7 routes are declared in internal/api/registry_totp.go: five SelfService
+// All 8 routes are declared in internal/api/registry_totp.go: six SelfService
 // (the caller's own enrollment), one Public (the second factor of an
 // in-progress login) and one global manage:user Check (the admin reset, the
 // only route here that acts on somebody else).
@@ -271,11 +261,12 @@ func (h *TOTPHandler) BeginSetup(c fiber.Ctx, p *apischema.Params) error {
 // proves a fresh sign-in at its identity provider instead: a step-up round trip
 // (POST /auth/totp/setup/sso-step-up, OIDCHandler.StartStepUp) records a proof for
 // this session, and the setup uses it up (useSSOStepUp); 403 without one. A password
-// it sends is not looked at.
+// it sends is not looked at. A token stolen from any session, however recent, gets
+// nothing from it without signing in at the provider as the owner.
 //
-// Any other account proves a recent sign-in: the session this request came with began
-// within totpFreshSignIn (its created_at is the sign-in; a refresh rotates the token and
-// keeps it).
+// An account of any other source has no way to prove it is the owner, and is refused
+// 403. (There used to be a third way, for both LDAP and SSO accounts: a session that
+// began within the last ten minutes, which a token stolen within them also passed.)
 func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password string) error {
 	if user.AuthSource == "local" {
 		if password == "" {
@@ -301,26 +292,9 @@ func (h *TOTPHandler) confirmItIsTheOwner(c fiber.Ctx, user db.User, password st
 		return h.useSSOStepUp(c, user)
 	}
 
-	sessionID, _ := c.Locals(LocalsSessionID).(uuid.UUID)
-	if sessionID == uuid.Nil {
-		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
-	}
-	ctx, cancel := context.WithTimeout(c.Context(), authDBTimeout)
-	session, err := h.queries.GetSessionByID(ctx, sessionID)
-	cancel()
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
-	case err != nil:
-		return totpSetupNotChecked("read the session", user.ID, err)
-	case session.UserID != user.ID:
-		return fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
-	case time.Since(session.CreatedAt) > totpFreshSignIn:
-		slog.Info("two-factor setup: refused, as the sign-in is too old for an account with no Nexara password",
-			"user_id", user.ID, "auth_source", user.AuthSource, "session_id", sessionID)
-		return fiber.NewError(fiber.StatusForbidden, totpSignInAgainMessage)
-	}
-	return nil
+	slog.Warn("two-factor setup: refused an account of a source that has no way to prove it is the owner",
+		"user_id", user.ID, "auth_source", user.AuthSource)
+	return fiber.NewError(fiber.StatusForbidden, totpNoProofMessage)
 }
 
 // useSSOStepUp uses up the proof a step-up through the identity provider recorded for
