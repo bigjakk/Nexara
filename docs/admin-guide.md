@@ -744,8 +744,25 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 2. Browser redirects to the identity provider with PKCE challenge
 3. After authentication, the provider redirects back with an authorization code
 4. Nexara exchanges the code for tokens, verifies the ID token (signature, nonce, audience). An ID token whose `email_verified` claim is false (the boolean, the number `0`, or the string `"false"`, `"0"` or `"no"`) is refused, for a new account and an existing one alike: the sign-in page asks the user to verify the address with their provider, and the audit log records `login_failed` with reason `email_not_verified` under the account, or, when no SSO account has that address, `login_failed_unknown_account` with no address, at most one a minute per client address, as for password sign-ins. A token without the claim is accepted
-5. With **Auto-Provision Users** on, a local user is created (JIT provisioning) with `auth_source=oidc`. A local or LDAP account with the same email is not taken over: the sign-in fails with *User provisioning failed*
+5. Nexara finds the account by who the person is at the provider, not by the address alone (see **Which account a sign-in reaches** below). With **Auto-Provision Users** on, an identity with no account gets a new one (JIT provisioning) with `auth_source=oidc`. A local or LDAP account with the same email is not taken over: the sign-in fails with *User provisioning failed*
 6. Group claims are mapped to Nexara roles, and as with LDAP this replaces the user's roles at every sign-in
+
+#### Which account a sign-in reaches
+
+An SSO account is bound to one identity at the provider: the ID token's issuer (`iss`) and subject (`sub`), stored on the account when it is created or first linked. At every sign-in:
+
+- the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token;
+- otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in;
+- otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
+- an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
+
+The unverified-address and allowed-domain refusals above happen before any of this, so neither can link an account. A local or LDAP account is never linked.
+
+**After the upgrade that added links**, every existing SSO account has no link and links itself at its next sign-in, by its address, as sign-in worked before. Until then the account is exactly as exposed as before the upgrade: whoever first signs in with an identity that presents its address takes the link. Where your provider lets users set an unverified address (Microsoft Entra ID, for one, sends no `email_verified`), sign in once with each SSO account you rely on, or check the **Not linked yet** marks on **Admin > Users**.
+
+**Resetting a link.** On **Admin > Users**, **More > Reset SSO link** (offered for a linked SSO account) clears the account's link after a confirmation: its next SSO sign-in links again by address. It ends every session of the account, since the identity behind them is in question, and is recorded in the audit log as `user_sso_link_reset`. You cannot reset your own. Use it when a person's account at the provider was replaced, or when a link may have been taken by the wrong identity.
+
+**Changing the issuer.** Accounts stay bound to the issuer they linked under, so after the issuer of a configuration changes, every one of them is refused at sign-in. That is the safe default: a new issuer's subjects are not the old one's. Saving a new **Issuer URL** while accounts are linked to the current one warns first and asks you to confirm. Afterwards, **Reset all SSO links** in the configuration's **Accounts** section clears every SSO account's link at once, after a confirmation, and ends every SSO session (yours too, if you signed in with SSO). Each account then links again by its address at its next sign-in, with the same first-sign-in exposure as after the upgrade. It is recorded as `oidc_links_reset` with the number of accounts.
 
 The sign-in is bound to the browser that started it, with a cookie set at step 1 and another once steps 4–6 are done. A
 link from someone else's sign-in — the provider's redirect back, or the `/oidc-callback` page it leads to —

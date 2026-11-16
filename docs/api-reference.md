@@ -314,6 +314,10 @@ password. A pending token issued before this rule existed is refused as expired.
    Body: { "code": "..." }
    Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "permissions": [...], "global_permissions": [...] }
    ```
+   The account is the one bound to the ID token's issuer and subject; an SSO account
+   with no link yet is linked by its address, and one bound to another identity is
+   refused: the callback redirects to `/login?error=` with *This sign-in does not match
+   the single sign-on identity your account is linked to. Contact an administrator.*
    As with password login, the refresh token is set as an HttpOnly cookie
    rather than returned in the body, and a user with 2FA enabled gets
    `{ "totp_required": true, "totp_pending_token": "..." }` here instead of
@@ -2325,11 +2329,13 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/users` | List all users |
+| GET | `/users` | List all users. `sso_linked` says whether an SSO account is bound to its provider identity; the identity is never returned |
 | GET | `/users/:id` | Get user |
 | PUT | `/users/:id` | Update user. Deactivating the account (`is_active: false`) changes it and ends every one of its sessions in one transaction: if the sessions cannot be ended, the account stays active and the answer (`503` or `500`) says it was **not** changed. An answer that says the change **could not be confirmed** means the deactivation may have taken effect; repeating it is safe |
 | DELETE | `/users/:id` | Delete user |
 | DELETE | `/users/:id/totp` | Admin reset user's TOTP |
+| DELETE | `/users/:id/sso-link` | Reset an SSO account's link to its provider identity (`manage:user`): its next SSO sign-in links again by address, and every session of the account ends. `400` when the account has no link, `403` for your own. The reset and the end of the sessions are one transaction: an answer that says the link was **not** reset changed nothing; one that says it **could not be confirmed** may have taken effect, and repeating it is safe. Audited as `user_sso_link_reset` |
+| DELETE | `/oidc/links` | Reset the link of every SSO account at once (`manage:user`), for after an issuer change; ends every session of each, the caller's own included. Answers `{ "reset": <accounts> }`. Audited as `oidc_links_reset` |
 
 ### LDAP
 
@@ -2349,8 +2355,8 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 |--------|------|-------------|
 | GET | `/oidc/configs` | List OIDC configs, oldest first. Sign-in uses the oldest enabled one |
 | POST | `/oidc/configs` | Create OIDC config. A plain-`http` redirect URI answers `422 insecure_oidc_redirect_confirm_required` until the body sets `acknowledge_insecure_redirect`; an issuer that resolves to a private address answers `422 private_address_confirm_required`, its address in `details.ip`, until the body sets `allow_private_address` (stored, audited; a loopback, link-local, unspecified or zoned address is `400` either way); so does `PUT`, which keeps a confirmation while `issuer_url` stays the same |
-| GET | `/oidc/configs/:id` | Get OIDC config |
-| PUT | `/oidc/configs/:id` | Update OIDC config |
+| GET | `/oidc/configs/:id` | Get OIDC config. `linked_accounts` (also in the list) counts the accounts bound to an identity of its issuer |
+| PUT | `/oidc/configs/:id` | Update OIDC config. Moving `issuer_url` while accounts are linked to the current issuer answers `422 oidc_issuer_change_confirm_required`, with `details.linked_accounts`, until the body sets `acknowledge_issuer_change`: those accounts are refused at sign-in until their links are reset (`DELETE /oidc/links`) |
 | DELETE | `/oidc/configs/:id` | Delete OIDC config |
 | POST | `/oidc/configs/:id/test` | Test OIDC connection. `422 private_address_confirm_required` when the issuer now resolves to a private address the config is not confirmed for |
 
