@@ -19,12 +19,16 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
+// mailFilter is a user filter that matches the address, so an account no sign-in has
+// named yet is searched by it.
+const mailFilter = "(|(uid={{username}})(mail={{username}}))"
+
 // ldapSyncApp is a harness app whose LDAPHandler searches dir, and sync runs Sync Now
 // against the store's config, answering its status.
 func ldapSyncApp(t *testing.T, store *epochStore, dir *fakeDirectory) (*epochApp, *LDAPHandler, func() int) {
 	t.Helper()
 	if store.ldapConfig == nil {
-		store.ldapConfig = &db.LdapConfig{ID: uuid.New()}
+		store.ldapConfig = &db.LdapConfig{ID: uuid.New(), UserFilter: mailFilter, EmailAttribute: "mail"}
 	}
 	a := newEpochApp(t, store, epochOptions{})
 	h := &LDAPHandler{queries: a.users.queries, directory: func(auth.LDAPConfig) ldapDirectory { return *dir }}
@@ -76,11 +80,19 @@ type fakeDirectory struct {
 	err   error
 	names map[string]bool
 	panic bool
+	// entries, when set, is the entry each name finds; any other name finds nobody.
+	entries map[string]auth.LDAPUser
 }
 
 func (d fakeDirectory) SearchUser(name string) (*auth.LDAPUser, error) {
 	if d.panic {
 		panic("search panicked")
+	}
+	if d.entries != nil {
+		if e, ok := d.entries[name]; ok {
+			return &e, nil
+		}
+		return nil, fmt.Errorf("%w: no entries matched", auth.ErrLDAPUserNotFound)
 	}
 	switch {
 	case d.names != nil && !d.names[name]:
@@ -171,7 +183,7 @@ func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	store := newEpochStore(db.User{ID: uuid.New(), Email: "alice@example.com", IsActive: true, AuthSource: "ldap"})
-	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60,
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60, UserFilter: mailFilter, EmailAttribute: "mail",
 		LastSyncAt: pgtype.Timestamptz{Time: now.Add(-30 * time.Minute), Valid: true}}
 	a, h, syncNow := ldapSyncApp(t, store, &fakeDirectory{found: &auth.LDAPUser{}})
 	h.now = func() time.Time { return now }
@@ -208,7 +220,7 @@ func TestLDAPSync_TheScheduleRunsWhenDueOneSyncAtATime(t *testing.T) {
 func TestLDAPSync_SearchesWithTheNameThePersonSignsInWith(t *testing.T) {
 	t.Parallel()
 	store := newEpochStore()
-	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true}
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, UserFilter: "(sAMAccountName={{username}})", EmailAttribute: "mail"}
 	entry := auth.LDAPUser{DN: "uid=alice,ou=people,dc=example,dc=com", Email: epochLoginEmail}
 	a, _, sync := ldapSyncApp(t, store, &fakeDirectory{found: &entry, names: map[string]bool{"alice": true}})
 	a.auth.SetLDAPHandler(&LDAPHandler{queries: a.auth.queries, signIn: func(auth.LDAPConfig) (ldapSignInSession, error) {
@@ -297,7 +309,7 @@ func TestLDAP_AFailedGroupSearchChangesNoRole(t *testing.T) {
 func TestLDAPSync_APanicInTheScheduledSyncIsRecovered(t *testing.T) {
 	t.Parallel()
 	store := newEpochStore(db.User{ID: uuid.New(), Email: epochLoginEmail, IsActive: true, AuthSource: "ldap"})
-	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60}
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), Enabled: true, SyncIntervalMinutes: 60, UserFilter: mailFilter, EmailAttribute: "mail"}
 	_, h, _ := ldapSyncApp(t, store, &fakeDirectory{panic: true})
 	h.RunScheduledSync(context.Background())
 	if store.syncLeased {
@@ -328,5 +340,58 @@ func TestLDAPSync_TheLeaseIsShortRenewedAndNamedInThe409(t *testing.T) {
 	}
 	if got := ldapSyncLease; got > 5*time.Minute {
 		t.Errorf("the lease lasts %v past a renewal: a stopped sync blocks the next one that long", got)
+	}
+}
+
+// TestUserFilterMatchesAddress: an unnamed account is searched by its address only when
+// the filter is an equality on the address attribute; anything else it cannot read is
+// "cannot tell", which leaves the account alone.
+func TestUserFilterMatchesAddress(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		filter, attr string
+		want         filterMatch
+	}{
+		{mailFilter, "mail", filterMatches},
+		{"(&(objectClass=user)( Mail = {{username}} ))", "MAIL", filterMatches},
+		{"(sAMAccountName={{username}})", "mail", filterDoesNotMatch},
+		{"(uid={{username}})", "userPrincipalName", filterDoesNotMatch},
+		{"(mail={{username}}*)", "mail", filterCannotTell},
+		{"(&(uid={{username}})(!(mail={{username}})))", "mail", filterCannotTell},
+		{mailFilter, "", filterCannotTell},
+	} {
+		if got := userFilterMatchesAddress(tc.filter, tc.attr); got != tc.want {
+			t.Errorf("%q with %q = %d, want %d", tc.filter, tc.attr, got, tc.want)
+		}
+	}
+}
+
+// TestLDAPSync_AnAccountNotSignedInSinceIsLeftAloneByAFilterOnAccountNames: with a filter
+// on sAMAccountName, ten accounts provisioned before the upgrade, and six of them signed
+// in since, no sync deactivates anyone: the four the filter cannot find by address are
+// skipped until they sign in, not counted missing.
+func TestLDAPSync_AnAccountNotSignedInSinceIsLeftAloneByAFilterOnAccountNames(t *testing.T) {
+	t.Parallel()
+	entries := map[string]auth.LDAPUser{}
+	users := make([]db.User, 0, 10)
+	for i := range 10 {
+		name := fmt.Sprintf("user%d", i)
+		u := db.User{ID: uuid.New(), Email: name + "@example.com", IsActive: true, AuthSource: "ldap"}
+		entries[name] = auth.LDAPUser{DN: "uid=" + name + ",dc=example,dc=com", Email: u.Email}
+		users = append(users, u)
+	}
+	store := newEpochStore(users...)
+	store.ldapConfig = &db.LdapConfig{ID: uuid.New(), UserFilter: "(sAMAccountName={{username}})", EmailAttribute: "mail"}
+	_, _, sync := ldapSyncApp(t, store, &fakeDirectory{entries: entries})
+	for round, signedIn := range []int{0, 6} {
+		for i := range signedIn {
+			store.mutate(users[i].ID, func(u *db.User) { u.LdapLoginName = fmt.Sprintf("user%d", i) })
+		}
+		sync()
+		for _, u := range users {
+			if !store.user(u.ID).IsActive {
+				t.Errorf("sync %d (%d signed in since): %s was deactivated", round+1, signedIn, u.Email)
+			}
+		}
 	}
 }

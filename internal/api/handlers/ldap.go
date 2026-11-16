@@ -599,6 +599,9 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 		"users_disabled":   res.disabled,
 		"users_re_enabled": res.reEnabled,
 		"users_skipped":    res.skipped,
+		// Accounts no sign-in has named yet, with a filter that does not match the
+		// address: left as they are until they sign in once.
+		"users_not_signed_in_since_upgrade": res.notSignedIn,
 	})
 }
 
@@ -623,6 +626,36 @@ type ldapSyncResult struct {
 	ran                                           bool
 	synced, disabled, reEnabled, skipped, missing int
 	answered                                      int // searches that answered: found or missing
+	notSignedIn                                   int // no stored sign-in name, and a filter that does not match the address
+}
+
+// filterMatch is what userFilterMatchesAddress can tell.
+type filterMatch int
+
+const (
+	filterCannotTell filterMatch = iota
+	filterMatches
+	filterDoesNotMatch
+)
+
+// userFilterMatchesAddress says whether the user filter matches the address attribute
+// against what was typed, so that searching by an account's address finds it: an
+// equality term (<emailAttribute>={{username}}), ignoring case and spaces. A negation,
+// or a term that puts {{username}} in a substring or another form, is "cannot tell".
+func userFilterMatchesAddress(filter, emailAttribute string) filterMatch {
+	f := strings.ToLower(strings.Join(strings.Fields(filter), ""))
+	attr := strings.ToLower(strings.TrimSpace(emailAttribute))
+	if attr == "" || strings.Contains(f, "!") {
+		return filterCannotTell
+	}
+	term := "(" + attr + "={{username}})"
+	if strings.Contains(f, term) {
+		return filterMatches
+	}
+	if strings.Contains(f, "("+attr+"=") && strings.Contains(f, "{{username}}") {
+		return filterCannotTell // the attribute is matched, but not as an equality on the typed name
+	}
+	return filterDoesNotMatch
 }
 
 // errLDAPSyncTooManyMissing is a sync that changed nothing because most of the accounts
@@ -638,7 +671,8 @@ func tooManyMissing(missing, searched int) bool {
 // auditDetails are the ldap_sync row's details: the counts and, for a sync that
 // stopped, the class of the failure (never the directory's own error text).
 func (r ldapSyncResult) auditDetails(err error) json.RawMessage {
-	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped, "missing": r.missing}
+	d := map[string]any{"synced": r.synced, "disabled": r.disabled, "re_enabled": r.reEnabled, "skipped": r.skipped, "missing": r.missing,
+		"not_signed_in_since_upgrade": r.notSignedIn}
 	if err != nil {
 		d["outcome"] = "failed"
 		d["reason"] = ldapFailureClass(err)
@@ -716,6 +750,7 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 	}
 	results := make([]searched, 0, len(ldapUsers))
 	missing := 0
+	byAddress := userFilterMatchesAddress(cfg.UserFilter, cfg.EmailAttribute) == filterMatches
 	for _, dbUser := range ldapUsers {
 		if err := ctx.Err(); err != nil {
 			return res, fmt.Errorf("the sync was stopped: %w", err)
@@ -724,9 +759,15 @@ func (h *LDAPHandler) syncConfig(ctx context.Context, id uuid.UUID) (res ldapSyn
 			return res, err
 		}
 		// The name the person signs in with, which is what the user filter is written
-		// for; the address only for an account no sign-in has named yet.
+		// for. An account no sign-in has named yet is searched by its address only when
+		// the filter matches the address; otherwise its search proves nothing either way,
+		// so it is left alone until its next sign-in stores its name.
 		name := dbUser.LdapLoginName
 		if name == "" {
+			if !byAddress {
+				res.notSignedIn++
+				continue
+			}
 			name = dbUser.Email
 		}
 		ldapUser, err := client.SearchUser(name)
