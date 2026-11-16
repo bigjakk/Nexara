@@ -20,6 +20,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useCreateStorage } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   CephSecretField,
   ISCSITargetField,
@@ -119,6 +120,9 @@ export function AddStorageDialog({
   const [idTyped, setIdTyped] = useState(false);
 
   const createMutation = useCreateStorage();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
   const { hasPermission } = usePermissions();
 
   // PVE models "use LUNs directly" as the content type rather than a flag of its
@@ -273,16 +277,17 @@ export function AddStorageDialog({
         ? { params: submitParams }
         : pbsSourceRequest(source, submitParams);
 
-    createMutation.mutate(
-      {
+    settle(
+      createMutation.mutateAsync({
         clusterId,
         data: {
           storage: storageName.trim(),
           type: storageType,
           ...fromSource,
         },
-      },
+      }),
       {
+        action: `Adding storage ${storageName.trim()}`,
         onSuccess: () => {
           resetForm();
           setOpen(false);

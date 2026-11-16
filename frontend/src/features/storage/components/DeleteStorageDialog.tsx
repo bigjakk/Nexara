@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trash2, AlertTriangle } from "lucide-react";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CopyableName } from "@/components/CopyableName";
 import { useDeleteStorage } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface DeleteStorageDialogProps {
   clusterId: string;
@@ -45,26 +46,39 @@ export function DeleteStorageDialog({
   const [error, setError] = useState<string | null>(null);
 
   const deleteMutation = useDeleteStorage();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
+  // A delete that lands after the dialog was closed still leaves the deleted
+  // storage's page, as it did before; not once this has unmounted.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   function handleDelete() {
     if (confirmName !== storageName) return;
     setError(null);
 
-    deleteMutation.mutate(
-      { clusterId, storageId },
-      {
-        onSuccess: () => {
-          setOpen(false);
-          setConfirmName("");
-          onDeleted?.();
-        },
-        onError: (err) => {
-          setError(
-            err instanceof Error ? err.message : "Failed to delete storage",
-          );
-        },
+    settle(deleteMutation.mutateAsync({ clusterId, storageId }), {
+      action: `Deleting storage ${storageName}`,
+      onSuccess: () => {
+        setOpen(false);
+        setConfirmName("");
+        onDeleted?.();
       },
-    );
+      onLateSuccess: () => {
+        if (mounted.current) onDeleted?.();
+      },
+      onError: (err) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to delete storage",
+        );
+      },
+    });
   }
 
   return (

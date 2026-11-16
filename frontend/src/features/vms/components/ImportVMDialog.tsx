@@ -24,6 +24,7 @@ import {
 } from "@/features/storage/api/storage-queries";
 import { useResourcePools } from "@/features/pools/api/pool-queries";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { deriveFilenameFromURL } from "@/lib/derive-filename";
 import { formatBytes } from "@/lib/format";
 import {
@@ -166,6 +167,9 @@ export function ImportVMDialog({
   const metadataMutation = useImportMetadata();
   const downloadMutation = useDownloadURL();
   const uploadMutation = useUploadFile();
+  // The dialog shows a failed upload itself (the hook opts out of the app's
+  // toast), and one that lands after it was closed is toasted instead.
+  const settleUpload = useSaveOutcome(open);
   const urlMetaMutation = useQueryURLMetadata();
   const enableImportMutation = useEnableImportContent();
   const startMutation = useStartImport();
@@ -497,8 +501,8 @@ export function ImportVMDialog({
     if (!uploadFile || !sourcePoolId) return;
     setUploadUpid(null);
     setUploadProgress(0);
-    uploadMutation.mutate(
-      {
+    settleUpload(
+      uploadMutation.mutateAsync({
         clusterId,
         storageId: sourcePoolId,
         content: "import",
@@ -506,8 +510,9 @@ export function ImportVMDialog({
         onProgress: (p) => {
           setUploadProgress(p);
         },
-      },
+      }),
       {
+        action: `Uploading ${uploadFile.name}`,
         onSuccess: (res) => {
           setUploadProgress(null);
           if (res.upid) {

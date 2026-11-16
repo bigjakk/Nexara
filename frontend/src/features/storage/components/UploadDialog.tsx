@@ -16,6 +16,7 @@ import { UsageBar } from "@/components/UsageBar";
 import { formatBytes } from "@/lib/format";
 import { TaskProgressBanner } from "@/features/vms/components/TaskProgressBanner";
 import { useUploadFile } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface UploadDialogProps {
   clusterId: string;
@@ -37,6 +38,9 @@ export function UploadDialog({
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadFile();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it has gone is toasted instead.
+  const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
 
   const supportsIso = supportedContent.includes("iso");
@@ -52,15 +56,16 @@ export function UploadDialog({
     if (!selectedFile) return;
     setProgress(0);
     setTaskUpid(null);
-    uploadMutation.mutate(
-      {
+    settle(
+      uploadMutation.mutateAsync({
         clusterId,
         storageId,
         content: contentType,
         file: selectedFile,
         onProgress,
-      },
+      }),
       {
+        action: `Uploading ${selectedFile.name}`,
         onSuccess: (data) => {
           setProgress(null);
           if (data.upid) {

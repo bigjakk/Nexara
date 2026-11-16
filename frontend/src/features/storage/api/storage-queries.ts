@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import { apiClient, openApiRequest } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
 import { signedInUserID, usePBSKeyStore } from "@/stores/pbs-key-store";
 import type { ClusterResponse, StorageResponse } from "@/types/api";
 import type {
@@ -122,6 +123,7 @@ export function useUploadFile() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: (params: UploadParams) => uploadFile(params),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({
@@ -254,6 +256,7 @@ export function useCreateStorage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, data }: CreateStorageParams) =>
       apiClient.post<StorageWriteResponse>(
@@ -287,6 +290,7 @@ export function useUpdateStorage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     gcTime: STORAGE_WRITE_GC_TIME,
     mutationFn: ({ clusterId, storageId, data }: UpdateStorageParams) =>
       apiClient.put<StorageWriteResponse>(
@@ -424,6 +428,7 @@ export function useDeleteStorage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...errorsHandledLocally,
     mutationFn: ({ clusterId, storageId }: DeleteStorageParams) =>
       apiClient.delete<{ status: string; storage: string }>(
         apiPath`/api/v1/clusters/${clusterId}/storage/${storageId}`,

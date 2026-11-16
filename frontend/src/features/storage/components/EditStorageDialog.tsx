@@ -21,6 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useStorageConfig, useUpdateStorage } from "../api/storage-queries";
+import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   CephSecretField,
   ISCSITargetField,
@@ -101,6 +102,9 @@ export function EditStorageDialog({
     open ? storageId : "",
   );
   const updateMutation = useUpdateStorage();
+  // The dialog shows a failure itself (the hook opts out of the app's toast),
+  // and one that lands after it was closed is toasted instead.
+  const settle = useSaveOutcome(open);
 
   const sType = storageType as StorageType;
   // See AddStorageDialog: PVE carries "use LUNs directly" in the content field,
@@ -269,16 +273,17 @@ export function EditStorageDialog({
       return;
     }
 
-    updateMutation.mutate(
-      {
+    settle(
+      updateMutation.mutateAsync({
         clusterId,
         storageId,
         data: {
           params: submitParams,
           ...(deleteKeys.length > 0 ? { delete: deleteKeys.join(",") } : {}),
         },
-      },
+      }),
       {
+        action: `Saving storage ${storageName}`,
         onSuccess: () => {
           // closeEditor also drops the mutation's copy of the request and
           // response, either of which can hold a key; by now any generated
