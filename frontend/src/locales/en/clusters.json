@@ -7,6 +7,17 @@
   "failedLoadClusters": "Failed to load clusters.",
   "noClustersConfigured": "No clusters configured. Add one to get started.",
   "apiUrl": "API URL",
+  "privateAddress": {
+    "title": "Private network address",
+    "urlResolves_loopback": "<url>{{url}}</url> resolves to a loopback address (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "urlResolves_linkLocal": "<url>{{url}}</url> resolves to a link-local address (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "urlResolves_private": "<url>{{url}}</url> resolves to an address on a private network (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "resolves_loopback": "That URL resolves to a loopback address (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "resolves_linkLocal": "That URL resolves to a link-local address (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "resolves_private": "That URL resolves to an address on a private network (<ip>{{ip}}</ip>). This is fine for self-hosted lab setups. Confirm to continue, or go back and use a public address.",
+    "confirming": "Confirming…",
+    "continue": "Continue with private address"
+  },
   "vms": "VMs",
   "backToDashboard": "Back to Dashboard",
   "failedLoadClusterData": "Failed to load cluster data.",

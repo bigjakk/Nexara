@@ -1,4 +1,5 @@
 import { ShieldAlert } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { WarningCallout } from "@/components/WarningCallout";
 
@@ -22,17 +23,19 @@ interface PrivateAddressWarningProps {
  * one, and any other it confirms is on a private network. The shared text said
  * "private/loopback" of every one.
  */
-function addressKind(ip: string): string {
+type AddressKind = "loopback" | "linkLocal" | "private";
+
+function addressKind(ip: string): AddressKind {
   const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.\d+\.\d+$/i.exec(ip);
   if (v4 !== null) {
-    if (v4[1] === "127") return "a loopback address";
-    if (v4[1] === "169" && v4[2] === "254") return "a link-local address";
-    return "an address on a private network";
+    if (v4[1] === "127") return "loopback";
+    if (v4[1] === "169" && v4[2] === "254") return "linkLocal";
+    return "private";
   }
   const v6 = ip.toLowerCase();
-  if (v6 === "::1") return "a loopback address";
-  if (/^fe[89ab]/.test(v6)) return "a link-local address";
-  return "an address on a private network";
+  if (v6 === "::1") return "loopback";
+  if (/^fe[89ab]/.test(v6)) return "linkLocal";
+  return "private";
 }
 
 /**
@@ -50,25 +53,24 @@ export function PrivateAddressWarning({
   pending = false,
   privateOnly = false,
 }: PrivateAddressWarningProps) {
-  const kind = privateOnly
-    ? "an address on a private network"
-    : addressKind(ip);
+  const { t } = useTranslation("clusters");
+  const kind = privateOnly ? "private" : addressKind(ip);
+  const hasUrl = url != null && url !== "";
   return (
-    <WarningCallout title="Private network address" icon={ShieldAlert}>
+    <WarningCallout title={t("privateAddress.title")} icon={ShieldAlert}>
       <p>
-        {url != null && url !== "" ? (
-          <>
-            <strong className="break-all text-foreground">{url}</strong>{" "}
-            resolves to {kind} (<code className="font-mono">{ip}</code>).
-          </>
-        ) : (
-          <>
-            That URL resolves to {kind} (<code className="font-mono">{ip}</code>
-            ).
-          </>
-        )}{" "}
-        This is fine for self-hosted lab setups. Confirm to continue, or go back
-        and use a public address.
+        <Trans
+          t={t}
+          i18nKey={
+            hasUrl ? "privateAddress.urlResolves" : "privateAddress.resolves"
+          }
+          context={kind}
+          values={{ url, ip }}
+          components={{
+            url: <strong className="break-all text-foreground" />,
+            ip: <code className="font-mono" />,
+          }}
+        />
       </p>
       <div className="flex flex-wrap gap-2 pt-1.5">
         <Button
@@ -78,7 +80,9 @@ export function PrivateAddressWarning({
           onClick={onConfirm}
           disabled={pending}
         >
-          {pending ? "Confirming…" : "Continue with private address"}
+          {pending
+            ? t("privateAddress.confirming")
+            : t("privateAddress.continue")}
         </Button>
         {onCancel != null && (
           <Button
@@ -88,7 +92,7 @@ export function PrivateAddressWarning({
             onClick={onCancel}
             disabled={pending}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
         )}
       </div>
