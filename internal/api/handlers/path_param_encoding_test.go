@@ -24,23 +24,11 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// These tests exist because a path parameter crosses three encoders on its way
-// from the browser to Proxmox, and for two routes it used to cross one too many.
-//
-// The chain is: the SPA percent-encodes the value (encodeURIComponent); Fiber
-// routes and hands it back with only the escapes of unreserved characters
-// decoded (v3.6), because UnescapePath is at its default of false; the handler
-// reads it; the proxmox client percent-escapes it into the outbound path. Without a decode in the middle, the client takes the encoded
-// TEXT for the name and escapes it again. A pool the operator named "a#b"
-// arrives as "a%23b" and goes out as "a%2523b", so Proxmox resolves a pool
-// named "a%23b" — which does not exist. An IP set entry "192.0.2.0/24" arrives
-// as "192.0.2.0%2F24" and goes out as "192.0.2.0%252F24", which is why no CIDR
-// entry could be deleted through that route at all.
-//
-// The assertion is deliberately made on the RAW request target the far side
-// receives (r.RequestURI, not r.URL.Path), for the reason the whole defect is
-// invisible otherwise: r.URL.Path is already decoded, so "%2523" and "%23" look
-// identical there. Everything below compares bytes on the wire.
+// A path parameter crosses three encoders: the SPA's encodeURIComponent, Fiber (UnescapePath
+// off, so only unreserved escapes are decoded), and the proxmox client's PathEscape. Without
+// a decode between, a pool "a#b" went out as "a%2523b" and an IP set entry "192.0.2.0/24"
+// could never be deleted. Assertions are on the raw r.RequestURI: r.URL.Path is decoded, and
+// there "%2523" and "%23" look the same.
 
 // pathParamEncKey is the AES-256 key the fake cluster row's token is encrypted
 // with. Fixed, and a test fixture only.
@@ -337,21 +325,10 @@ func ipSetEntryMirror(t *testing.T) apischema.Properties {
 	})
 }
 
-// TestCephPoolDeleteReachesProxmoxAsTheNameTheCallerMeant is the end-to-end
-// proof for DELETE /clusters/:cluster_id/ceph/pools/:pool_name.
-//
-// Each case names a pool, encodes it the way a correct client must, drives the
-// real router into the real CephHandler.DeletePool, and asserts on the bytes
-// the Proxmox side receives. The four characters that carry the defect —
-// "%", "#", "?" and a space — are the ones url.PathEscape encodes, so they are
-// the ones that were escaped twice; the rest are here to hold the cases that
-// already worked.
-//
-// A space is worth a word of its own: the catalogued ceph-pool-name rule
-// excludes whitespace, and it still reaches the handler, because validation
-// runs against the value AS IT ARRIVES — "a%20b" carries no whitespace. That
-// ordering is a separate wart and is not what this asserts; the assertion is
-// only that whatever does get through arrives at Proxmox unmangled.
+// TestCephPoolDeleteReachesProxmoxAsTheNameTheCallerMeant drives DELETE
+// /clusters/:cluster_id/ceph/pools/:pool_name through the real router and asserts the bytes
+// Proxmox receives. "%", "#", "?" and a space are what PathEscape encodes, so they were
+// escaped twice; a space gets past the no-whitespace rule because validation sees "a%20b".
 func TestCephPoolDeleteReachesProxmoxAsTheNameTheCallerMeant(t *testing.T) {
 	h := newPathParamHarness(t, func(app *fiber.App, queries *db.Queries) {
 		handler := NewCephHandler(queries, pathParamEncKey, nil)
@@ -407,19 +384,10 @@ func TestIPSetEntryDeleteReachesProxmoxAsTheEntryTheCallerMeant(t *testing.T) {
 	}
 }
 
-// TestPathParamDecodeRefusesWhatItNowMakesReachable is the other half of the
-// decode, and the reason it belongs at the handler rather than after the
-// client's escape.
-//
-// Decoding moves the traversal guards onto the string the client will actually
-// put in the path: "..%2F.." means "../..", and validatePathSegment is what
-// refuses it. A bare "%2E%2E" no longer gets that far: since v3.6 Fiber decodes
-// it and removes the dot segment before it routes, so the route does not match
-// (404). A malformed escape is refused too: the contract is that a path
-// parameter is percent-encoded, so "%zz" is a bad request rather than a pool
-// name to be guessed at.
-//
-// Nothing may reach Proxmox in any of these cases.
+// TestPathParamDecodeRefusesWhatItNowMakesReachable: once decoded, "..%2F.." means "../..",
+// so validatePathSegment must refuse it at the handler. A bare "%2E%2E" is a 404 (Fiber
+// removes the dot segment before routing), a malformed escape such as "%zz" is a 400, and
+// nothing reaches Proxmox in any case.
 func TestPathParamDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 	ceph := newPathParamHarness(t, func(app *fiber.App, queries *db.Queries) {
 		handler := NewCephHandler(queries, pathParamEncKey, nil)

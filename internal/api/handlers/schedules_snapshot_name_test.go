@@ -15,18 +15,10 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// These tests drive the real Create and Update handlers against the same
-// stand-in DBTX schedules_scope_test.go uses. No database is needed, because
-// the assertion is that the INSERT/UPDATE is never reached.
-//
-// The hazard they cover: scheduled_tasks.params is a jsonb blob the endpoint
-// declaration carries through without describing, filled from a bare free-text
-// field in the SPA. A snap_name stored there reached CreateVMSnapshot with no
-// cap, no shape check and no reserved-name check. The client refuses it now —
-// that is the fix, and internal/proxmox is where it is tested — but a task
-// refused at fire time is refused on EVERY fire, silently, in a last_error
-// column nobody is watching. These hold the other half: the operator is told
-// while the form is still open.
+// These drive the real Create and Update handlers against schedules_scope_test.go's
+// stand-in DBTX; the INSERT/UPDATE is never reached. internal/proxmox refuses a bad
+// snap_name when a run fires, but then every fire fails silently into last_error:
+// these make the form say so while it is still open.
 
 // scheduleCreateMirror restates the POST schema registry_schedules.go
 // declares, for the reason withRequestParams' own doc comment gives: package
@@ -61,19 +53,10 @@ func snapshotScheduleBody(resourceType, snapName string) string {
 		`"schedule":"0 3 * * *","params":{"snap_name":"` + snapName + `"}}`
 }
 
-// TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject is the test that
-// turns the live bug into a 400.
-//
-// A refused payload here was once storable. The row was created, the SPA
-// showed the schedule as armed, and then every fire failed against PVE with a
-// raw sentence in last_error — a recurring snapshot the operator believed was
-// protecting a guest, silently never running.
-//
-// snap_name is a PREFIX now: each run adds -YYYYMMDD-HHMMSS, because a name
-// sent verbatim on every run failed on every run after the first (a guest
-// holds each snapshot name once). So the budget is 24 characters, not 40, and
-// what Proxmox reserves is judged on the whole name a run sends — which is why
-// the reserved words sit in the accepting half.
+// TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject: a name Proxmox refuses is a
+// 400 at create, not a schedule that looks armed and fails on every fire. snap_name is a
+// prefix (each run adds -YYYYMMDD-HHMMSS), so the budget is 24 characters, and reserved
+// words are judged on the whole name a run sends: they sit in the accepting half.
 func TestScheduleCreateRefusesASnapshotNameProxmoxWouldReject(t *testing.T) {
 	clusterID := uuid.New()
 

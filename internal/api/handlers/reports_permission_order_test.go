@@ -9,22 +9,11 @@ import (
 	"testing"
 )
 
-// validateScheduleFields reads a notification channel out of the database
-// and reports back whether it exists and whether it is an email channel.
-// That is a fact the caller is not otherwise entitled to — the channel
-// endpoints gate on view:notification_channel — so any handler calling it
-// must have authorized first.
-//
-// CreateSchedule did not. It ran the validation four lines before its
-// requireClusterPerm, and because the route declares Deferred there is no
-// middleware in front of the handler, so the order in the body IS the
-// gate. Any authenticated caller holding no report grant could ask
-// whether a channel UUID existed. EmailRun always had the order right.
-//
-// Ordering is invisible to every other guard in this repo:
-// registryEnforcementGaps proves a Deferred handler REACHES a permission
-// check, not that it reaches one before it does any work, so nothing
-// would have caught the swap back.
+// validateScheduleFields tells its caller whether a notification channel exists and is an
+// email channel, which view:notification_channel guards; a Deferred route has no
+// middleware in front, so the order in the handler body IS the gate. CreateSchedule once
+// validated before its requireClusterPerm; registryEnforcementGaps proves only that a
+// Deferred handler reaches a check, not that it reaches it first.
 const orderedGate = "validateScheduleFields"
 
 // permissionGates are the calls that establish the caller may proceed.
@@ -34,20 +23,11 @@ var permissionGates = map[string]bool{
 	"requirePBSPerm":     true,
 }
 
-// TestGuard_ScheduleValidationIsAuthorizedFirst walks every function in
-// the handlers package and fails any that calls validateScheduleFields
-// without a permission gate earlier in the same body.
-//
-// It is deliberately a source-order check rather than a request-level
-// one: validateScheduleFields needs a live database, so a behavioural
-// test would need Postgres and would skip silently without it — and a
-// guard that skips is not a guard.
-//
-// LIMIT, stated rather than discovered: source order is not reachability.
-// A gate nested inside a condition that never holds sits textually first
-// and satisfies this check while gating nothing. Catching that needs
-// control-flow analysis; what this catches is the shape that actually
-// shipped — a gate simply written below the work it was meant to guard.
+// TestGuard_ScheduleValidationIsAuthorizedFirst fails any function that calls
+// validateScheduleFields with no permission gate earlier in its body. A source-order check,
+// because a request-level one needs Postgres and would skip without it. Source order is not
+// reachability: a gate inside a condition that never holds would pass. It catches the shape
+// that shipped, a gate written below the work.
 func TestGuard_ScheduleValidationIsAuthorizedFirst(t *testing.T) {
 	t.Parallel()
 

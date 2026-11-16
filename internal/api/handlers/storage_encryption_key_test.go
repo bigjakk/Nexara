@@ -35,17 +35,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// A PBS storage's client encryption key reaches Nexara two ways: the operator
-// pastes one into params.encryption-key, or asks for "autogen" and Proxmox
-// answers with the key it generated. Either way it is the whole secret — the
-// key file Proxmox writes has no passphrase — and the operator decision is that
-// Nexara never keeps it: not in the database, not in an audit row (view:audit
-// is granted to every Viewer by default), not in an event, not in a log line,
-// not in an error. The only place it may appear is the response to the one
-// request that generated it.
-//
-// These tests drive the real Create and Update handlers end to end and look
-// for the key everywhere it could land.
+// A PBS storage's client encryption key (pasted, or "autogen" answered by Proxmox) is the
+// whole secret, and Nexara keeps it nowhere: not the database, an audit row, an event, a
+// log line or an error; only the response to the request that made it. These drive the
+// real Create and Update handlers and look for it everywhere it could land.
 
 // storageKeyCanary is the key material in every fixture key: letters and
 // hyphens only, so no rendering — JSON escaping, a quoted slog value — can
@@ -545,25 +538,11 @@ func TestStorageWriteHandsTheGeneratedKeyOnlyToItsOwnResponse(t *testing.T) {
 	}
 }
 
-// TestStorageKeyNeverReachesAuditEventsOrLogs looks for the key in every sink
-// a storage write feeds besides its own response: the audit row (every
-// argument, not only details — and details are what the syslog forwarder
-// sends on as well), every event the request published, and every log line
-// written while it ran.
-//
-// Every row that succeeds has a positive control on each sink, so that "the
-// key is absent" is never true merely because nothing was recorded: the audit
-// row exists and says, in words, what happened to the key; the audit_entry
-// event arrived; and the log holds AuditLogAs's insert-failure line for this
-// very request (the stand-in database refuses the insert on purpose). And on
-// every row the key really passed through: Proxmox was sent it, or the
-// response carried it.
-//
-// The refused row covers the error path: Proxmox rejecting a supplied key must
-// not bring it back in the error the caller sees, nor leave an audit row. It
-// writes no audit row, so nothing on that request logs or publishes: its event
-// and log checks rest on the same capture the other rows show to be live, and
-// prove only that the failure added nothing.
+// TestStorageKeyNeverReachesAuditEventsOrLogs looks for the key in every sink besides the
+// response: every audit argument, every event, every log line. Each succeeding row has a
+// positive control per sink (the row, the audit_entry event, AuditLogAs's insert-failure
+// line) and proves the key passed through; the refused row proves Proxmox's error neither
+// echoes the key nor writes a row.
 func TestStorageKeyNeverReachesAuditEventsOrLogs(t *testing.T) {
 	h := newStorageKeyHarness(t)
 

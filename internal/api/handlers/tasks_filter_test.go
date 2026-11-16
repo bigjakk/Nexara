@@ -54,19 +54,10 @@ func taskQueryArgs(l db.ListTaskHistoryFilteredParams, c db.CountTaskHistoryFilt
 	return rec.list, rec.count
 }
 
-// TestTaskListTreatsAnEmptyFilterAsNone drives the real List handler with each
-// of its filters — ?cluster_id=, ?status= and ?vmids= — sent EMPTY, one at a
-// time and then all together, and holds each request to the omitted one's
-// queries, argument for argument: no filter, and the caller's own scope on the
-// page and on the count. That is what `if x != ""` meant before the registry.
-//
-// The cluster filter is the one with a permission side, and the caller that
-// exposes it is one holding view:task on a single cluster: had "" been taken
-// as supplied, List would have parsed it (a 500) or asked whether that caller
-// may see it (a 403). A non-empty value of each filter is the control that
-// shows it is read at all — and the cluster is applied in either case of hex
-// digit when the caller may see it, and refused before any query when they
-// may not.
+// TestTaskListTreatsAnEmptyFilterAsNone: ?cluster_id=, ?status= and ?vmids= sent empty must
+// mean no filter, as `if x != ""` did before the registry. The empty cluster_id has the
+// permission side: a caller with view:task on one cluster would get a 500 (parsed) or a 403
+// (checked) if "" were taken as supplied. A non-empty value is the control that each is read.
 func TestTaskListTreatsAnEmptyFilterAsNone(t *testing.T) {
 	clusterA, clusterB := uuid.New(), uuid.New()
 

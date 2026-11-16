@@ -526,19 +526,11 @@ func TestRenderBootstrapErrorStatuses(t *testing.T) {
 	}
 }
 
-// TestGuard_BootstrapPasswordReachesOnlyLogin is a static guard over the
-// onboarding handler files: the operator's password and one-time code may be
-// read in exactly two places — the emptiness check in validate, and the
-// Login call that spends them.
-//
-// The realistic mistake this catches is someone adding the password to a log
-// line, an audit detail or an error message while debugging a failed
-// onboarding. Unlike the token secret, this credential belongs to a privileged
-// human account and is very likely reused elsewhere.
-//
-// Limitation, stated plainly: it checks reads of the struct field. Copying the
-// password into a local first and leaking that would pass. It is aimed at the
-// realistic slip, not at deliberate laundering.
+// TestGuard_BootstrapPasswordReachesOnlyLogin: the operator's password and one-time code,
+// a privileged human credential likely reused elsewhere, are read only by validate's
+// emptiness check and the Login call that spends them, so a debugging log line, audit
+// detail or error cannot carry them. It checks reads of the field: a copy into a local
+// first would pass; it aims at the slip, not at laundering.
 func TestGuard_BootstrapPasswordReachesOnlyLogin(t *testing.T) {
 	allowed := map[string]string{
 		"validate":            "checks the field is non-empty; never reads its value elsewhere",

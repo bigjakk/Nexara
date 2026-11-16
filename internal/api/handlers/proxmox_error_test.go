@@ -637,18 +637,10 @@ func TestMapMissingObjectError(t *testing.T) {
 	}
 }
 
-// Every phrase set must reject every other set's negatives.
-//
-// Without this, each set is only ever tested against the negatives its own
-// author thought of, and a later loosening passes: "no such option '<k>'" and
-// "no such alias" were pinned only against the metric-server set, so shortening
-// haRuleMissingPhrases to "no such" broke nothing. That is not hypothetical —
-// PVE's update_rule reaches SectionConfig's delete_from_config, which dies
-// "no such option '<k>'" on the very same PUT.
-//
-// Each fixture is a real or realistic PVE die that means something other than
-// "the object you named is gone", so a 404 would be wrong for all of them
-// whichever endpoint produced it.
+// Every phrase set must reject every other set's negatives, or a loosening passes: shortening
+// haRuleMissingPhrases to "no such" broke nothing while "no such option '<k>'" was pinned only
+// against the metric-server set, and PVE's update_rule dies with exactly that (see ha.go).
+// Each fixture is a PVE die that does not mean "the object is gone", so a 404 is wrong for all.
 func TestMissingObjectPhraseSets_RejectEachOthersNegatives(t *testing.T) {
 	sets := map[string][]string{
 		"haRuleMissingPhrases":       haRuleMissingPhrases,

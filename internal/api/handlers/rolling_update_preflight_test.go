@@ -8,17 +8,10 @@ import (
 	"github.com/bigjakk/nexara/internal/rolling"
 )
 
-// TestFoldPreflight is the coverage whose absence let this bug ship twice.
-//
-// The strict policy refuses a job when the pre-flight reports errors. Both
-// checks used to be folded in with `if err == nil`, so a check that FAILED
-// contributed no conflicts and left hasErrors false — the gate answering "all
-// clear" precisely because it had learned nothing. The first attempt at a fix
-// moved that swallow from the analyzer up into the caller without removing it,
-// and every test stayed green because nothing here existed.
-//
-// The row that matters most is "neither check ran": before, that was
-// indistinguishable from a clean cluster.
+// TestFoldPreflight: a pre-flight check that FAILED once contributed no conflicts and left
+// hasErrors false, so the strict gate said "all clear" because it had learned nothing (see
+// foldPreflight). The row that matters most is "neither check ran", which used to look
+// exactly like a clean cluster.
 func TestFoldPreflight(t *testing.T) {
 	haFail := errors.New("list HA rules: proxmox API error 503: cluster is not quorate")
 	capFail := errors.New("get nodes: connection failed")

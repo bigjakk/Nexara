@@ -13,17 +13,11 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// TestGuestSnapshotListTreatsAnEmptyClusterFilterAsNone drives the real List
-// handler with ?cluster_id= — the "no filter" spelling the listing has always
-// taken — and checks it is not parsed as a uuid.
-//
-// The declaration accepts the empty value now, which makes this the handler's
-// job to get right: once the declaration began letting the empty value
-// through, a handler still parsing it would have sent "" to parseParamUUID and
-// answered a request the route has always served with a 500. The stub engine grants
-// no guest permission, so the handler returns its empty listing without a
-// database; a non-empty filter, by contrast, is parsed and refused (403),
-// which is the control that shows the filter is read at all.
+// TestGuestSnapshotListTreatsAnEmptyClusterFilterAsNone: the declaration lets ?cluster_id=
+// through empty, so the handler must not parse it (a 500 on a request the route has always
+// served). The stub engine grants no guest permission, so the answer is the empty listing
+// without a database; a non-empty filter is parsed and refused (403), the control that the
+// filter is read at all.
 func TestGuestSnapshotListTreatsAnEmptyClusterFilterAsNone(t *testing.T) {
 	handler := NewGuestSnapshotHandler(db.New(&pbsUPIDDBTX{}), "", nil)
 	mirror := compiledMirror(t, apischema.Properties{

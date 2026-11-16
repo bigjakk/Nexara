@@ -164,37 +164,11 @@ func isJSONBody(c fiber.Ctx) bool {
 	return media == fiber.MIMEApplicationJSON || strings.HasSuffix(media, "+json")
 }
 
-// withRequestParams adapts a registry-shaped handler to a fiber.Handler for a
-// test that drives a real REQUEST, which list_scope_test.go's withParams
-// cannot: that one validates an EMPTY request so every parameter arrives
-// carrying its default, which is right for a handler whose test never reaches
-// the values.
-//
-// The handlers this serves branch ON what the caller sent — the LDAP transport
-// gate reads start_tls and server_url, the console-token gate picks its
-// resource from `type`, the audit and task listings read their filters — so the
-// request has to be decoded and validated the way api.Endpoint.extract does at
-// runtime. This is a deliberately minimal stand-in for that: the JSON body, the
-// query string, and the route's :param segments, merged into one map.
-//
-// Everything is read WHOLESALE rather than from a declared list, and that is
-// what keeps the "unknown parameter" 400 honest: an undeclared key has to reach
-// Validate to be rejected. A non-JSON content type is not decoded and not
-// drained, mirroring api.Endpoint.bodyValues — Fiber runs with
-// StreamRequestBody, so reading a MULTIPART body here would consume the upload
-// before the handler's c.FormFile could.
-//
-// ONE fidelity gap, recorded rather than fixed: c.Queries() flattens a repeated
-// key to its last value, while production's queryValues (api/registry_params.go)
-// keeps repeats as a []string, because that is how a query string spells an
-// array. No route tested through this declares an Array query parameter, so
-// nothing is mis-tested today — but a test for one would have to stop using
-// this helper.
-//
-// props is a MIRROR of the route's declaration rather than the declaration
-// itself, for the reason migrationListMirror gives: package api imports this
-// package, not the other way round. It is compiled here so a mirror that is
-// itself malformed fails loudly rather than silently accepting anything.
+// withRequestParams adapts a registry handler for a test that sends a real request, decoded
+// and validated as api.Endpoint.extract does: body, query and :params merged, read wholesale
+// so an undeclared key still gets the 400. A non-JSON body is not read (StreamRequestBody).
+// Gap: c.Queries() keeps only a repeated key's last value, so an Array query parameter
+// cannot be tested through this. props mirrors the declaration (api imports this package).
 func withRequestParams(t *testing.T, props apischema.Properties, pathParams []string,
 	h func(fiber.Ctx, *apischema.Params) error) fiber.Handler {
 	t.Helper()

@@ -5,21 +5,10 @@ import (
 	"testing"
 )
 
-// TestContainerStatusActions pins the vocabulary POST
-// .../containers/:ct_id/status accepts.
-//
-// It matters more than the size of the list suggests: the same slice is
-// the endpoint's declared enum (internal/api/registry_containers.go), so
-// it is what rejects an unknown action at the edge.
-//
-// Be clear about what it does NOT prove. The switch in PerformAction is
-// the other half — an action listed here but missing a case there leaves
-// upid empty and still answers "dispatched" — and nothing reads that
-// switch, here or in the registry tests. Naming the six actions below is
-// the closest thing to a check: a case deleted from the switch has to be
-// deleted from this list too for the handler to stay honest, and this is
-// where a reader is told to look. Proving it needs an AST walk over the
-// handler body, which neither guest domain has.
+// TestContainerStatusActions pins the actions POST .../containers/:ct_id/status accepts: the
+// same slice is the declared enum. It does not prove the switch in PerformAction covers them
+// (a missing case answers "dispatched" with no upid); naming the six here is the nearest
+// check, and where a reader is told to look.
 func TestContainerStatusActions(t *testing.T) {
 	tests := []struct {
 		name   string

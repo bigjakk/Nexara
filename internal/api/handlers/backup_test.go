@@ -10,22 +10,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// TestPBSMetricsTimeframesCoverTheWindowTable holds the exported enum and
-// the window table together, the way TestCephMetricsTimeframesCoverTheTable
-// does for Ceph.
-//
-// PBSMetricsTimeframes is what the endpoint declaration in
-// internal/api/registry_backup.go validates ?timeframe= against, and
-// datastoreMetricsTimeframes is what datastoreMetricsWindow looks the value
-// up in. Two lists, one vocabulary: a timeframe added to the table but not
-// the slice is unreachable through the API, and one added to the slice but
-// not the table passes validation and then silently serves the fallback
-// window. Both directions fail here.
-//
-// "latest" is the one member with no window on purpose — it selects the
-// most recent sample per datastore rather than a history range — so it is
-// excluded from the first direction and required to be absent from the
-// second.
+// TestPBSMetricsTimeframesCoverTheWindowTable holds PBSMetricsTimeframes (the declared
+// ?timeframe= enum) and datastoreMetricsTimeframes (the window table) together, both ways:
+// one only in the table is unreachable, one only in the enum silently serves the fallback
+// window. "latest" has no window on purpose (the newest sample per datastore).
 func TestPBSMetricsTimeframesCoverTheWindowTable(t *testing.T) {
 	for _, tf := range PBSMetricsTimeframes {
 		if tf == PBSMetricsLatestTimeframe {

@@ -584,26 +584,11 @@ func TestSyslogProbeAudits(t *testing.T) {
 	}
 }
 
-// TestSyslogAuditBoundsCallerStrings covers the caps on what a caller can push
-// into an audit row. Neither endpoint bounded the host it accepted, and the
-// probe's error text wraps the dialler's message around that same host, so
-// without the caps one request wrote a body-sized string into audit_log — and
-// the probe can be repeated as often as the caller likes.
-//
-// Since Phase 6j there are TWO defences and this drives all three parts of
-// them:
-//
-//   - The declaration (internal/api/registry_audit.go) caps `host` at 256
-//     characters, so an oversized one is refused before any handler runs and
-//     writes no row at all — strictly stronger than truncating it afterwards.
-//   - The handler still routes every recorded value through toSyslogAuditConfig
-//     and syslogTestAuditError on the path that writes the row. That wiring is
-//     what a schema bound cannot replace, so it is driven through a REAL
-//     request with a host at the declared ceiling, reading the recorded row
-//     back.
-//   - The truncation functions themselves still cut. Asserted directly,
-//     because a host the schema accepts can no longer be long enough to make
-//     them fire through a request — which is the point of the first bullet.
+// TestSyslogAuditBoundsCallerStrings: a caller must not push a body-sized host into
+// audit_log (the probe's error wraps the host, and it can be repeated at will). The
+// declaration caps host at 256 so no row is written; the handler's routing through
+// toSyslogAuditConfig and syslogTestAuditError is driven with a host at that ceiling; the
+// truncation functions are asserted directly, since no accepted host reaches them.
 func TestSyslogAuditBoundsCallerStrings(t *testing.T) {
 	oversized := strings.Repeat("日", 4000) + ".internal"
 
@@ -745,17 +730,10 @@ func TestGuard_SyslogAuditFieldsClassified(t *testing.T) {
 	}
 }
 
-// jsonFieldNames indexes a struct's exported fields by the name they marshal
-// under, which is what an audit row is actually read by.
-//
-// It recurses into nested structs and refuses embedded ones, because the guard
-// above compares names and both shapes would defeat that. A nested
-// field TLS TLSOptions `json:"tls"` presents as the single name "tls" — adding a
-// field of the same name to syslogAuditConfig would satisfy the guard while
-// inlining every field underneath, a client key included. An embedded struct is
-// worse: its name is the type's, which never appears in the JSON at all, so two
-// structs embedding the same type would match on a name neither of them
-// marshals.
+// jsonFieldNames indexes a struct's exported fields by their JSON names, recursing into
+// nested structs and refusing embedded ones: a nested `json:"tls"` struct is one name that
+// hides every field under it, and an embedded struct's name never appears in the JSON, so
+// either would let the name comparison above pass vacuously.
 func jsonFieldNames(t *testing.T, typ reflect.Type) map[string]bool {
 	t.Helper()
 
@@ -829,22 +807,11 @@ func TestApplySyslogDefaults(t *testing.T) {
 	}
 }
 
-// TestSyslogProbeReleasesItsForwarder pins TestSyslog's Close.
-// proxsyslog.NewForwarder starts a sender goroutine, with a 1024-slot queue,
-// that a probe never uses, and before the Close every probe left both behind:
-// a goroutine and ~160 KiB per request, on a route with no rate limit of its
-// own.
-//
-// It counts only the goroutines proxsyslog.NewForwarder started, so nothing
-// else the process runs can move the count, and it finds them by the "created
-// by" line each one carries from the moment it exists. A frame of
-// (*Forwarder).run would not do: a sender the scheduler has not run yet has
-// none, and at GOMAXPROCS=1 twenty leaked senders all sat unscheduled, so a
-// count by that name read zero with the leak back. A control forwarder proves
-// the count can see a sender at all first, so a renamed constructor fails
-// here instead of turning every count into a silent zero. The count is
-// polled, because a closed sender can still be on its way out when the stack
-// is dumped; a leaked one never leaves.
+// TestSyslogProbeReleasesItsForwarder pins TestSyslog's Close: each probe's forwarder starts
+// a sender goroutine with a 1024-slot queue on a route with no rate limit of its own. It
+// counts by the "created by proxsyslog.NewForwarder" line, which a sender not yet scheduled
+// already carries (a run frame does not), behind a control that proves the count sees one,
+// and polls, since a closed sender may still be on its way out.
 func TestSyslogProbeReleasesItsForwarder(t *testing.T) {
 	collector, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {

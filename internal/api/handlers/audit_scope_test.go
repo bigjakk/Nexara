@@ -230,17 +230,10 @@ func auditParams(t *testing.T, query string) *apischema.Params {
 	return params
 }
 
-// TestParseAuditFilters_UsesTheValidatedPagination pins that the LIMIT and
-// OFFSET the handler sends are the ones the schema validated.
-//
-// It replaces a clamp test, and the thing it used to protect is now protected
-// harder. safeconv.Int32 bounds only the int32 range, so a negative ?limit=
-// once reached Postgres as `LIMIT -1` and came back a 500; the handler grew low
-// clamps for it. The declaration now bounds limit to 1..200 and offset to >= 0,
-// so those values are refused BY NAME before any handler runs and can no longer
-// reach the query at all — pinned in package api by
-// TestAuditListBoundsArePinned. What is left here is the copy itself, which is
-// still where a typo would send the wrong page.
+// TestParseAuditFilters_UsesTheValidatedPagination: the LIMIT and OFFSET sent are the ones
+// the schema validated. The declaration bounds limit to 1..200 and offset to >= 0 (pinned by
+// TestAuditListBoundsArePinned), so a negative limit, once a `LIMIT -1` 500, never reaches
+// here; what is left is the copy, where a typo would send the wrong page.
 func TestParseAuditFilters_UsesTheValidatedPagination(t *testing.T) {
 	handler := NewAuditHandler(nil, nil)
 	access := clusterAccess{HasGlobal: true}

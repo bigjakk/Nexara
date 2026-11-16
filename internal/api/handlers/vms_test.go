@@ -95,20 +95,10 @@ func TestSnapshotNameErrorAttributesTheFailure(t *testing.T) {
 	}
 }
 
-// captureSlog redirects the default logger for the duration of a test and
-// returns an accessor for what was written to it. It mirrors the helper of
-// the same name in internal/api.
-//
-// A test using it must stay SEQUENTIAL. bytes.Buffer is not safe for
-// concurrent use and nothing here guards it, so a t.Parallel() test
-// logging through the default logger while this one holds it is a data
-// race — and a second concurrent captureSlog would swap the default out
-// from under this one's assertion, atomically and just as fatally.
-// Today that cannot happen for three separate reasons: the caller below
-// does not call t.Parallel(), Go resumes top-level parallel tests only
-// once the sequential ones have finished, and none of this package's
-// t.Parallel() tests log through slog at all. Adding t.Parallel() to the
-// caller removes all three at once.
+// captureSlog swaps the default logger for the test and returns what was written (it
+// mirrors the helper in internal/api). Its callers must stay sequential: the buffer is
+// unguarded and a second capture would swap the logger from under the first. Parallel
+// top-level tests start only after the sequential ones, and none here log through slog.
 func captureSlog(t *testing.T) func() string {
 	t.Helper()
 	var buf bytes.Buffer

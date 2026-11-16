@@ -161,23 +161,11 @@ func TestParseFavoriteTarget(t *testing.T) {
 	}
 }
 
-// TestFavoriteTypesAreRBACResources pins the resource_type values to the RBAC
-// permission catalog, read out of the migrations that seed it.
-//
-// AddFavorite passes the resource_type straight to requireClusterPerm as the
-// resource name. A constant edited to something that is not a seeded resource
-// resolves to a permission nobody holds, so every star 403s — including for an
-// admin — with nothing in the code reading as wrong.
-//
-// The catalog is parsed from migrations.FS rather than listed here: a list
-// written next to the constants it checks agrees with them by construction and
-// can never fail.
-//
-// What this does NOT catch, deliberately stated so nobody trusts it further
-// than it goes: a migration that RENAMES a resource. A rename ships as a new
-// UPDATE or INSERT while the original seeding text stays in 000016 forever, so
-// the old name still parses out of the file set. Catching that would mean
-// executing the migrations, which is internal/db's job, not this test's.
+// TestFavoriteTypesAreRBACResources: AddFavorite passes resource_type to requireClusterPerm
+// as the resource, so a constant that is not a seeded resource makes every star 403, an
+// admin's too. The catalogue is parsed from migrations.FS, not listed here, so it can fail.
+// It cannot see a later migration that RENAMES a resource (000016's text still names the
+// old one); executing the migrations is internal/db's job.
 func TestFavoriteTypesAreRBACResources(t *testing.T) {
 	seeded := seededViewResources(t)
 

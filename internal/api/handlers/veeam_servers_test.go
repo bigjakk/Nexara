@@ -21,19 +21,10 @@ import (
 	"github.com/bigjakk/nexara/internal/veeam"
 )
 
-// The Veeam routes are declared endpoints now
-// (internal/api/registry_veeam.go), so what USED to be tested here splits in
-// two, exactly as the PBS routes did.
-//
-// The parameter rules — the four required create fields, a malformed body, a
-// path id that is not a UUID — are the SCHEMA's, and they are tested against
-// the REAL declaration in internal/api/registry_veeam_test.go. So are the
-// twelve routes whose permission is now a middleware Check: a bare handler
-// mount cannot exercise a gate that no longer sits inside the handler.
-//
-// What stays here is what is still the handler's: the URL policy, the
-// insecure-TLS acknowledgement, the response DTO's shape, and the two routes
-// whose authorization is genuinely resolved at request time.
+// The Veeam routes' parameter rules and their middleware Checks belong to the declaration
+// and are tested in internal/api/registry_veeam_test.go. What stays here is the handler's:
+// the URL policy, the insecure-TLS acknowledgement, the response DTO's shape, and the two
+// routes whose authorization is resolved at request time.
 
 // veeamMirror is a local copy of the parts of the Veeam declarations these
 // tests exercise.
@@ -234,21 +225,10 @@ func TestVeeamCreate_UnreachableServerIsBadGateway(t *testing.T) {
 	}
 }
 
-// TestVeeamRoutes_RefuseBeforeAnyLookup covers the two routes whose
-// authorization is still the handler's own.
-//
-// The other nine this used to cover — create, list, get, update, delete,
-// test, the two platform routes and the infrastructure listing — are
-// middleware Checks now, and
-// TestVeeamGlobalRoutesAreGatedByTheirDeclaration in
-// internal/api/registry_veeam_test.go drives each of them end to end against
-// the real declaration. A bare handler mount here would prove nothing about
-// a gate that no longer sits inside the handler, and leaving the cases in
-// would quietly turn into "these routes need no permission".
-//
-// Both of the two run accessibleClusters("view", "veeam") FIRST, before the
-// server row is loaded, which is what stops an unauthorized caller telling
-// 404 from 403 and probing which server ids exist.
+// TestVeeamRoutes_RefuseBeforeAnyLookup covers the two routes whose authorization is still
+// the handler's (the other nine are TestVeeamGlobalRoutesAreGatedByTheirDeclaration's). Both
+// run accessibleClusters("view", "veeam") before loading the server row, so an unauthorized
+// caller cannot tell 404 from 403 and probe which server ids exist.
 func TestVeeamRoutes_RefuseBeforeAnyLookup(t *testing.T) {
 	app := newVeeamTestApp(t)
 	id := uuid.New().String()
@@ -277,17 +257,10 @@ func TestVeeamRoutes_RefuseBeforeAnyLookup(t *testing.T) {
 	}
 }
 
-// The both-or-neither rule on MapBackupObjectGuest — a cluster with no vmid
-// identifies nothing, and a vmid with no cluster is ambiguous across every
-// cluster the server protects — cannot be driven from here: the handler
-// authorizes and loads the object BEFORE it reaches that check, so a request
-// that got far enough to exercise it would need a live database. What the
-// migration had to preserve is the SHAPE the check reads, and that is asserted
-// against the real declaration by
-// TestMapBackupObjectGuestKeepsItsBothOrNeitherShape in
-// internal/api/registry_veeam_test.go: both parameters optional, neither
-// carrying a default, so "the caller said nothing" stays distinguishable from
-// "the caller sent zero" the way the *pointer fields used to make it.
+// MapBackupObjectGuest's both-or-neither rule (a cluster without a vmid names nothing, a vmid
+// without a cluster is ambiguous) sits after a database load, so it cannot be driven here.
+// TestMapBackupObjectGuestKeepsItsBothOrNeitherShape in registry_veeam_test.go pins the shape
+// it reads: both parameters optional with no default, so "said nothing" is not "sent zero".
 
 // A confirm-and-proceed gate, matching how private addresses are handled: a
 // lab with an unreachable internal CA is real, doing it by accident is not.

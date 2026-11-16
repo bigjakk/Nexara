@@ -105,24 +105,11 @@ func TestFilterGuestSnapshotRows_UnknownGuestTypeDropped(t *testing.T) {
 	}
 }
 
-// TestGuard_GuestSnapshotResyncReadsPermissionsBeforeTheGuest is what is left
-// of the gates-before-lookup guard now that the COARSE gate has moved out of
-// this package.
-//
-// It used to mount Resync with NIL queries and assert that a caller holding
-// neither guest permission got a 403 before anything touched the database. That
-// refusal is now the declared Alternatives middleware in
-// internal/api/registry_guest_snapshots.go, and
-// TestGuestSnapshotResyncGateIsEitherGuestPermission proves it end to end —
-// including that the handler never runs, which is a stronger statement than
-// "it returned 403".
-//
-// The ORDERING inside the handler still matters and cannot be seen from there:
-// the two hasClusterPerm reads feed the PRECISE per-class refusal, which
-// answers 404 rather than 403 so a caller holding only the other guest class
-// cannot learn that a guest with this vmid exists. If the guest lookup moved
-// ahead of them, the 404-vs-403 split would become a vmid-existence oracle
-// again. This pins the order statically.
+// TestGuard_GuestSnapshotResyncReadsPermissionsBeforeTheGuest: the coarse 403 is the
+// declaration's (TestGuestSnapshotResyncGateIsEitherGuestPermission), but the precise
+// per-class refusal is a 404, so a caller holding only the other guest class cannot learn
+// that a vmid exists. A guest lookup moved ahead of the two hasClusterPerm reads would make
+// that split an existence oracle again; this pins the order statically.
 func TestGuard_GuestSnapshotResyncReadsPermissionsBeforeTheGuest(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "guest_snapshots.go", nil, 0)

@@ -268,22 +268,11 @@ func timeArg(t *testing.T, s string) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: v, Valid: true}
 }
 
-// TestAuditReadsTreatAnEmptyFilterAsNone drives the three real audit reads
-// with every filter each declares sent EMPTY — one at a time, then all
-// together — and holds each request to the omitted one's queries, argument for
-// argument: no filter, and the caller's own scope on the page and on the
-// count, which is what `if x != ""` meant before the registry. The instance-
-// wide listing and export take ?cluster_id= as well as the filters all three
-// share (user_id, resource_type, action, source, severity, start_time,
-// end_time and vmids).
-//
-// The empty cluster filter is the one with a permission side, and the caller
-// that exposes it is one holding view:audit on a single cluster: had "" been
-// taken as supplied, auditClusterFilter would have parsed it (a 500) or asked
-// whether that caller may see it (a 403). A non-empty value of each filter is
-// the control that shows it is read at all — and the cluster is applied in
-// either case of hex digit when the caller may see it, and refused before any
-// query when they may not.
+// TestAuditReadsTreatAnEmptyFilterAsNone: each filter the three audit reads declare, sent
+// empty, must mean no filter, as `if x != ""` did before the registry. The empty
+// cluster_id has the permission side: a caller with view:audit on one cluster would get a
+// 500 (parsed) or a 403 (checked) if "" were taken as supplied. A non-empty value of each
+// filter is the control that it is read at all.
 func TestAuditReadsTreatAnEmptyFilterAsNone(t *testing.T) {
 	clusterA, clusterB, user := uuid.New(), uuid.New(), uuid.New()
 

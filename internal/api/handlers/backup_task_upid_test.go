@@ -23,21 +23,10 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The two PBS task routes — GET /pbs-servers/:pbs_id/tasks/:upid and its /log
-// sibling — carry the same three-encoder problem the Ceph pool and IP set entry
-// routes carried, and carry it for a value that can NEVER avoid it.
-//
-// A UPID is colon-separated by construction, and a colon is not legal unencoded
-// in a path segment, so encodeURIComponent always sends "UPID%3A…". Fiber runs
-// with UnescapePath at its default of false and hands the handler that text
-// unchanged; PBSClient.GetTaskLog then url.PathEscape-s it into the outbound
-// path, which escapes the "%" a second time. PBS is asked for a task literally
-// named "UPID%3A…", which no PBS has ever recorded — so every task-log fetch and
-// every task-status poll missed, for every task, on every server.
-//
-// The assertion below is on the RAW request target the far side receives
-// (r.RequestURI). r.URL.Path is already decoded, where "%253A" and "%3A" both
-// read back as ":" and the whole defect is invisible.
+// The PBS task routes (GET /pbs-servers/:pbs_id/tasks/:upid and its /log) must decode the
+// UPID once: its colons arrive as %3A, Fiber passes them on undecoded, and escaping them
+// again asked PBS for "UPID%253A…", missing every task. The assertion is on the raw
+// RequestURI, because r.URL.Path decodes both forms to ":" and hides the defect.
 
 // pbsUPIDEncKey is the AES-256 key the fake PBS server row's token is encrypted
 // with. Fixed, and a test fixture only.
@@ -406,26 +395,11 @@ func TestPBSTaskRoutesReachPBSAsTheTaskTheCallerMeant(t *testing.T) {
 	}
 }
 
-// TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable is the other half of the
-// decode.
-//
-// Before it, "A%2F.." named a task literally called "A%2F.." and no guard
-// needed to see a slash; after it the same request really does carry one, and
-// the guard in PBSClient is what refuses it. A bare "..", and "%2E%2E", never
-// get that far: the route's declared pattern — a leading alphanumeric — turns
-// both away first. So every case here starts with a letter and satisfies that
-// pattern, which is the point: the declaration matches the value AS IT
-// ARRIVES and cannot see through an escape, so for these it is not the anchor
-// of record.
-//
-// Nothing may reach PBS in any of them. That is defence in depth rather than
-// the last line: PBS splits the raw path on "/" before it decodes anything, so
-// it would not have traversed on these either (validatePBSTaskUPID records the
-// upstream source). What the refusal buys is a clear local 400 for a value no
-// PBS minted, and a guard that keeps holding behind a proxy that normalises
-// paths — including one that reads a backslash as a separator, which is why a
-// dot piece between backslashes is refused while a backslash itself, which PBS
-// puts in most real UPIDs, is not.
+// TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable: decoded, "A%2F.." carries a real
+// slash, so the PBSClient guard must refuse it; each case starts with a letter to pass the
+// route's pattern, which cannot see through an escape. Nothing may reach PBS: a dot piece
+// between backslashes is refused (a normalising proxy reads it as a path), a backslash
+// alone, in most real UPIDs, is not.
 func TestPBSTaskUPIDDecodeRefusesWhatItNowMakesReachable(t *testing.T) {
 	h := newPBSUPIDHarness(t)
 

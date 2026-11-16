@@ -48,23 +48,11 @@ func (d *cveFilterDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Ro
 	return replayRow{row: d.scan}
 }
 
-// TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone drives the real
-// ListVulnerabilities handler with ?severity=, ?node_id= and ?kev= sent EMPTY
-// — the "no filter" each meant before the registry (`severity != ""`,
-// `nodeID != ""`, and `c.Query("kev") == "true"`, which made ?kev= false) —
-// and checks each reaches the listing an omitted one does, instead of a
-// severity match on "", a uuid parse of "" or a refused boolean. An empty kev
-// reaches the handler as NOT supplied, since its declaration counts "" as
-// absent. The non-empty filters are the control that shows each is read at
-// all — the node in either case of hex digit, since the rule admits upper
-// case, which the uuid format used to lower-case — and the mixed cases pin
-// that an empty filter never shadows a real one, and the order the handler
-// applies real ones in, which the severity Description states: kev, then
-// node_id, then severity, one at a time.
-//
-// No permission engine is wired because this route has no permission side in
-// the handler: its gate is the declared middleware, and the only check here is
-// that the scan belongs to the cluster in the path.
+// TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone: ?severity=, ?node_id= and ?kev= sent
+// empty mean no filter (an empty kev is "not supplied" by its declaration). Non-empty values
+// are the control that each is read; the mixed cases pin that an empty one never shadows a
+// real one, and the order the Description states: kev, then node_id, then severity. No
+// permission engine: the gate is the declared middleware.
 func TestCVEVulnerabilityListTreatsAnEmptyFilterAsNone(t *testing.T) {
 	clusterID, scanID, nodeID := uuid.New(), uuid.New(), uuid.New()
 	mirror := compiledMirror(t, apischema.Properties{

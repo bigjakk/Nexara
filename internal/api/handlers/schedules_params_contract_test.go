@@ -11,33 +11,11 @@ import (
 	"testing"
 )
 
-// scheduled_tasks.params is a jsonb column with no schema: the endpoint
-// declaration carries it through as a bare apischema.Object, and two packages
-// read it back with their own struct. internal/scheduler's snapshotParams is
-// the one that decides what the task DOES; snapshotScheduleParams over in
-// schedules.go is a subset this layer reads so it can refuse a bad snap_name
-// while the caller is still on the form.
-//
-// Two copies of one contract, and the drift FAILS OPEN — which is the whole
-// reason this guard exists rather than a comment saying "keep these in sync".
-// Rename the key on the scheduler's side and the handler goes on unmarshalling
-// a field nobody writes: sp.SnapName is then always "", the
-// `if sp.SnapName == ""` branch treats it as "no name given", and the
-// synchronous 400 quietly stops happening. Nothing observable changes. The
-// client still refuses at fire time, which is exactly the per-fire failure
-// this change was written to remove.
-//
-// The pattern is the one this file's neighbour already uses: validScheduleActions
-// is a copy of the declaration's Enum, and ScheduleActionKeys exists purely so
-// TestScheduleActionVocabulary can pin the two from the other side. This is the
-// same move for the params blob, done with the AST because the scheduler's
-// struct is unexported and importing that package here would drag the whole
-// engine — drs, rolling, reports, notifications — into the handler layer for
-// one field.
-//
-// WHAT IT DOES NOT CATCH: it compares the json tags of the fields this layer
-// declares. A key the scheduler adds and this layer ignores is out of scope by
-// design — the subset is deliberate.
+// scheduled_tasks.params has no schema, and two structs read it: the scheduler's
+// snapshotParams (what the task does) and this package's snapshotScheduleParams (to refuse a
+// bad snap_name on the form). Drift fails open: rename the scheduler's key and SnapName is
+// always "", so the synchronous 400 silently stops. Compared by AST (that struct is
+// unexported); keys the scheduler has and this layer ignores are out of scope by design.
 const schedulerPackageDir = "../../scheduler"
 
 // schedulerSnapshotParamsType is the struct in internal/scheduler that decodes

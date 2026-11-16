@@ -10,21 +10,10 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// TestRefreshCookie_PathIsTheExportedScope is the handlers-side half of the
-// coupling between the refresh cookie's Path and the parts of internal/api
-// that mirror it (response compression is skipped under that Path, and so is
-// the general rate limiter).
-//
-// Exporting RefreshCookiePath only helps if it is the value that actually
-// reaches the browser. A constant that middleware.go reads but setRefreshCookie
-// no longer uses would be a decorative copy with the drift moved one step
-// sideways, so this asserts against the Set-Cookie header rather than against
-// the constant: whatever internal/api derives from RefreshCookiePath is
-// therefore derived from the real Path attribute.
-//
-// clearRefreshCookie is checked alongside it because a browser only accepts a
-// deletion whose attributes match the original Set-Cookie; if the two ever
-// disagreed, logout would silently leave a live refresh cookie behind.
+// TestRefreshCookie_PathIsTheExportedScope: internal/api skips compression and the general
+// limiter under RefreshCookiePath, so the constant must be what reaches the browser; this
+// asserts the Set-Cookie header, not the constant. clearRefreshCookie is checked too: a
+// browser accepts a deletion only with matching attributes, or logout leaves a live cookie.
 func TestRefreshCookie_PathIsTheExportedScope(t *testing.T) {
 	app := fiber.New()
 	app.Get("/set", func(c fiber.Ctx) error {

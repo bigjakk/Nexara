@@ -7,17 +7,10 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// The two DRS vocabularies are declared once, in drs.go, and the endpoint
-// declarations in internal/api/registry_drs.go use them as their enums.
-// There is deliberately no second copy of either — the membership maps
-// they replaced were the hand-rolled validators the schema now performs,
-// and keeping them as well would have been exactly the "second copy that
-// silently rots" this migration exists to remove.
-//
-// What is left to check is therefore not "do two lists agree" but "does
-// every value the code branches on by name appear in the list the API
-// accepts". A branch literal outside the vocabulary is a branch no request
-// can ever reach.
+// The DRS vocabularies are declared once, in drs.go, and registry_drs.go uses them as its
+// enums; there is deliberately no second copy. What is checked is that every value the
+// code branches on by name is in the list the API accepts: one outside it is a branch no
+// request can reach.
 
 // TestDRSModesCoverTheBranchesThatReadThem pins the two mode literals this
 // package still compares against.

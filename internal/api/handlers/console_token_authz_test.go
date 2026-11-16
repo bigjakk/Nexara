@@ -84,19 +84,10 @@ func newConsoleTokenTestApp(t *testing.T, engine permissionEngine) (*fiber.App, 
 	return app, capture
 }
 
-// consoleTokenMirror is a local copy of POST /api/v1/auth/console-token's
-// declaration (internal/api/registry_auth.go).
-//
-// A mirror for the reason migrationListMirror gives — package api imports this
-// package, not the other way round. Two things about it are load-bearing rather
-// than incidental:
-//
-//   - the cluster is named console_cluster_id with "cluster_id" as an ALIAS,
-//     because checkPathParams refuses a body parameter NAMED cluster_id; every
-//     caller, including mintConsoleTokenReq below, still sends the alias.
-//   - `type` carries the enum, so this test's five console types are exactly
-//     the ones the real route accepts. Getting that wrong would let a case pass
-//     here that a real request could not reach.
+// consoleTokenMirror copies POST /api/v1/auth/console-token's declaration (registry_auth.go;
+// package api imports this one). Load-bearing: the cluster is console_cluster_id with
+// "cluster_id" as an alias, because checkPathParams refuses a body parameter named
+// cluster_id; and `type` carries the enum, so no case passes here that a request could not reach.
 func consoleTokenMirror() apischema.Properties {
 	return apischema.Properties{
 		"console_cluster_id": {Type: apischema.String, Format: "uuid", Alias: "cluster_id"},

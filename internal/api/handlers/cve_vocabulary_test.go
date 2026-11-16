@@ -7,18 +7,10 @@ import (
 	"testing"
 )
 
-// TestCVESeveritiesAllHaveAPostureBucket holds the exported severity
-// vocabulary against the thing in this package that actually counts by
-// severity.
-//
-// CVESeverities, with the empty no-filter value added, is what the
-// endpoint declaration in internal/api/registry_cve.go validates
-// ?severity= against. There is deliberately no second membership map
-// beside it — that map WAS the hand-rolled validator the schema now
-// performs — so the check that is left compares the vocabulary against a
-// real reader instead: the posture summary carries one count per severity,
-// and a severity the filter accepts but the summary has no bucket for is a
-// value the API can slice by and never report on.
+// TestCVESeveritiesAllHaveAPostureBucket: CVESeverities is what registry_cve.go validates
+// ?severity= against, with deliberately no second membership map. So it is held against a
+// real reader instead: a severity the filter accepts but the posture summary has no bucket
+// for is one the API can slice by and never report on.
 func TestCVESeveritiesAllHaveAPostureBucket(t *testing.T) {
 	posture := reflect.TypeOf(securityPostureResponse{})
 

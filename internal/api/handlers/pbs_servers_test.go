@@ -14,20 +14,10 @@ import (
 	"github.com/bigjakk/nexara/internal/api/apischema"
 )
 
-// The PBS routes are declared endpoints now (internal/api/registry_pbs.go),
-// so what USED to be tested here splits in two.
-//
-// The parameter rules — the four required create fields, a malformed body,
-// a cluster_id that is not a UUID, a path id that is not a UUID — are the
-// schema's, and they are tested against the REAL declaration in
-// internal/api/registry_pbs_test.go rather than against a hand-mounted app
-// here. The same goes for GET /clusters/:cluster_id/pbs-servers, whose
-// permission is a middleware Check that a bare handler mount cannot
-// exercise at all.
-//
-// What stays here is what is still the handler's: the URL policy, the
-// empty-token_secret refusal, and the per-row permission split that makes
-// four of these routes Deferred.
+// The PBS routes' parameter rules and the cluster-scoped list's permission belong to the
+// declaration and are tested in internal/api/registry_pbs_test.go. What stays here is the
+// handler's own: the URL policy, the empty token_secret refusal, and the per-row
+// permission split that makes four of these routes Deferred.
 
 // pbsMirror is a local copy of the parts of the PBS declarations these
 // tests exercise.

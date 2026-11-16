@@ -57,26 +57,11 @@ type credHolder struct {
 	Cred    clusterCredential `json:"cred"`
 }
 
-// clusterCredential.Secret is the minted (or operator-supplied) Proxmox API
-// token in plaintext, alive between resolution and the encrypted column. It
-// sat in this file next to bootstrapRequest, which has been redacted since it
-// was written, with no protection of its own — closing that asymmetry is what
-// this guards.
-//
-// Each rendering is served by a different method — String, GoString, LogValue,
-// MarshalJSON — so removing any one of them fails this test on its own shapes
-// and no others.
-//
-// Every case also asserts a NON-credential value SURVIVES. Without that half a
-// String() returning "" or a MarshalJSON() returning {} would satisfy every
-// absence assertion while destroying the diagnostics the redaction exists to
-// preserve.
-//
-// The slog case asserts the GROUPED key (cred.token_id=...), not merely the
-// token id. clusterCredential implements Stringer, so with LogValue deleted
-// slog falls through to String and still does not leak — an absence-only slog
-// assertion would be masked by String, and LogValue could never be killed on
-// its own.
+// clusterCredential.Secret is the Proxmox API token in plaintext. Each rendering (String,
+// GoString, LogValue, MarshalJSON) is its own case, so removing any one fails on its own
+// shapes; every case also asserts a non-credential value survives, or a blank String()
+// would pass. The slog case asserts the grouped key (cred.token_id=...): without LogValue
+// slog falls back to String, which does not leak either, and would mask its loss.
 func TestGuard_ClusterCredentialNeverPrintsItsSecret(t *testing.T) {
 	cred := fixtureClusterCredential()
 	// Every real call site holds a *clusterCredential, so the pointer shapes
@@ -270,18 +255,10 @@ func TestGuard_BootstrapRequestGoStringRedactsThePassword(t *testing.T) {
 	}
 }
 
-// The redactors must be in the method set of the VALUE, not just the pointer.
-// fmt and encoding/json skip a pointer-receiver method on a value they cannot
-// address, and every one of these four types is rendered or marshalled as a
-// value somewhere: clusterCredential and bootstrapRequest in the tables above,
-// authResponse at its three response sites (two `c.JSON(authResponse{...})`
-// and one `c.Status(...).JSON(...)` in Register — same encoder, different
-// spelling), and logoutRequest wherever the decoded body reaches a log line.
-//
-// It is what makes deleting any
-// redactor fail a NAMED test rather than break compilation: nothing above
-// calls cred.String() or req.GoString() directly, so the package still builds
-// with one removed and reports which one went missing.
+// The redactors must be in the VALUE's method set: fmt and encoding/json skip a
+// pointer-receiver method on a value they cannot address, and all four types are rendered
+// as values somewhere (authResponse by c.JSON at its three sites). Nothing calls the
+// redactors directly, so deleting one still compiles and fails here by name.
 func TestCredentialRedactorsAreInTheValueMethodSet(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -365,19 +342,10 @@ func mustMarshalCred(t *testing.T, v any) string {
 // as a printf wrapper and check the call sites instead.
 func renderCredVerb(verb string, v any) string { return fmt.Sprintf(verb, v) }
 
-// credLogLine renders through a real slog pipeline and returns the line,
-// using the JSON handler when asJSON is set.
-//
-// Both handlers are exercised on purpose, and it is not symmetry for its own
-// sake. For a value that is not itself a LogValuer the two take DIFFERENT
-// routes: TextHandler formats it with %+v, which dispatches String, while
-// JSONHandler MARSHALS it, which dispatches MarshalJSON. Production builds
-// its logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272), so a
-// Text-only probe does not resemble production — and that is exactly how an
-// earlier version of this file passed while the JSON path leaked a live
-// token through a wrapper struct. The wrapper cases are the ones that found
-// it: slog.Any on the type ITSELF is safe under both handlers, because
-// LogValue resolves before either route is taken.
+// credLogLine renders attr through a real slog pipeline, JSON handler when asJSON. Both are
+// exercised because they differ for a value that is not a LogValuer: Text dispatches String,
+// JSON dispatches MarshalJSON, and production logs JSON. A Text-only version of this file
+// once passed while a wrapper struct leaked a live token through the JSON path.
 func credLogLine(t *testing.T, asJSON bool, attr slog.Attr) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -412,34 +380,19 @@ func fixtureAuthResponse() authResponse {
 	}
 }
 
-// fixtureAuthResponseJSON is the exact body the three auth endpoints must
-// emit, written out by hand rather than built from the struct so the
-// assertion cannot agree with a broken implementation.
-//
-// Byte identity, not a field check: refresh_token must still be PRESENT, still
-// be the empty string, and still sit between access_token and expires_at.
-// frontend/src/types/api.ts declares refresh_token non-optional and
-// docs/api-reference.md documents it as present-and-empty, so dropping the key
-// or reordering the object is a contract break, not a tidy-up. access_token
-// must survive in full — it is the thing the client came for, and blanking it
-// alongside the refresh token is the plausible over-correction this pins shut.
+// fixtureAuthResponseJSON is the exact body the three auth endpoints must emit, written by
+// hand so it cannot agree with a broken implementation. Byte identity: refresh_token stays
+// present, empty and in place (the SPA's types and the API docs say so), and access_token
+// survives in full, which pins shut the plausible over-correction.
 const fixtureAuthResponseJSON = `{"user":{"id":"00000000-0000-4000-8000-000000000001",` +
 	`"email":"admin@example.com","display_name":"Admin","role":"admin"},` +
 	`"access_token":"at-66666666-7777-8888-9999-aaaaaaaaaaaa","refresh_token":"",` +
 	`"expires_at":1767225600,"permissions":["view:cluster","view:vm"],"global_permissions":["view:cluster"]}`
 
-// authResponse.MarshalJSON turns three call-site invariants into one type
-// invariant: the v1.9.x refresh-token-in-body leak can no longer be reopened
-// by a fourth construction site forgetting `RefreshToken: ""`.
-//
-// The shapes are not a catalogue. `value` is literally what Register, Login
-// and Refresh do — c.JSON(authResponse{...}) hands an unaddressable value to
-// encoding/json — and it is the one that breaks if the receiver is ever
-// changed to a pointer. `slice` is included with a warning attached: slice
-// elements ARE addressable, so encoding/json will still dispatch a
-// POINTER-receiver MarshalJSON for it. It therefore does not discriminate on
-// receiver kind, and deleting the value/map/wrapper cases because "slice
-// covers it" would quietly remove the only cases that do.
+// TestGuard_AuthResponseAlwaysBlanksTheRefreshToken: the type, not each call site, blanks
+// the refresh token. `value` is what Register, Login and Refresh do, and breaks if the
+// receiver becomes a pointer; `slice` does not discriminate (its elements are addressable),
+// so do not delete the value, map or wrapper cases because "slice covers it".
 func TestGuard_AuthResponseAlwaysBlanksTheRefreshToken(t *testing.T) {
 	resp := fixtureAuthResponse()
 

@@ -617,20 +617,10 @@ func TestPlanDiskAttachPassesTheWholeSpecThrough(t *testing.T) {
 	}
 }
 
-// TestPlanDiskAttachPinsTheWriteToTheReadThatChoseTheSlot is the
-// compare-and-swap half.
-//
-// The slot is decided from a config snapshot, and a second round trip
-// (the storage list) happens before anything is written — so between the
-// two, another attach can take the slot this one picked. Without a digest
-// the write would not fail, it would REPLACE the other attach's config
-// line and orphan its volume: failure mode 2 from this file's header,
-// reached by concurrency rather than by a bad parameter.
-//
-// The digest that goes out must be the one from the read that made the
-// decision, NOT a fresh one — a token fetched at write time pins the
-// write to a config nobody decided anything against, which is the
-// inverted form of the check.
+// TestPlanDiskAttachPinsTheWriteToTheReadThatChoseTheSlot: another attach can take the
+// slot between the read that chose it and the write, which would then REPLACE that
+// attach's line and orphan its volume. The digest sent must be the deciding read's: one
+// fetched at write time pins the write to a config nobody decided against.
 func TestPlanDiskAttachPinsTheWriteToTheReadThatChoseTheSlot(t *testing.T) {
 	probe := &fakeDiskProbe{
 		config: proxmox.VMConfig{"digest": "digest-at-read-time", "scsi0": "store01:vm-101-disk-0"},
@@ -928,19 +918,10 @@ func TestDiskAttachRequestFromRejectsAnUnnormalizedSize(t *testing.T) {
 	}
 }
 
-// TestRequireGuestKindPerm is the mutation-proof for the permission
-// crossover a security review found: convert-to-template and
-// clone-to-template are reached on manage:vm, but they call
-// ConvertCTToTemplate / CloneCT for a container — and manage:container is
-// a separate permission row a cluster-scoped or custom role can withhold.
-//
-// It is driven through a real Fiber request rather than called directly,
-// because requireClusterPerm resolves the engine out of c.Locals and a
-// direct call would prove nothing about what a request actually gets. The
-// engine is newGrantEngine (audit_redaction_test.go) because the shared
-// admin/viewer stub answers every permission the same way and cannot
-// express "holds manage:vm, does not hold manage:container" — which is
-// the only interesting state here.
+// TestRequireGuestKindPerm: convert- and clone-to-template are reached on manage:vm but act
+// on a container through ConvertCTToTemplate and CloneCT, so manage:container is checked too.
+// Driven through a real Fiber request (requireClusterPerm reads c.Locals), on newGrantEngine:
+// only it can hold manage:vm without manage:container.
 func TestRequireGuestKindPerm(t *testing.T) {
 	clusterID := uuid.New()
 

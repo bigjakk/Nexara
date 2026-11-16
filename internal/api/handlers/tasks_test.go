@@ -317,19 +317,10 @@ func TestParseTaskSort(t *testing.T) {
 	}
 }
 
-// TestTaskSortColumnsMatchSQL guards the whitelist against the ORDER BY it
-// gates: a key accepted here but absent from queries/tasks.sql would return
-// 200 with silently unsorted rows, which is worse than the 400 the whitelist
-// exists to produce.
-//
-// That the defaults themselves are valid is proven by TestParseTaskSort, not
-// here: parseTaskSort applies each default and then validates it, so a default
-// the whitelist rejects makes those rows error. The two rows that leave sortBy
-// empty ("defaults when both empty", "sort defaults alone") pin defaultTaskSort;
-// the two that leave order empty ("defaults when both empty", "order defaults
-// alone") pin defaultTaskOrder to "desc" — stricter than the assertion this test
-// used to carry, which accepted either direction. Keep them if you trim that
-// table.
+// TestTaskSortColumnsMatchSQL: a sort key accepted here but absent from queries/tasks.sql
+// would answer 200 with silently unsorted rows instead of the whitelist's 400. That the
+// defaults are valid is TestParseTaskSort's job: its rows that leave sortBy or order empty
+// pin defaultTaskSort and defaultTaskOrder ("desc"), so keep them if you trim that table.
 func TestTaskSortColumnsMatchSQL(t *testing.T) {
 	query, err := os.ReadFile(filepath.Join(repoRoot, "queries", "tasks.sql"))
 	if err != nil {
