@@ -125,7 +125,7 @@ func TestOIDCExchange_RefusesACodeThisBrowserWasNotGiven(t *testing.T) {
 			a := newEpochApp(t, newEpochStore(u), epochOptions{})
 			var code string
 			a.probe = func(c fiber.Ctx) error {
-				_, code, _ = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{}, &auth.OIDCUserInfo{Email: u.Email, DisplayName: u.DisplayName})
+				_, code, _ = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: u.Email, DisplayName: u.DisplayName})
 				return c.SendStatus(http.StatusNoContent)
 			}
 			probe := a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)
@@ -271,7 +271,7 @@ func TestOIDCBindingSecure_IsTheRedirectURIsUnderAuto(t *testing.T) {
 	a.probe = func(c fiber.Ctx) error {
 		_, code, _ = a.oidc.provisionAndStoreExchange(c,
 			db.OidcConfig{RedirectUri: "https://nexara.example.com/api/v1/auth/oidc/callback"},
-			&auth.OIDCUserInfo{Email: u.Email, DisplayName: u.DisplayName})
+			&auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: u.Email, DisplayName: u.DisplayName})
 		return c.SendStatus(http.StatusNoContent)
 	}
 	probe := a.send(t, http.MethodGet, "/probe", "", nil, 10*time.Second)

@@ -63,7 +63,7 @@ func TestOIDCProvision_RefusesAnAddressAnotherAccountHasInAnotherCase(t *testing
 	a := newEpochApp(t, store, epochOptions{})
 	var failure string
 	callProvision(t, a, func(c fiber.Ctx) error {
-		_, _, failure = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Email: "Alice@Example.com"})
+		_, _, failure = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: "Alice@Example.com"})
 		return c.SendStatus(http.StatusNoContent)
 	})
 	if failure != "User provisioning failed" || len(store.named("CreateOIDCUser")) != 0 || len(a.redis.Keys()) != 0 {

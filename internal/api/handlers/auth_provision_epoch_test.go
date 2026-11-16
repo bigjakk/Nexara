@@ -68,7 +68,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 		u := existing()
 		a := newEpochApp(t, newEpochStore(u), epochOptions{})
 
-		user, data, failure := exchange(t, a, db.OidcConfig{}, &auth.OIDCUserInfo{Email: u.Email, DisplayName: u.DisplayName})
+		user, data, failure := exchange(t, a, db.OidcConfig{}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: u.Email, DisplayName: u.DisplayName})
 
 		if failure != "" {
 			t.Fatalf("provisioning failed: %q", failure)
@@ -89,7 +89,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 		store.after["GetUserByEmailAndSource"] = func(s *epochStore) { s.users[u.ID].AuthEpoch++ }
 		a := newEpochApp(t, store, epochOptions{})
 
-		_, data, failure := exchange(t, a, db.OidcConfig{}, &auth.OIDCUserInfo{Email: u.Email, DisplayName: "Renamed By The Provider"})
+		_, data, failure := exchange(t, a, db.OidcConfig{}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: u.Email, DisplayName: "Renamed By The Provider"})
 
 		if failure != "" {
 			t.Fatalf("provisioning failed: %q", failure)
@@ -105,7 +105,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 	t.Run("a first sign-in provisions the account, at epoch 0", func(t *testing.T) {
 		a := newEpochApp(t, newEpochStore(), epochOptions{})
 
-		user, data, failure := exchange(t, a, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Email: "carol@example.com", DisplayName: "Carol"})
+		user, data, failure := exchange(t, a, db.OidcConfig{AutoProvision: true}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: "carol@example.com", DisplayName: "Carol"})
 
 		if failure != "" {
 			t.Fatalf("provisioning failed: %q", failure)
@@ -118,7 +118,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 	t.Run("an unknown user with auto-provisioning off: nothing is stored", func(t *testing.T) {
 		a := newEpochApp(t, newEpochStore(), epochOptions{})
 
-		_, _, failure := exchange(t, a, db.OidcConfig{AutoProvision: false}, &auth.OIDCUserInfo{Email: "carol@example.com"})
+		_, _, failure := exchange(t, a, db.OidcConfig{AutoProvision: false}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: "carol@example.com"})
 
 		if failure != "User provisioning failed" {
 			t.Errorf("failure = %q, want the login page's provisioning message", failure)
@@ -133,7 +133,7 @@ func TestOIDCCallback_TheExchangeCodeCarriesTheEpochOfTheProvisionedUser(t *test
 		a := newEpochApp(t, newEpochStore(u), epochOptions{})
 		var code string
 		callProvision(t, a, func(c fiber.Ctx) error {
-			_, code, _ = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{}, &auth.OIDCUserInfo{Email: u.Email, DisplayName: u.DisplayName})
+			_, code, _ = a.oidc.provisionAndStoreExchange(c, db.OidcConfig{}, &auth.OIDCUserInfo{Issuer: epochIssuer, Subject: epochSubject, Email: u.Email, DisplayName: u.DisplayName})
 			return c.SendStatus(http.StatusNoContent)
 		})
 		if ttl := a.redis.TTL("oidc:exchange:" + code); ttl <= 0 || ttl > oidcExchangeTTL {

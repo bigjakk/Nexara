@@ -342,6 +342,27 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		s.users[u.ID] = u
 		remember(func() { delete(s.users, u.ID) })
 		return authFakeRow{value: *u}
+	case "GetUserByOIDCIdentity":
+		// oidc_issuer, oidc_subject.
+		if u := s.byIdentity(args[0].(string), args[1].(string)); u != nil {
+			return authFakeRow{value: *u}
+		}
+		return authFakeRow{err: pgx.ErrNoRows}
+	case "LinkOIDCIdentity":
+		// oidc_issuer, oidc_subject, id; the SQL's WHERE: an SSO account with no link
+		// stored, and users_oidc_identity_key.
+		iss, sub := args[0].(string), args[1].(string)
+		u, ok := s.users[args[2].(uuid.UUID)]
+		if !ok || u.AuthSource != "oidc" || u.OidcSubject != "" || u.OidcIssuer != "" || iss == "" || sub == "" {
+			return authFakeRow{err: pgx.ErrNoRows}
+		}
+		if s.byIdentity(iss, sub) != nil {
+			return authFakeRow{err: &pgconn.PgError{Code: "23505", ConstraintName: "users_oidc_identity_key"}}
+		}
+		before := *u
+		remember(func() { *u = before })
+		u.OidcIssuer, u.OidcSubject = iss, sub
+		return authFakeRow{value: *u}
 	case "UpdateLDAPUserProfile", "UpdateOIDCUserProfile":
 		// id, display_name: only for an account of the query's own source, as the SQL's WHERE.
 		source := "ldap"
@@ -529,10 +550,12 @@ type epochApp struct {
 	probe fiber.Handler
 }
 
-// The accounts the harness holds.
+// The accounts the harness holds, and the provider identity its SSO sign-ins present.
 const (
 	epochLoginEmail = "alice@example.com"
 	epochAdminEmail = "bob@example.com"
+	epochIssuer     = "https://sso.example.com"
+	epochSubject    = "subject-of-alice"
 )
 
 // epochUser is a local, active account whose password is racePassword.

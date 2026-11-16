@@ -694,6 +694,9 @@ func (h *OIDCHandler) exchangeFailure(c fiber.Ctx, err error) string {
 func (h *OIDCHandler) provisionAndStoreExchange(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (user db.User, exchangeCode, failure string) {
 	// JIT provision or update the user
 	user, err := h.provisionUser(c, cfg, userInfo)
+	if errors.Is(err, errOIDCIdentityMismatch) {
+		return db.User{}, "", oidcIdentityMismatchMessage
+	}
 	if err != nil {
 		slog.Error("OIDC user provisioning failed", "email", userInfo.Email, "error", err)
 		return db.User{}, "", "User provisioning failed"
@@ -754,14 +757,89 @@ func (h *OIDCHandler) storeExchange(ctx context.Context, user db.User, binding s
 
 // --- User provisioning ---
 
-func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (db.User, error) {
-	// Look up existing user
-	user, err := h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
-		Email:      userInfo.Email,
-		AuthSource: "oidc",
-	})
+// errOIDCIdentityMismatch refuses a sign-in whose address names an SSO account that is
+// bound to another provider identity: another subject, or another issuer.
+var errOIDCIdentityMismatch = errors.New("oidc: the account with this address is bound to another identity")
+
+// oidcIdentityMismatchMessage answers that refusal on the login page. It names no
+// subject, no issuer and no address: the person learns what to do, an attacker nothing.
+const oidcIdentityMismatchMessage = "This sign-in does not match the single sign-on identity your account is " +
+	"linked to. Contact an administrator."
+
+// oidcAccount is accountForIdentity's answer to "which account is this identity".
+type oidcAccount struct {
+	// User is the account: the zero value when Found is false.
+	User db.User
+	// Found: an SSO account answers to this identity.
+	Found bool
+	// Bound: it answers by the issuer and subject stored on it. Found but not Bound: by
+	// its address, an SSO account with no link stored yet (its first sign-in since the
+	// upgrade that added links, or since an administrator reset its link).
+	Bound bool
+}
+
+// accountForIdentity answers which Nexara account a provider identity is, and writes
+// nothing:
+//   - the SSO account bound to info's issuer and subject, whatever its address says
+//     now (Found, Bound);
+//   - else the SSO account info's address names (GetUserByEmailAndSource: exact
+//     spelling first, else the one differing only by case), when it has no link stored
+//     (Found, not Bound): a sign-in links it before it signs in (linkOIDCAccount);
+//   - else none (not Found, nil error).
+//
+// An address that names an SSO account bound to another identity is
+// errOIDCIdentityMismatch, with that account in User for the audit row. An account of
+// another source is never an answer, and an identity without an issuer or a subject
+// is an error. The caller must have had the identity verified by the provider.
+func (h *OIDCHandler) accountForIdentity(ctx context.Context, info *auth.OIDCUserInfo) (oidcAccount, error) {
+	if info.Issuer == "" || info.Subject == "" {
+		return oidcAccount{}, fmt.Errorf("oidc: the identity has no issuer or subject")
+	}
+	user, err := h.queries.GetUserByOIDCIdentity(ctx, db.GetUserByOIDCIdentityParams{
+		OidcIssuer: info.Issuer, OidcSubject: info.Subject})
 	if err == nil {
-		// Update display name if changed
+		return oidcAccount{User: user, Found: true, Bound: true}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return oidcAccount{}, fmt.Errorf("lookup user by identity: %w", err)
+	}
+	user, err = h.queries.GetUserByEmailAndSource(ctx, db.GetUserByEmailAndSourceParams{
+		Email: info.Email, AuthSource: "oidc"})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return oidcAccount{}, nil
+	}
+	if err != nil {
+		return oidcAccount{}, fmt.Errorf("lookup user: %w", err)
+	}
+	if user.OidcSubject != "" || user.OidcIssuer != "" {
+		return oidcAccount{User: user}, errOIDCIdentityMismatch
+	}
+	return oidcAccount{User: user, Found: true}, nil
+}
+
+// provisionUser is the account a verified sign-in signs in to: the one
+// accountForIdentity names — linked to the identity first when it has no link — or a
+// new one bound to it when auto-provisioning is on. A sign-in whose address names an
+// account bound to another identity is refused (errOIDCIdentityMismatch) and audited
+// as a failed sign-in under that account. Nothing else ever writes a link.
+func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *auth.OIDCUserInfo) (db.User, error) {
+	acct, err := h.accountForIdentity(c.Context(), userInfo)
+	if errors.Is(err, errOIDCIdentityMismatch) {
+		h.auditIdentityMismatch(c, acct.User)
+		return db.User{}, err
+	}
+	if err != nil {
+		return db.User{}, err
+	}
+	if acct.Found {
+		user := acct.User
+		if !acct.Bound {
+			if user, err = h.linkOIDCAccount(c, user, userInfo); err != nil {
+				return db.User{}, err
+			}
+		}
+		// Update display name if changed. The address is not rewritten from the token:
+		// a bound account keeps its own, whatever the claim says now.
 		if userInfo.DisplayName != "" && userInfo.DisplayName != user.DisplayName {
 			if updated, updateErr := h.queries.UpdateOIDCUserProfile(c.Context(), db.UpdateOIDCUserProfileParams{
 				ID:          user.ID,
@@ -771,10 +849,6 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 			}
 		}
 		return user, nil
-	}
-
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return db.User{}, fmt.Errorf("lookup user: %w", err)
 	}
 
 	// User not found — JIT provision if enabled
@@ -793,6 +867,7 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 	if err != nil {
 		return db.User{}, fmt.Errorf("check the address: %w", err)
 	}
+	var user db.User
 	if taken {
 		err = errEmailTakenInAnotherCase
 	} else {
@@ -804,22 +879,59 @@ func (h *OIDCHandler) provisionUser(c fiber.Ctx, cfg db.OidcConfig, userInfo *au
 		})
 	}
 	if err != nil {
-		// Handle race condition
+		// Handle race condition: another sign-in created the account in the meantime.
 		if isDuplicateKeyError(err) || errors.Is(err, errEmailTakenInAnotherCase) {
-			user, err = h.queries.GetUserByEmailAndSource(c.Context(), db.GetUserByEmailAndSourceParams{
-				Email:      userInfo.Email,
-				AuthSource: "oidc",
-			})
-			if err != nil {
-				return db.User{}, fmt.Errorf("lookup user after race: %w", err)
-			}
-			return user, nil
+			return h.boundAccountAfterRace(c, userInfo)
 		}
 		return db.User{}, fmt.Errorf("create user: %w", err)
 	}
 
 	// Role assignment is handled by syncUserRoles called after provisionUser
 	return user, nil
+}
+
+// linkOIDCAccount binds an unlinked SSO account to the identity signing in to it. The
+// write is conditional in SQL (LinkOIDCIdentity: only while no link is stored), so when
+// another sign-in got there first what is stored then decides (boundAccountAfterRace).
+func (h *OIDCHandler) linkOIDCAccount(c fiber.Ctx, user db.User, info *auth.OIDCUserInfo) (db.User, error) {
+	linked, err := h.queries.LinkOIDCIdentity(c.Context(), db.LinkOIDCIdentityParams{
+		ID: user.ID, OidcIssuer: info.Issuer, OidcSubject: info.Subject})
+	if err == nil {
+		return linked, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) && !isDuplicateKeyError(err) {
+		return db.User{}, fmt.Errorf("link the account: %w", err)
+	}
+	return h.boundAccountAfterRace(c, info)
+}
+
+// boundAccountAfterRace settles a link or a creation that lost a race with another
+// sign-in: the identity signs in only to an account now bound to it. An address now
+// naming an account bound to another identity is refused as accountForIdentity's
+// mismatch; anything else is an error.
+func (h *OIDCHandler) boundAccountAfterRace(c fiber.Ctx, info *auth.OIDCUserInfo) (db.User, error) {
+	acct, err := h.accountForIdentity(c.Context(), info)
+	if errors.Is(err, errOIDCIdentityMismatch) {
+		h.auditIdentityMismatch(c, acct.User)
+		return db.User{}, err
+	}
+	if err != nil {
+		return db.User{}, fmt.Errorf("lookup user after race: %w", err)
+	}
+	if !acct.Bound {
+		return db.User{}, fmt.Errorf("lookup user after race: no account is bound to the identity")
+	}
+	return acct.User, nil
+}
+
+// auditIdentityMismatch records a sign-in refused for a mismatched identity as a failed
+// sign-in under the account concerned, with that account's own address and a fixed
+// reason: nothing the provider asserted (audit details are readable by every Viewer).
+func (h *OIDCHandler) auditIdentityMismatch(c fiber.Ctx, account db.User) {
+	slog.Warn("oidc callback: refused a sign-in whose identity does not match the account's link", "user_id", account.ID)
+	details, _ := json.Marshal(map[string]string{"email": account.Email, "ip": c.IP(),
+		"method": "oidc", "reason": "identity_mismatch"})
+	AuditLogAs(c, h.queries, h.eventPub, account.ID, pgtype.UUID{}, "auth", account.ID.String(), "login_failed", details)
 }
 
 // syncUserRoles maps OIDC group names to RBAC role UUIDs and assigns them.

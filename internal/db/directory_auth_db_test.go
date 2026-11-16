@@ -223,17 +223,21 @@ func TestOIDCIdentity_SQL(t *testing.T) {
 		if n, err := q.CountUsersLinkedToIssuer(ctx, iss); err != nil || n != 1 {
 			t.Errorf("CountUsersLinkedToIssuer = %d, %v; want 1", n, err)
 		}
-		for stmt, args := range map[string][]any{
-			// Inside a savepoint each, so the refusal does not end the transaction.
-			`INSERT INTO users (email, password_hash, display_name, auth_source, oidc_issuer, oidc_subject) VALUES ('erin@example.com', '', 'x', 'oidc', $1, 'sub-1')`: {iss},
-			`UPDATE users SET oidc_issuer = $1, oidc_subject = 'sub-3' WHERE id = $2`: {iss, ids["local"]},
+		// A second account for the identity, and an identity on a local account: each
+		// inside a savepoint, so the refusal does not end the transaction.
+		for _, st := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO users (email, password_hash, display_name, auth_source, oidc_issuer, oidc_subject) VALUES ('erin@example.com', '', 'x', 'oidc', $1, 'sub-1')`, []any{iss}},
+			{`UPDATE users SET oidc_issuer = $1, oidc_subject = 'sub-3' WHERE id = $2`, []any{iss, ids["local"]}},
 		} {
 			sp, err := tx.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := sp.Exec(ctx, stmt, args...); err == nil {
-				t.Errorf("%s: accepted, want refused", stmt)
+			if _, err := sp.Exec(ctx, st.sql, st.args...); err == nil {
+				t.Errorf("%s: accepted, want refused", st.sql)
 			}
 			_ = sp.Rollback(ctx)
 		}
