@@ -79,6 +79,8 @@
     "haManagerFor": "HA manager · for {{who}}",
     "migrationStart": "Migration target"
   },
+  "filed": "Filed",
+  "filedBy": "Filed by {{user}}",
   "taskLog": "Task Log",
   "inProgress": "In progress...",
   "taskCompletedSuccessfully": "Task completed successfully.",

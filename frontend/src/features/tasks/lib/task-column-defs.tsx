@@ -88,7 +88,7 @@ export const TASK_COLUMNS_WITH_VM: ColumnDef<
     sortable: true,
     cell: (task) => (
       <div className="flex items-center gap-2">
-        <PVESourceBadge source={task.source} />
+        <PVESourceBadge source={task.source} filedBy={task.filed_by} />
         <span className="truncate">{task.description || task.upid}</span>
       </div>
     ),

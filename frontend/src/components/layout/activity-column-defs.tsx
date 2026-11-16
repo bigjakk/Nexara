@@ -114,7 +114,14 @@ export const ACTIVITY_COLUMN_DEFS: ColumnDef<
     sortValue: activityLabel,
     cell: (row) => (
       <div className="flex items-center gap-x-2 overflow-hidden">
-        <PVESourceBadge source={row.entry.source} />
+        {/* A task filed through the API is the filing's entry, task_recorded,
+            whose actor is who filed it. */}
+        <PVESourceBadge
+          source={
+            row.entry.action === "task_recorded" ? "filed" : row.entry.source
+          }
+          filedBy={row.actorLabel}
+        />
         <LinkedTaskBadge
           role={row.linkedRole}
           requester={row.haRequester}

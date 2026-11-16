@@ -2184,7 +2184,7 @@ Every schedule carries `run_as`: the user whose grants its runs read under, stam
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/tasks` | List tracked tasks |
+| GET | `/tasks` | List tracked tasks. A row whose `source` is `filed` carries `filed_by`, the display name (else the email) of who filed it |
 | POST | `/tasks` | Record a task Nexara dispatched, as running: how it ends is the collector's, read from Proxmox. The node its UPID names must be one of the body's cluster's (404 otherwise; 400 for a UPID naming none), and Proxmox must have the task there, asked through that cluster's own client: 400 if it does not, 502 if the read fails. It is recorded with the type Proxmox reports, the body's `description` kept in the filing's audit entry as `provided_description` rather than as the task's own, and a UPID already on record — in the audit log or the task archive, of any cluster — is refused with 409. The row is `source` `filed`, with the caller as who filed it, and starts when Proxmox says the task did; whoever ran the task (Nexara's own record of a dispatch, or the collector's of a task run in Proxmox) takes the row over, with its own user and source |
 | PUT | `/tasks/:upid` | Report the progress of a running task the caller filed; it stays running. Any task but the caller's own filing (one Nexara dispatched, one recorded from Proxmox, another user's) is refused with 403, one that has finished with 409, and a status other than `running` or a `finished_at` with 400 |
 | DELETE | `/tasks` | Clear completed tasks |

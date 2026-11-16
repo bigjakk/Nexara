@@ -53,6 +53,22 @@ describe("TaskLogPanel", () => {
     expect(screen.getByText("HA manager · for Ops")).toBeInTheDocument();
   });
 
+  // A task filed through the API is marked with who filed it, as a task
+  // observed on Proxmox is marked PVE.
+  it("marks a filed task with who filed it", async () => {
+    vi.mocked(apiClient.list).mockResolvedValue([
+      {
+        ...removedClusterEntry,
+        action: "task_recorded",
+        details: "{}",
+        user_display_name: "Alice",
+      },
+    ]);
+    renderWithProviders(<TaskLogPanel />);
+
+    expect(await screen.findByText("Filed by Alice")).toBeInTheDocument();
+  });
+
   describe("running tasks and the error filter", () => {
     const row = (
       name: string,

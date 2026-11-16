@@ -342,3 +342,38 @@ func TestTaskSortColumnsMatchSQL(t *testing.T) {
 		}
 	}
 }
+
+// A row filed through POST /tasks is listed with who filed it, which the Tasks
+// page shows as "Filed by"; a row whoever ran the task took over is not.
+func TestTaskListNamesWhoFiledARow(t *testing.T) {
+	t.Parallel()
+	alice := db.User{ID: uuid.New(), Email: "alice@example.com", DisplayName: "Alice"}
+	row := func(source string) db.ListTaskHistoryFilteredRow {
+		return db.ListTaskHistoryFilteredRow{ID: uuid.New(), ClusterID: uuid.New(), UserID: alice.ID, Upid: "UPID:pve-01:1:2:3:qmstart:101:alice@pve:", Status: "running", Source: source}
+	}
+	dbtx := &auditRowsDBTX{
+		rowsFor: map[string][]any{"ListTaskHistoryFiltered": {row("filed"), row("nexara")}},
+		rowFor:  map[string]any{"CountTaskHistoryFiltered": struct{ N int64 }{2}, "GetUserByID": alice},
+	}
+	h := NewTaskHandler(db.New(dbtx), nil, 0)
+	app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+	app.Use(func(c fiber.Ctx) error {
+		c.Locals("user_id", uuid.New())
+		c.Locals("rbac_engine", newGrantEngine("view:task"))
+		return c.Next()
+	})
+	app.Get("/tasks", withRequestParams(t, taskListMirror(t), nil, h.List))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/tasks", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	var got ListResponse[taskResponse]
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("%v (%s)", err, body)
+	}
+	if len(got.Items) != 2 || got.Items[0].FiledBy != "Alice" || got.Items[1].FiledBy != "" {
+		t.Errorf("items %s, want the filed row by Alice and the other by no one", body)
+	}
+}

@@ -89,6 +89,10 @@ type taskResponse struct {
 	Vmid        *int32   `json:"vmid,omitempty"`
 	StartedAt   string   `json:"started_at"`
 	FinishedAt  *string  `json:"finished_at,omitempty"`
+
+	// FiledBy names who filed a row whose source is "filed" (POST /tasks)
+	// while it is still theirs: their display name, else their email.
+	FiledBy string `json:"filed_by,omitempty"`
 }
 
 func mapTaskHistory(t db.TaskHistory) taskResponse {
@@ -306,6 +310,7 @@ func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	resp := make([]taskResponse, 0, len(tasks))
+	filers := map[uuid.UUID]string{}
 	for _, t := range tasks {
 		// Defense-in-depth: SQL already restricts rows via
 		// accessible_cluster_ids; the per-row guard keeps a future query edit
@@ -316,7 +321,21 @@ func (h *TaskHandler) List(c fiber.Ctx, p *apischema.Params) error {
 		// ListTaskHistoryFilteredRow is the table's own shape — the query
 		// returns task_history's columns and nothing else — so the conversion
 		// is a compile-time assertion that the two stay identical.
-		resp = append(resp, mapTaskHistory(db.TaskHistory(t)))
+		r := mapTaskHistory(db.TaskHistory(t))
+		if t.Source == "filed" {
+			name, seen := filers[t.UserID]
+			if !seen {
+				if u, uErr := h.queries.GetUserByID(c.Context(), t.UserID); uErr == nil {
+					name = u.DisplayName
+					if name == "" {
+						name = u.Email
+					}
+				}
+				filers[t.UserID] = name
+			}
+			r.FiledBy = name
+		}
+		resp = append(resp, r)
 	}
 	return RespondList(c, resp, total)
 }

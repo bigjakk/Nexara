@@ -17,6 +17,8 @@ export interface TaskRecord {
   node: string;
   task_type: string;
   source: string;
+  /** Who filed a row whose source is "filed" (POST /api/v1/tasks). */
+  filed_by?: string;
   progress: number | null;
   /** Guest VMID parsed from the UPID at insert; absent for non-guest tasks. */
   vmid?: number;
