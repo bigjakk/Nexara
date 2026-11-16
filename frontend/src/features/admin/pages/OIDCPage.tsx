@@ -613,7 +613,11 @@ export function OIDCPage() {
                 description={
                   addressChanged
                     ? "This provider is moving to a new issuer, so it needs the client secret again. The stored one is only ever sent to the address it was saved for."
-                    : undefined
+                    : !isNew &&
+                        activeConfig?.allow_private_address === true &&
+                        form.issuer_url === activeConfig.issuer_url
+                      ? "Confirmed for a private network address. A new issuer is asked about again."
+                      : undefined
                 }
                 htmlFor="oidc-issuer-url"
               >

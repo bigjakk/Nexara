@@ -222,6 +222,26 @@ describe("an OIDC configuration save that settles", () => {
     expect(mockedToastError).not.toHaveBeenCalled();
   });
 
+  it("says on edit that the stored issuer was confirmed for a private address, and does not resend it", async () => {
+    const user = userEvent.setup();
+    mockedList.mockResolvedValue([
+      { ...oidcConfig("oidc-01", FIRST), allow_private_address: true },
+    ]);
+    renderPage();
+
+    await openEdit(user);
+    expect(
+      screen.getByText(/Confirmed for a private network address/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockedPut).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedPut.mock.calls[0]?.[1]).not.toHaveProperty(
+      "allow_private_address",
+    );
+  });
+
   it("asks to confirm an issuer on a private address, and resends the save confirmed", async () => {
     const user = userEvent.setup();
     const held = deferred<unknown>();
