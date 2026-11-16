@@ -72,18 +72,11 @@ func newStorageWriteServer(t *testing.T, answer string) (*Client, *storageWriteS
 	return newTestClient(t, srv.URL), rec
 }
 
-// TestStorageWrite_HandsBackOnlyAKeyProxmoxWasAskedToGenerate drives
-// CreateStorage and UpdateStorage against answers shaped like the ones
-// pve-storage's API2/Storage/Config.pm create and update return: {storage,
-// type, config}, where config is whatever PBSPlugin's add or update hook
-// returned.
-//
-// The load-bearing case is the supplied key. PBSPlugin echoes a caller's own
-// key back as config.encryption-key (`$res->{'encryption-key'} =
-// $encryption_key`), so the answer to a supplied key is indistinguishable
-// from the answer to autogen. Its precondition asserts the answer really does
-// carry the key; without that, "the result is empty" would pass for a server
-// that never echoed anything.
+// TestStorageWrite_HandsBackOnlyAKeyProxmoxWasAskedToGenerate drives CreateStorage and
+// UpdateStorage against answers shaped like pve-storage's create and update ({storage, type,
+// config}). The load-bearing case is the supplied key: PBSPlugin echoes it back as
+// config.encryption-key, like an autogen answer, and its precondition asserts the echo is
+// really there, or "the result is empty" would pass against a server that echoed nothing.
 func TestStorageWrite_HandsBackOnlyAKeyProxmoxWasAskedToGenerate(t *testing.T) {
 	generated := storageWriteKey(storageWriteCanary + "-generated")
 	supplied := storageWriteKey(storageWriteCanary + "-supplied")
@@ -355,21 +348,11 @@ func TestUpdateStorage_RefusesAContradictoryDeleteWithoutIssuingARequest(t *test
 	}
 }
 
-// TestPBSEncryptionKey_NeverRendersItsText renders a key — and a
-// StorageWriteResult holding one as an exported field, which is how it
-// travels — through every route this package can foresee a debugging line
-// taking, and fails if the key material appears in any of them.
-//
-// Both slog handlers are exercised because they reach the key differently:
-// the text handler through fmt's %+v, which is Format; the JSON handler,
-// which is the one production installs, through encoding/json, which is
-// MarshalJSON.
-//
-// %p and %w are the verbs fmt cannot hand to Format: both take its bad-verb
-// path, which skips every method and prints the operand raw. They print no
-// placeholder, so for them the test asks only that the key is absent — which
-// holds because the raw print of the struct is the address its text sits
-// behind.
+// TestPBSEncryptionKey_NeverRendersItsText renders a key, and a StorageWriteResult holding
+// one, every way a debugging line could: the text handler reaches it through Format, the JSON
+// handler (production's) through MarshalJSON. %p and %w skip every method and print the
+// operand raw, so for them only absence is asked, which holds because the raw print is the
+// address the text sits behind.
 func TestPBSEncryptionKey_NeverRendersItsText(t *testing.T) {
 	key := newPBSEncryptionKey(storageWriteKey(storageWriteCanary))
 	result := StorageWriteResult{GeneratedEncryptionKey: key}

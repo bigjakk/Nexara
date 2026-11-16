@@ -778,6 +778,11 @@ func (c *Client) GetCephFS(ctx context.Context, node string) ([]CephFS, error) {
 	}
 	return fs, nil
 }
+
+// GetCephCrushRules reads GET /nodes/{node}/ceph/rules. The one legitimate plural
+// among the Ceph paths: `rules` is a method registered directly on PVE::API2::Ceph,
+// not a subclass mount like pool, cfg, osd, mds, mgr, mon and fs (all singular), so
+// do not "correct" it.
 func (c *Client) GetCephCrushRules(ctx context.Context, node string) ([]CephCrushRule, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

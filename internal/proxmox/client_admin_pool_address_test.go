@@ -7,55 +7,16 @@ import (
 	"testing"
 )
 
-// These cases guard the three methods that ADDRESS an existing resource pool —
-// GetResourcePool, UpdateResourcePool, DeleteResourcePool — each of which
-// interpolates a caller-supplied pool id into the request path.
-//
-// Until this change nothing in this package constrained that id at all: the
-// three built "/pools/" + url.PathEscape(poolID) straight from the argument.
-// The only rule anywhere was the pool id's pattern in
-// internal/api/registry_pools.go, i.e. a check in the CALLER — and that rule
-// was PVE's own verify_poolname charset, which admits a leading dot, so "." and
-// ".." matched it exactly as any other name did. It stopped a slash and nothing
-// else. This is the same opt-in shape the rest of this client's path-segment
-// guards were moved off (3e757d3 for task ids, 7f4d2ca for HA ids, 82d24d8 for
-// node names, 4852e28 for snapshot names).
-//
-// That declaration has since been tightened too — it now reads apischema's
-// path-safe-dotted-name, the entry PVE group and role ids share, which carves
-// the same pair out at the route. These cases are unaffected by it and must
-// stay that way: they call the client DIRECTLY, which is the point of putting
-// the guard here, so a mutation to either layer fails only its own tests.
-//
-// Two halves, and the second is load-bearing. The refusal half alone is
-// satisfiable by refusing everything, which here would be a REGRESSION rather
-// than a weak test: a pool created at the PVE console can be named ".hidden"
-// or "-lead", and these three are how such a pool is read, edited and deleted.
-// Tightening them to a name rule is how an object becomes undeletable —
-// poolIDParam's own comment documents that trap from the declaration side.
-//
-// Every assertion reads r.RequestURI — newCaptureServer records exactly that —
-// and never r.URL.Path. net/http has already decoded Path by the time the
-// handler runs, which makes "%2F.." and "/.." indistinguishable there and
-// hides this whole bug class.
+// These guard GetResourcePool, UpdateResourcePool and DeleteResourcePool, which put a caller's
+// pool id in the path: PVE's pool charset admits a leading dot, so "." and ".." passed the
+// route's old rule. They call the client directly, so either layer fails only its own tests.
+// The accepting half is load-bearing: a pool made at the PVE console as ".hidden" or "-lead"
+// must stay reachable. Assertions read r.RequestURI; r.URL.Path is already decoded.
 
-// poolAddressTraversal pops from the poolid slot back to the API root — behind
-// a proxy that decodes the %2F url.PathEscape writes into it and then removes
-// dot segments. pveproxy itself decodes the %2F but removes no dot segment
-// (see validatePathSegment): it reads "a" as the pool id and finds no endpoint
-// below it.
-//
-// The arithmetic, because an unexplained count is worse than none: the target
-// these methods build is /api2/json/pools/{poolid}, so the id sits in
-// /api2/json/pools, two segments below /api2/json. The payload spends one
-// segment ("a") and then pops twice, landing on /api2/json, and
-// /access/users/root@pam is appended from there:
-//
-//	/api2/json/pools/a/../../access/users/root@pam
-//	→ /api2/json/access/users/root@pam
-//
-// which is a real endpoint, reached with the cluster's own token. A third ".."
-// would over-pop past /api2/json and resolve to nothing.
+// poolAddressTraversal pops from the poolid slot to the API root behind a proxy that decodes
+// %2F and removes dot segments (pveproxy does neither: see validatePathSegment). The id sits
+// two below /api2/json, so "a" then two pops land on /api2/json/access/users/root@pam, a real
+// endpoint reached with the cluster's own token; a third ".." would over-pop to nothing.
 const poolAddressTraversal = "a/../../access/users/root@pam"
 
 // poolAddressMethod is one of the three. wire builds the exact request target
@@ -95,17 +56,10 @@ const poolAddressBody = `{"data":{"poolid":"infra","comment":"","members":[]}}`
 // refusedPoolIDs is the corpus that must never reach the wire.
 var refusedPoolIDs = []struct{ name, poolID, why string }{
 	{"empty", "", "there is no pool to address, and the request would target the collection"},
-	// The two shapes the HTTP route could deliver here when this guard was
-	// written, and the only two — the pool id's charset stopped everything
-	// below this pair, and it matched these. (The declaration now refuses
-	// them as well, so today an HTTP caller is turned away one layer
-	// earlier; these two rows are what holds the floor under that, for the
-	// next caller who is not an HTTP request.) url.PathEscape leaves a dot
-	// alone, so both arrive intact. pveproxy would read either as a pool
-	// NAMED "." or ".." (see validatePathSegment); a normalising proxy in
-	// front of it resolves them, and the targets there are worked out rather
-	// than recalled: /pools/. is /pools, and /pools/.. removes the pools
-	// segment as well, landing on the API root one level further up.
+	// The two shapes the HTTP route could deliver when this guard was written (the declaration now
+	// refuses them too; these hold the floor for a caller that is not an HTTP request). PathEscape
+	// leaves dots alone; pveproxy would read a pool NAMED "." or "..", but behind a normalising
+	// proxy /pools/. is /pools and /pools/.. is the API root.
 	{"a bare dot", ".", "behind a normalising proxy the \".\" segment disappears, landing the call on the pool COLLECTION"},
 	{"a bare traversal", "..", "behind a normalising proxy it lands one level further up, on the API root — on DELETE, an endpoint the caller never named"},
 	{"a traversal", poolAddressTraversal, "behind a proxy that decodes %2F and normalises, it reaches /api2/json/access/users/root@pam with the cluster's own token"},
@@ -214,17 +168,10 @@ func TestPoolAddressMethods_AcceptWhatPVEMints(t *testing.T) {
 	}
 }
 
-// TestCreateResourcePoolStillTakesANestedID records the asymmetry the guard
-// above deliberately does not close.
-//
-// POST /pools sends the id as a form FIELD, so nothing about it has to survive
-// a path segment: "infra/prod" is a pool PVE will create and the three
-// addressing methods can never reach. Giving the create the same guard would
-// refuse a pool name Proxmox accepts, which is the invented-strictness mistake
-// poolCreateIDParam (internal/api/registry_pools.go) exists to avoid.
-//
-// It is a test rather than a comment because the tempting "make all four
-// consistent" edit is one line and nothing else would fail.
+// TestCreateResourcePoolStillTakesANestedID: POST /pools sends the id as a form field, so
+// "infra/prod" is a pool PVE creates and the addressing methods can never reach; guarding the
+// create would refuse a name Proxmox accepts (see poolCreateIDParam). A test, not a comment,
+// because the tempting "make all four consistent" edit is one line.
 func TestCreateResourcePoolStillTakesANestedID(t *testing.T) {
 	srv, seen := newCaptureServer(t, `{"data":null}`)
 	c := newTestClient(t, srv.URL)

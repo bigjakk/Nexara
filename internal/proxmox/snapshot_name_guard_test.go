@@ -11,37 +11,11 @@ import (
 	"testing"
 )
 
-// Static-analysis guard, in the shape of upid_signature_guard_test.go: no
-// server, no client, just the package's own source.
-//
-// TestCreateSnapshotMethods_RefuseBadNamesBeforeTheWire proves the TWO methods
-// that exist today consult ValidateSnapshotName. This is what covers the third
-// one, written next year by someone who copied CreateVMSnapshot and deleted the
-// part they did not recognise. That is not hypothetical here either: the rule
-// used to live in internal/api/handlers, and both non-handler callers —
-// internal/scheduler and internal/guesttools — were written without it, one of
-// them producing a scheduled snapshot task that failed on every fire.
-//
-// SCOPE, and the boundary is the whole point:
-//
-// It keys on `form.Set("snapname", …)` — a method that PUTS a name into the
-// request body, i.e. one that MINTS a snapshot. It deliberately does NOT key on
-// the path, because DeleteVMSnapshot, RollbackVMSnapshot, DeleteCTSnapshot and
-// RollbackCTSnapshot interpolate a snapshot name into the URL and must stay
-// OUTSIDE this rule. Those address a snapshot Proxmox already minted, and a
-// create-side validator there would strand any snapshot whose name predates
-// this code or came from another tool — the invented-strictness shape, and the
-// reason registry_vms.go declares the addressing side with MaxLength 128 and no
-// two-character minimum. Their own (separate) path-guard gap — the snapshot
-// name is a PATH segment there, so "." and ".." had to be refused even though
-// the create rule must not be — is closed by validatePathSegment and covered by
-// client_guests_snapshot_address_test.go, not by this guard.
-//
-// WHAT IT DOES NOT CATCH, stated rather than implied: it matches the literal
-// `X.Set("snapname", …)` shape, so building the field name from a variable, or
-// posting a raw body with doPostRaw, walks past it. And it proves the validator
-// is CALLED in the same function, not that its error is returned — the wire
-// tests above are what hold that half.
+// Every method that MINTS a snapshot (`form.Set("snapname", …)`) must call
+// ValidateSnapshotName: the scheduler and guesttools were once written without it. Delete
+// and rollback address a snapshot PVE already minted and must stay outside (validatePathSegment
+// and client_guests_snapshot_address_test.go cover them). Not caught: a field name from a
+// variable, a raw doPostRaw body, or a call whose error is dropped (the wire tests hold that).
 const snapshotNameValidator = "ValidateSnapshotName"
 
 // minSnapshotMintingMethods is the count below which this guard has stopped

@@ -35,19 +35,10 @@ func fixtureEndpoint() TargetEndpoint {
 	}
 }
 
-// Guard C-1. TargetEndpoint.APIToken is the target cluster's live, long-lived
-// credential, and every rendering route below is one a person reaches by
-// reflex while debugging: a %v in an error, a slog.Any in a log line, a
-// json.Marshal of the whole params struct. Each is checked separately because
-// each is served by a different method — String, GoString, LogValue and
-// MarshalJSON — and removing any one of them must fail this test on its own
-// shape. GoString is the easy one to forget: fmt dispatches Stringer for
-// %v/%s/%q/%x/%X but GoStringer for %#v.
-//
-// Every case also asserts the host SURVIVES. Without that half, a String()
-// that returned "" — or a MarshalJSON that emitted {} — would satisfy an
-// absence-only assertion while destroying the diagnostics the redaction is
-// supposed to preserve.
+// Guard C-1: TargetEndpoint.APIToken is the target cluster's live credential. Each rendering
+// a debugging reflex reaches (%v, %#v, slog.Any, json.Marshal) is served by its own method
+// (String, GoString, LogValue, MarshalJSON) and checked on its own; %#v is the easy one to
+// forget. Every case also asserts the host survives, or a blank String() would pass.
 func TestGuard_TargetEndpointNeverPrintsItsToken(t *testing.T) {
 	e := fixtureEndpoint()
 

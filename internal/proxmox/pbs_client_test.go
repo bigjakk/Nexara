@@ -269,18 +269,10 @@ func TestNewPBSClient_Validation(t *testing.T) {
 	}
 }
 
-// TestPBSClient_GetDatastoreConfigUsesConfigEndpoint pins which PBS endpoint the
-// datastore config is read from.
-//
-// It used to read /admin/datastore/{store}, which is the API's directory node
-// for that datastore: PBS answers with the list of subdirs below it
-// ([{"subdir":"catalog"},{"subdir":"gc"},…]), an ARRAY. Decoding that into
-// PBSDatastoreConfig failed on "cannot unmarshal array", the handler mapped it
-// to a 500, and the datastore panel in the UI retried it forever while showing
-// nothing. The real configuration lives under /config/datastore/{store}.
-//
-// The fixtures below are the shapes a live PBS 3.x actually returned for the
-// two paths, so this fails again the moment the leading segment goes back.
+// TestPBSClient_GetDatastoreConfigUsesConfigEndpoint: the config is read from
+// /config/datastore/{store}; /admin/datastore/{store} answers its subdir list, which failed to
+// decode into a 500 (see GetDatastoreConfig). The fixtures are what a live PBS 3.x returned
+// for both paths, so this fails again the moment the leading segment goes back.
 func TestPBSClient_GetDatastoreConfigUsesConfigEndpoint(t *testing.T) {
 	const store = "datastore01"
 

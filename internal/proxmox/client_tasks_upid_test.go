@@ -9,61 +9,17 @@ import (
 	"testing"
 )
 
-// These cases guard the three node-task calls at the choke point — the client —
-// rather than at the routes, for the reason validatePBSTaskUPID records for the
-// PBS pair: the route declaration matches the value as it ARRIVES, where an
-// escaped dot carries no dot at all, and a check in one handler is a check the
-// next handler forgets.
-//
-// The traversal is expressible because taskUPID (internal/api/handlers/vms.go)
-// percent-DECODES the :upid path parameter before the client sees it. What
-// reaches GetTaskStatus is the real string "UPID:pve-01:a/../../../status", and
-// url.PathEscape does not defuse it. It leaves "." and ".." alone outright, and
-// it turns each "/" back into "%2F" — which pveproxy decodes into a separator
-// before it routes, though it resolves none of the dots (see
-// validatePathSegment). Behind a proxy that decodes %2F and removes dot
-// segments, where the request lands is the caller's to pick, one level per
-// "..": GetTaskStatus appends "/status", so "A/../.." resolves onto
-// /nodes/{node}/status, while StopNodeTask appends nothing at all and hands the
-// caller the whole tail — "A/../../certificates/custom" resolves onto DELETE
-// /nodes/{node}/certificates/custom. The cases below carry representative
-// traversals rather than one per arithmetic variant; what each asserts is that
-// NOTHING is sent. Both GETs are reachable by anything holding view:task, which
-// the built-in Viewer role holds.
-//
-// Every case drives one of the three EXPORTED methods. Asserting on
-// validateTaskUPID directly would still pass on the day someone drops the call
-// from one of them.
-//
-// Every assertion reads r.RequestURI (newCaptureServer records exactly that),
-// never r.URL.Path. net/http has already decoded Path by the time a handler
-// runs, so "%2F.." and "/.." are indistinguishable there and the entire bug
-// class is invisible.
+// The three node-task calls are guarded at the client, as validatePBSTaskUPID's comment says
+// why: taskUPID decodes :upid, so "UPID:pve-01:a/../../../status" reaches GetTaskStatus, and
+// PathEscape leaves the dots. Behind a normalising proxy the caller picks the target (StopNodeTask
+// appends nothing: DELETE /nodes/{node}/certificates/custom). Each case asserts nothing is sent,
+// through the exported methods, on r.RequestURI (r.URL.Path is already decoded).
 
-// recordedNodeTaskUPIDs is the corpus that must survive the guard unchanged.
-//
-// Half of it is the shapes this repo already pins in its own fixtures
-// (internal/db/migration_084_test.go, internal/api/registry_tasks_test.go);
-// the other half is a shape census of every task_history row on the development
-// database, with node names, realms and token names rewritten to the
-// placeholder scheme. The census is recorded as a PROPERTY and not as a row
-// count on purpose: the count moves every time the collector runs, and a number
-// that rots independently of the sentence it supports teaches readers to
-// distrust the sentence. The property: not one recorded UPID carries a "/", a
-// "\", a control character, or is "." or ".." — which is what makes a blanket
-// separator ban affordable here.
-//
-// It exists so that nobody later "tightens" this into a full-shape UPID regex.
-// PVE mints 8 colon-separated fields and PBS 9; the worker id is legitimately
-// empty (aptupdate), legitimately non-numeric (vzdump:local), legitimately
-// dotted (osd.1, a ceph mgr id), and legitimately carries an "@"; the user half
-// carries a "!" for an API token; and the repo's own task-create route
-// round-trips a value with fewer fields than either. A guard that is too strict
-// fails SILENTLY rather than loudly: reconcileRunningTasks
-// (internal/collector/task_reconcile.go) polls these unattended, swallows the
-// error, and after staleTaskGrace marks the task failed — so an over-tight
-// guard would not surface as a 400, it would surface as good tasks recorded as
-// having vanished.
+// recordedNodeTaskUPIDs must survive the guard unchanged: the repo's own fixtures and a shape
+// census of the dev database's task_history (names rewritten), in which no UPID carries "/",
+// "\", a control character, or is "." or "..". It is here so nobody tightens the guard into a
+// full-shape regex: client_tasks.go records the legitimate shapes, and why too strict a guard
+// fails silently (good tasks recorded as vanished).
 var recordedNodeTaskUPIDs = []struct{ name, upid string }{
 	{"guest start", "UPID:pve-01:001316BE:00B8B463:6A8CE407:qmstart:110:root@pam:"},
 	{"guest shutdown by an API token", "UPID:pve-01:001316BE:00B8B463:6A8CE407:qmshutdown:142:root@pam!nexara:"},
@@ -136,23 +92,11 @@ func TestNodeTaskCallsSendEveryRecordedUPIDUnchanged(t *testing.T) {
 	}
 }
 
-// TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment drives the guard through
-// all three protected methods.
-//
-// Reachability differs by value, and only one of the two paths runs through the
-// task routes. taskUPID (internal/api/handlers/vms.go) 400s anything
-// extractNodeFromUPID cannot read a node out of, which needs at least two
-// colon-separated parts — so of the values below only "the probe value" arrives
-// at this client from a caller holding view:task. The colon-free ones reach it
-// the other way: POST /api/v1/tasks takes an unpatterned upid (manage:task),
-// files the row as running, and reconcileRunningTasks replays it through
-// GetTaskStatus on the next sync tick with the server's own credentials and
-// nobody watching. A guard in either handler would have covered one of those
-// two and not the other, which is the argument for putting it here.
-//
-// The refusal has to wrap ErrInvalidInput: that is what mapProxmoxError turns
-// into a 400, and an unclassified error surfaces as a 500 that reads like a
-// Proxmox outage rather than like the caller's own input.
+// TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment drives all three methods. Only the probe
+// value passes taskUPID (it needs a node to extract); the colon-free ones arrive via POST
+// /api/v1/tasks (manage:task), replayed by reconcileRunningTasks with the server's credentials.
+// A guard in either handler covers one path, hence the client. The refusal wraps
+// ErrInvalidInput, which mapProxmoxError makes a 400, not a 500.
 func TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment(t *testing.T) {
 	const node = "pve-01"
 

@@ -86,18 +86,11 @@ func TestConsoleDial_ConnectStallEndsAtTheBound(t *testing.T) {
 	}
 }
 
-// TestConsole_RefusesABlockedAddress points every way this package connects
-// at 0.0.0.0, an address netguard.DialControlSSRFGuard always blocks, and
-// requires each to be refused by the guard before a packet goes out: the
-// console dials, which connect through consoleDialer, and an API request and
-// a ticket mint, which connect through buildHTTPClient's transport. All of it
-// is guardedDialer, so this is also what shows the two paths share it.
-//
-// Linux connects a dial to the unspecified address to the local host, so a
-// listener on loopback is where an unguarded dial to 0.0.0.0 lands. The twin
-// below shows that it does, which is what makes the listener staying empty
-// mean the guard stopped the dial, rather than that nothing could have
-// arrived.
+// TestConsole_RefusesABlockedAddress: the console dials (consoleDialer) and an API request
+// and a ticket mint (buildHTTPClient) to 0.0.0.0, which netguard always blocks, must each be
+// refused before a packet goes out, showing both paths share guardedDialer. Linux sends a dial
+// to 0.0.0.0 to the local host, so the loopback listener is where an unguarded one lands; the
+// twin below shows that it does, so an empty listener means the guard stopped the dial.
 func TestConsole_RefusesABlockedAddress(t *testing.T) {
 	listener := newStallServer(t)
 	accepted := &listener.accepted

@@ -38,41 +38,20 @@ func fixtureClientConfig() ClientConfig {
 	}
 }
 
-// clientCfgHolder stands in for a struct that holds a ClientConfig as an
-// EXPORTED field. Nothing in the tree does today, and that is exactly why it
-// is here: the redaction has to already work for the first thing that does,
-// which will be written by someone who never reads this file.
-//
-// The live shape in the tree is the other one — internal/rolling's
-// failoverTarget holds a ClientConfig in an UNEXPORTED field, and fmt cannot
-// call a method through one (reflect.Value.CanInterface is false), so %+v and
-// %#v of that outer struct still print the raw fields. That limitation is
-// recorded on the type in client.go, on failoverTarget itself, and in the
-// sweep notes in internal/api/handlers/proxmox_read_credentials_test.go. It is
-// deliberately not asserted here: a case in this file that expects the secret
-// to be PRESENT reads as an endorsement to anyone who greps it later.
+// clientCfgHolder holds a ClientConfig as an EXPORTED field, which nothing in the tree does
+// yet: the redaction must already work for the first thing that does. The unexported-field
+// case (internal/rolling's failoverTarget, where fmt cannot reach the methods) is recorded on
+// the type in client.go and deliberately not asserted here.
 type clientCfgHolder struct {
 	Cluster string       `json:"cluster"`
 	Cfg     ClientConfig `json:"cfg"`
 }
 
-// ClientConfig.TokenSecret is the cluster's live API token secret in
-// plaintext, held between crypto.Decrypt and the Authorization header. Each
-// rendering below is served by a different method — String, GoString,
-// LogValue, MarshalJSON — so removing any one of them fails this test on its
-// own shapes and no other.
-//
-// Every case also asserts that NON-credential values SURVIVE. Without that
-// half, a String() returning "" or a MarshalJSON() returning {} would satisfy
-// every absence assertion while destroying the diagnostics the redaction
-// exists to preserve. All THREE survivors — base URL, token id and
-// fingerprint — are asserted on every case, because a single survivor would
-// let the other two be dropped silently by a redactor that got over-eager.
-//
-// The slog cases assert the GROUPED key (cfg.base_url=...), not merely the
-// value. ClientConfig implements Stringer, so with LogValue deleted slog falls
-// through to String and still does not leak — an absence-only slog assertion
-// would be masked by String, and LogValue could never be killed on its own.
+// ClientConfig.TokenSecret is the live token secret. Each rendering (String, GoString,
+// LogValue, MarshalJSON) is its own case, so removing one fails on its own shapes; every case
+// asserts all three non-secret values (base URL, token id, fingerprint) survive, or a blank
+// redactor would pass. The slog cases assert the grouped key: without LogValue slog falls
+// back to String, which does not leak either, and would mask its loss.
 func TestGuard_ClientConfigNeverPrintsItsTokenSecret(t *testing.T) {
 	cfg := fixtureClientConfig()
 	holder := clientCfgHolder{Cluster: "cluster01", Cfg: cfg}
@@ -225,19 +204,10 @@ func TestGuard_ClientConfigNeverPrintsItsTokenSecret(t *testing.T) {
 // absence assertion is not vacuous.
 func hexOf(s string) string { return fmt.Sprintf("%x", s) }
 
-// Each redactor must be in the method set of the VALUE, not just the pointer.
-// fmt and encoding/json skip a pointer-receiver method on a value they cannot
-// address, and every construction site in the tree builds a ClientConfig
-// literal and passes it by value — so a pointer receiver yields a fix that
-// compiles, lints clean and redacts nothing.
-//
-// This is also what makes deleting a method fail a NAMED test rather than
-// break compilation: NOTHING in this file calls cfg.String(), cfg.GoString(),
-// cfg.LogValue() or cfg.MarshalJSON() directly — every case reaches them the
-// way production does, through fmt, slog or encoding/json. Do not "simplify"
-// a case into a direct call. A direct call turns the mutation that validates
-// this file into a build failure, and a package that does not compile has not
-// been shown to redact anything.
+// Each redactor must be in the VALUE's method set: fmt and encoding/json skip a
+// pointer-receiver method on a value they cannot address, and every site passes a ClientConfig
+// by value. Nothing here calls a redactor directly, so deleting one still compiles and fails
+// a named test; do not "simplify" a case into a direct call.
 func TestClientConfigRedactorsAreInTheValueMethodSet(t *testing.T) {
 	// Deliberately a value assigned to `any`. That is what strips
 	// addressability, which is precisely the condition fmt and encoding/json
@@ -272,20 +242,10 @@ func TestClientConfigRedactorsAreInTheValueMethodSet(t *testing.T) {
 // printf wrapper and check the call sites instead.
 func renderCfgVerb(verb string, v any) string { return fmt.Sprintf(verb, v) }
 
-// clientCfgLogLine renders through a real slog pipeline and returns the
-// emitted line, using the JSON handler when asJSON is set.
-//
-// Both handlers are exercised on purpose, and it is not symmetry for its own
-// sake. For a value that is not itself a LogValuer the two take DIFFERENT
-// routes: TextHandler formats it with %+v, which dispatches String, while
-// JSONHandler MARSHALS it, which dispatches MarshalJSON. Production builds its
-// logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272, the only
-// two handler constructions outside tests), so a Text-only probe does not
-// resemble production — and that is exactly how an earlier hardening in this
-// sweep passed while the JSON path leaked a live token through a wrapper
-// struct. The wrapper cases are the ones that find it: slog.Any on the type
-// ITSELF is safe under both handlers, because LogValue resolves before either
-// route is taken.
+// clientCfgLogLine renders attr through a real slog pipeline, JSON handler when asJSON. Both
+// run because they differ for a value that is not a LogValuer: Text dispatches String, JSON
+// (production's) dispatches MarshalJSON. A Text-only probe once passed while a wrapper struct
+// leaked a live token through the JSON path.
 func clientCfgLogLine(t *testing.T, asJSON bool, attr slog.Attr) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -299,17 +259,7 @@ func clientCfgLogLine(t *testing.T, asJSON bool, attr slog.Attr) string {
 	return buf.String()
 }
 
-// The mirror guard — "redact everything" must not take the credential the
-// client actually authenticates with — is deliberately NOT written here.
-// Re-reading cfg.TokenSecret back out of the struct fixtureClientConfig() just
-// populated asserts nothing: it passes whatever the redactors do, because the
-// redactors do not touch the fields. The property is only real when something
-// authenticates with it, and TestAuthHeaderFormat (client_test.go) and
-// TestTokenAuthRequestsUnchanged (transport_guard_test.go) already pin the
-// exact Authorization header bytes against a live in-process server. If either
-// is ever removed, this note is the record of what it was load-bearing for.
-//
-// There is no PropertyString hazard here either, which is the difference from
-// TargetEndpoint: newAPIClient reads TokenID and TokenSecret as FIELDS and
-// hands them to buildAuthHeader, so no call site can reach the credential —
-// or fail to — through a method fmt would dispatch.
+// No "the client still authenticates" guard here: reading TokenSecret back out of the fixture
+// asserts nothing. TestAuthHeaderFormat and TestTokenAuthRequestsUnchanged pin the exact
+// Authorization bytes against a live server; remove neither. newAPIClient reads TokenID and
+// TokenSecret as fields, so no call site reaches the credential through a method fmt dispatches.

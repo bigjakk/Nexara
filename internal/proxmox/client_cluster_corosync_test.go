@@ -6,22 +6,11 @@ import (
 	"testing"
 )
 
-// PVE serves three paths under /cluster/config and they answer three
-// different things. These tests stand up all three with the shapes PVE
-// really returns, because the shapes are the whole subject:
-//
-//	/cluster/config        a directory index — [{"name": "..."}], no config
-//	/cluster/config/nodes  the corosync nodelist, minus pve_addr/pve_fp
-//	/cluster/config/join   the nodelist WITH those two, plus totem + digest
-//
-// The /nodes fixture is the one worth reading twice. Its published schema
-// declares items as {"node": string} and nothing else, which reads like a
-// bare index — but the handler returns
-// hash_to_array($nodelist, 'node'), and hash_to_array stamps the key onto
-// each entry and pushes the whole entry (pve-common,
-// src/PVE/RESTHandler.pm), so every corosync field comes back too. A
-// fixture built from the schema alone would understate what the old code
-// received and would let a test pass for the wrong reason.
+// PVE's three /cluster/config paths answer three different things, so the fixtures carry the
+// real shapes: /cluster/config is a directory index, /nodes the corosync nodelist without
+// pve_addr/pve_fp, /join the nodelist with them plus totem and digest. /nodes's schema says
+// {"node"} only, but hash_to_array returns whole entries (client_cluster.go), so a
+// schema-built fixture would understate it and let a test pass for the wrong reason.
 
 // corosyncNodelistEntry is one /cluster/config/nodes item: the corosync
 // section's own fields plus the stamped id property.

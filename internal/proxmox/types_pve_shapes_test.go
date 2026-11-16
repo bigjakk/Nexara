@@ -5,19 +5,11 @@ import (
 	"testing"
 )
 
-// The JSON in this file is the shape PVE actually emits, taken from the
-// published API schema (pve-docs/api-viewer/apidoc.js) and, for the SMART
-// attribute rows the schema leaves as an untyped array, from the producer
-// itself: pve-storage's PVE/Diskmanage.pm get_smart_data.
-//
-// Each test here fails against the struct definitions that shipped before
-// it, with these errors verbatim — quoted exactly so a future reader can
-// grep a 500's log line and land back here:
-//
-//	json: cannot unmarshal string into Go struct field DiskSMARTData.attributes.0.id of type int
-//	json: cannot unmarshal number into Go struct field .0.port of type string
-//
-// Both endpoints answered 500 on every call for that reason.
+// The JSON here is what PVE emits (the API schema, and Diskmanage.pm's get_smart_data for the
+// SMART rows the schema leaves untyped). Each test failed against the structs that shipped
+// before it, which answered 500 on every call with, verbatim (grep a log line to land here):
+// 	json: cannot unmarshal string into Go struct field DiskSMARTData.attributes.0.id of type int
+// 	json: cannot unmarshal number into Go struct field .0.port of type string
 
 // TestSMARTAttributeDecodesPVEShape pins the mixed number/string shape of a
 // single ATA attribute row.

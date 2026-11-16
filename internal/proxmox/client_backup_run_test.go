@@ -153,19 +153,10 @@ func runJobCutOff(w http.ResponseWriter) {
 	_ = conn.Close()
 }
 
-// runJobFixture is a job as read_job returns it: jobs.cfg's section with its
-// id injected, and the three property strings parsed into objects by
-// decode_value. The JSON types are the ones PVE sends. A top-level boolean or
-// integer is a number, because SectionConfig's check_value adds 0 to it. Inside
-// a property string every value stays the text parse_property_string read —
-// prune-backups' and performance's counts are strings — except a boolean,
-// which parse_boolean turns into a number: fleecing's enabled.
-// (TestPrintPropertyStringSpellsEveryValue covers a number where PVE sends
-// text.)
-//
-// Every value is distinct, so a value landing under the wrong key cannot pass,
-// and each property string has several keys, so one printed partially or in a
-// different order cannot either.
+// runJobFixture is a job as read_job returns it (jobs.cfg's section, id injected, property
+// strings decoded) with PVE's JSON types: client_backup.go records which are numbers and which
+// stay text. Every value is distinct and each property string has several keys, so a value
+// under the wrong key, or a string printed partially or reordered, cannot pass.
 const runJobFixture = `{
 	"id": "` + runJobID + `",
 	"type": "vzdump",

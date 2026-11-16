@@ -65,27 +65,10 @@ func newHAWireServer(t *testing.T) (*httptest.Server, *[]string) {
 	return srv, &seen
 }
 
-// TestHAGroupAndRuleMethods_RejectPathTraversal is the guard's reason to exist.
-//
-// These five methods build their path by concatenation and hand the id to
-// url.PathEscape, which is not a guard: it escapes "/" to %2F and leaves ".."
-// alone, and pveproxy decodes the escape BEFORE it routes (see
-// validatePathSegment). So an escaped separator is a separator there. The
-// dots are resolved only in front of pveproxy, which takes them literally: a
-// bare "." or ".." by any normalising proxy, the multi-segment payloads only
-// by one that decodes %2F before it removes dot segments. The destinations
-// below are that proxy's.
-//
-// The path arithmetic, counted rather than assumed: the id sits at depth 6 of
-// /api2/json/cluster/ha/{groups,rules}/{id}, so one ".." lands on /cluster/ha,
-// two on /cluster, and THREE on /api2/json — the API root. Four would overshoot
-// it onto /api2, off the JSON API altogether, which is why the payloads below
-// use three.
-//
-// Every id here is refused for a reason that is about shape, not about whether
-// this particular string happens to reach a live endpoint. "Whatever it lands
-// on happens not to take this verb" is a fact about PVE's routing table, not
-// about this code.
+// TestHAGroupAndRuleMethods_RejectPathTraversal: these five methods PathEscape the id, which
+// leaves ".." alone, and pveproxy decodes %2F before routing; a normalising proxy in front
+// resolves the dots. The id is at depth 6, so three ".." land on /api2/json, the API root (four
+// overshoot). Each id is refused for its shape, not for whether it reaches a live endpoint.
 func TestHAGroupAndRuleMethods_RejectPathTraversal(t *testing.T) {
 	payloads := []struct {
 		name string
@@ -140,23 +123,10 @@ func TestHAGroupAndRuleMethods_RejectPathTraversal(t *testing.T) {
 	}
 }
 
-// TestHAGroupAndRuleMethods_AcceptRealIDs is the half that stops the guard from
-// being tightened into something that refuses production data.
-//
-// The rule-shaped entries are the SHAPES of ids read out of the dev database's
-// audit_log (resource_type = 'ha_rule') — every name scrubbed to the repo's
-// placeholder scheme, which is why they look like a lab and not like one. The
-// group-shaped entries come from the repo's own fixtures, because this estate
-// runs a PVE version that migrated HA groups into rules and so has no group
-// names left to read.
-//
-// The long entry is the deliberate one: it is 200 characters, past the route
-// declaration's MaxLength of 128, and it must still be ACCEPTED here. A length
-// cap at this layer would buy no safety — a string of letters, digits, "_" and
-// "-" cannot leave its path segment however long it is — while giving the
-// client a way to refuse a name Proxmox itself imposes no limit on, which is
-// how the rolling orchestrator would lose the ability to re-enable a rule it
-// had disabled.
+// TestHAGroupAndRuleMethods_AcceptRealIDs stops the guard tightening into refusing real ids:
+// rule shapes from the dev database's audit_log (names scrubbed), group shapes from the repo's
+// fixtures (this estate's PVE migrated groups into rules). The 200-character id is past the
+// route's MaxLength of 128 and must be accepted: see client_ha.go on why there is no cap here.
 func TestHAGroupAndRuleMethods_AcceptRealIDs(t *testing.T) {
 	corpus := []struct {
 		name string

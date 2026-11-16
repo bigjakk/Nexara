@@ -114,18 +114,10 @@ func TestValidateSnapshotNameReservedPerKind(t *testing.T) {
 	}
 }
 
-// TestValidateSnapshotNameUnknownKindRefuses covers the third outcome the
-// reserved-name lookup can produce: not "reserved" and not "free", but
-// "this kind has no reserved set recorded".
-//
-// Without it, adding a third guest kind would silently take whichever set
-// the fallback happened to be — the failure mode is a reserved name
-// getting through, and nothing observable would change until Proxmox
-// refused the request.
-//
-// Unreachable through the two Create*Snapshot methods, which each pass a
-// literal — which is the point of siting the rule at the client. The
-// function is still exported, so the state still has to answer for itself.
+// TestValidateSnapshotNameUnknownKindRefuses: the reserved-name lookup has a third outcome, a
+// kind with no reserved set; without this a new guest kind would take whatever the fallback
+// was and let a reserved name through. Unreachable through the Create*Snapshot methods (they
+// pass literals), but the function is exported, so the state must answer for itself.
 func TestValidateSnapshotNameUnknownKindRefuses(t *testing.T) {
 	if _, known := ReservedSnapshotName("", "snap01"); known {
 		t.Error(`ReservedSnapshotName("", …) reported a known kind; the zero value must not resolve to a reserved set`)
@@ -233,20 +225,10 @@ var snapshotCreateMethods = map[string]snapshotCreateMethod{
 	},
 }
 
-// TestCreateSnapshotMethods_RefuseBadNamesBeforeTheWire is the reason the rule
-// moved down here.
-//
-// Two callers built a snapshot name and never passed it through the validator:
-// internal/scheduler decodes snap_name out of a scheduled_tasks.params jsonb
-// blob that no schema describes, and internal/guesttools derives one from an
-// upstream ISO version. The scheduler path was live — a manage:schedule holder
-// could store "current" or 200 characters, and the task then failed on EVERY
-// fire with a raw PVE error in last_error, so a recurring snapshot the operator
-// believed was protecting a guest silently never ran.
-//
-// A validator in each caller would have been the opt-in shape: the third caller
-// skips it. This asserts the refusal happens at the method, which is the one
-// place all of them go through.
+// TestCreateSnapshotMethods_RefuseBadNamesBeforeTheWire: the scheduler (snap_name from an
+// unschema'd jsonb) and guesttools (a name from an ISO version) never validated, and a stored
+// "current" or 200-character name failed on every fire, silently, in last_error. A validator
+// per caller is opt-in; this asserts the refusal at the method all of them go through.
 func TestCreateSnapshotMethods_RefuseBadNamesBeforeTheWire(t *testing.T) {
 	payloads := []struct {
 		name string

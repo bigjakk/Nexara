@@ -26,19 +26,10 @@ func newACMEAccountCaptureServer(t *testing.T) (*httptest.Server, *[]url.Values)
 	return srv, &seen
 }
 
-// TestCreateACMEAccountOmitsAnEmptyName pins the premise the whole
-// empty-name path rests on: an empty Name must reach PVE as NO name at all.
-//
-// PVE's register_account resolves the account name with
-// `extract_param($param, 'name') // 'default'` — defined-or, so it falls back
-// only when the key is ABSENT. Send `name=` instead and the value is defined,
-// fails the pve-configid format (`[a-z][a-z0-9_-]+`) before the body runs, and
-// a request that has always worked starts 400ing.
-//
-// handlers.defaultACMEAccountName documents that dependency in a comment; this
-// is what makes the comment bite. Nothing else asserts it — the handler-side
-// test drives a capture server that records the request TARGET only, never the
-// form body.
+// TestCreateACMEAccountOmitsAnEmptyName: an empty Name must reach PVE as no name at all, since
+// register_account falls back to 'default' only when the key is absent (`// 'default'`); a
+// sent `name=` fails pve-configid and 400s. handlers.defaultACMEAccountName relies on it, and
+// only this test reads the form body.
 func TestCreateACMEAccountOmitsAnEmptyName(t *testing.T) {
 	for _, tt := range []struct {
 		name     string

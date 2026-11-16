@@ -8,26 +8,10 @@ import (
 	"testing"
 )
 
-// Ceph pool create and delete spent their whole lives posting to /ceph/pools —
-// plural. PVE mounts the pool endpoints as a subclass, PVE::API2::Ceph
-// registering PVE::API2::Ceph::Pool at path 'pool', and registers no plural
-// alias; its dispatcher answers an unregistered path with 501 "Method not
-// implemented". So neither operation has ever reached Ceph.
-//
-// The evidence was already in this file's source: GetCephPools reads the
-// singular path and only falls back to plural. The read side had been
-// corrected, the write side never was, and nothing failed because nothing
-// asserted where these requests went.
-//
-// This pins the path and verb of every Ceph call, mutating and reading alike.
-// The reads are here as much as the writes: they are what fixes the subclass
-// names in place (cfg, osd, mds, mgr, mon, fs, pool — all singular), so the
-// next author reaching for a plural has something to fail against.
-//
-// GetCephCrushRules is the one legitimate plural, and is not an exception to
-// that: `rules` is a method registered directly on PVE::API2::Ceph rather than
-// a subclass mount, so the singular/plural rule above simply does not apply to
-// it. Do not "correct" it.
+// Ceph pool create and delete posted to the plural /ceph/pools, which PVE never registered
+// (501), so neither ever reached Ceph and nothing asserted where they went. This pins the path
+// and verb of every Ceph call; the reads fix the subclass names as singular. GetCephCrushRules
+// is the one legitimate plural (see its comment): do not "correct" it.
 func TestCephEndpointRequestPaths(t *testing.T) {
 	const node = "pve-01"
 	base := "/api2/json/nodes/" + node + "/ceph/"
@@ -236,20 +220,10 @@ func TestCephPoolOperationsReturnTheUPID(t *testing.T) {
 	}
 }
 
-// DeleteCephPool puts the pool name in the path, and url.PathEscape does not
-// make that safe on its own: it escapes "/" and leaves ".." untouched. pveproxy
-// would take the segment literally (see validatePathSegment), as the name of
-// the pool to destroy — destroypool declares it a bare string — while a
-// normalising proxy in front of it treats it as a traversal: ".." pops the pool
-// collection too, landing DELETE on /nodes/{node}/ceph, and "." stops a level
-// short, on /ceph/pool.
-//
-// Neither PVE::API2::Ceph nor PVE::API2::Ceph::Pool registers a DELETE at those
-// two levels, so behind such a proxy both 501 rather than doing harm — but the
-// same was true of the three /disks names guarded alongside this one, and
-// "whatever it lands on happens not to take this verb" is a fact about PVE's
-// routing table, not about this code. CreateCephPool needs no equivalent: its
-// name travels in the form body.
+// TestDeleteCephPoolRejectsPathTraversal: the pool name is a path segment and PathEscape leaves
+// ".." alone. pveproxy reads it literally (destroypool takes a bare string), but behind a
+// normalising proxy ".." lands DELETE on /nodes/{node}/ceph. PVE has no DELETE there (501),
+// but that is PVE's routing table, not this code. CreateCephPool sends its name in the body.
 func TestDeleteCephPoolRejectsPathTraversal(t *testing.T) {
 	const node = "pve-01"
 

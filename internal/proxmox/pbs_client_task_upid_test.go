@@ -11,20 +11,11 @@ import (
 	"testing"
 )
 
-// These cases guard PBSClient's two task reads at the choke point, which is
-// where the guard has to be rather than at the route.
-//
-// The API layer percent-decodes the :upid path parameter before it gets here
-// (pbsTaskUPIDFromParams in internal/api/handlers/backup.go), and that decode is
-// what puts a real "/" or ".." into the value at all: "A%2F..%2F..%2Fstatus"
-// arrives at the handler as text, and leaves it as the real string
-// "A/../../status". PBS itself would not traverse on it — the guard's doc
-// comment records why — so what these cases pin is that a value no PBS minted
-// gets a clear local 400, and that a value PBS DID mint is never refused.
-// Asserting through GetTaskLog/GetTaskStatus rather than on validatePBSTaskUPID
-// directly is deliberate — a validator with one caller is a validator the next
-// caller will forget, and only a test that goes through the protected function
-// notices when the call is dropped.
+// PBSClient's two task reads are guarded at the choke point: the API layer decodes :upid
+// (pbsTaskUPIDFromParams), which is what makes "A%2F..%2F.." a real "A/../..". PBS would not
+// traverse on it (see the guard's comment), so these pin a clear local 400 for a value no PBS
+// minted and no refusal of one PBS did, through GetTaskLog and GetTaskStatus rather than the
+// validator, so a caller that drops the call is noticed.
 
 // pbsUPIDWire records the raw request target of every call that reaches the
 // stand-in PBS server, and answers each with an envelope the client can decode.
@@ -158,17 +149,10 @@ func TestPBSClientTaskReadsSendTheUPIDTheCallerGave(t *testing.T) {
 	})
 }
 
-// TestPBSClientTaskReadsRefuseAPathThatIsNotOneSegment drives the guard through
-// both protected functions.
-//
-// Every value here is what the handler would hand over once it has decoded the
-// wire form. The ones that begin with a letter are reachable through the route
-// from a caller holding only view:backup; the rest are refused by the route's
-// pattern first and are here to pin the client guard on its own, since it is
-// the choke point for any caller. The refusal must carry ErrInvalidInput,
-// because that is what mapProxmoxError
-// turns into a 400 — an unclassified error would surface as a 500 and read as a
-// PBS outage rather than as the caller's own input.
+// TestPBSClientTaskReadsRefuseAPathThatIsNotOneSegment drives the guard through both
+// protected functions with decoded values: those starting with a letter pass the route's
+// pattern (a view:backup caller reaches them), the rest pin the client guard on its own. The
+// refusal must carry ErrInvalidInput, which mapProxmoxError makes a 400, not a 500.
 func TestPBSClientTaskReadsRefuseAPathThatIsNotOneSegment(t *testing.T) {
 	values := map[string]string{
 		"empty":                  "",

@@ -70,26 +70,11 @@ type constructorExemption struct {
 	reason string
 }
 
-// transportConstructorExempt names the functions allowed to build a guarded
-// type, and which ones. Everything else in this package must get its
-// connections through them.
-//
-// buildHTTPClient is the sole owner of TLS fingerprint pinning (with session
-// tickets disabled) and redirect refusal, and guardedDialer of the SSRF dial
-// guard. A second constructor anywhere in this package silently forks that
-// hardening: the next person to tighten one copy has no way to know the other
-// exists, and the forked client is the one that talks to a user-supplied URL.
-//
-// doMultipart is exempt because it does NOT build a fresh transport — it
-// Clone()s the hardened one to widen the write buffer for uploads, so it
-// inherits every setting by construction. It still needs its own http.Client
-// to drop the request timeout for long uploads, and it re-applies
-// refuseRedirect explicitly.
-//
-// consoleDialer builds the console's websocket dialer, which no http.Client
-// can stand in for; it connects through guardedDialer and reuses the
-// tls.Config buildHTTPClient built. An exemption covers only the types it
-// names, so consoleDialer building a net.Dialer of its own is still a fork.
+// transportConstructorExempt names who may build a guarded type, and which: buildHTTPClient
+// owns fingerprint pinning and redirect refusal, guardedDialer the SSRF dial guard, and a
+// second constructor silently forks that hardening. doMultipart Clone()s the hardened
+// transport (own client for the upload timeout, refuseRedirect re-applied); consoleDialer
+// reuses guardedDialer and the tls.Config. An exemption covers only the types it names.
 var transportConstructorExempt = map[string]constructorExemption{
 	"buildHTTPClient": {[]string{"net/http.Transport", "net/http.Client"}, "sole owner of the hardened transport"},
 	"doMultipart":     {[]string{"net/http.Client"}, "clones the hardened transport; own client only to drop the upload timeout"},
@@ -105,21 +90,11 @@ type guardMention struct {
 	pos  token.Position
 }
 
-// guardedMentions returns everything in files the guard judges:
-//
-//   - a construction of a guarded type: a composite literal, new(T), or a
-//     declared variable of the type itself — a pointer variable, a type
-//     assertion or a parameter type builds nothing and is not one;
-//   - a type declaration, at package level or in a function, that holds a
-//     guarded type by value — an alias, a defined type, an embedded or plain
-//     field — because a literal of it builds the guarded type under a name
-//     the construction rule cannot see. A pointer, a function type or an
-//     interface holds nothing, so those are skipped;
-//   - any use of a guarded value or function.
-//
-// Selectors are resolved through each file's imports by path, so an aliased
-// import cannot hide a mention. It reads syntax, not types: a guarded value
-// reached through a variable or a function that returns one is not seen.
+// guardedMentions returns what the guard judges: a construction of a guarded type (literal,
+// new(T), a variable of the type itself), a type declaration holding one by value (alias,
+// defined type, embedded or plain field), and any use of a guarded value or function.
+// Selectors resolve through imports by path, so an alias cannot hide one; it reads syntax,
+// not types, so a guarded value reached through a variable or a return is not seen.
 func guardedMentions(fset *token.FileSet, files []*ast.File) []guardMention {
 	var found []guardMention
 	for _, file := range files {

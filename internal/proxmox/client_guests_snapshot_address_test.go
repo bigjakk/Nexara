@@ -9,29 +9,11 @@ import (
 	"testing"
 )
 
-// These cases guard the four methods that ADDRESS an existing snapshot —
-// DeleteVMSnapshot, RollbackVMSnapshot, DeleteCTSnapshot, RollbackCTSnapshot —
-// each of which interpolates a caller-supplied name into the request path.
-//
-// Until this change the only thing constraining that name was snapshotNameParam
-// in internal/api/registry_vms.go, i.e. a check in the CALLER: the methods
-// themselves carried `if snapname == ""` and nothing else. That is the opt-in
-// shape, and the rest of this client's path-segment guards were moved to the
-// choke point for exactly this reason (commit 3e757d3 for task ids, 7f4d2ca for
-// HA ids, 82d24d8 for node names).
-//
-// Two halves, and the second is load-bearing. The refusal half alone is
-// satisfiable by refusing everything, which here would be a REGRESSION and not
-// merely a weak test: the addressing side is declared looser than the create
-// side on purpose (MaxLength 128, no two-character minimum) so Nexara can still
-// delete a snapshot Proxmox or a human at the PVE console minted outside
-// Nexara's create rule. Tightening these four to ValidateSnapshotName is how an
-// object becomes undeletable.
-//
-// Every assertion reads r.RequestURI — newCaptureServer records exactly that —
-// and never r.URL.Path. net/http has already decoded Path by the time the
-// handler runs, which makes "%2F.." and "/.." indistinguishable there and hides
-// this whole bug class.
+// These guard the four methods that address an existing snapshot (Delete and Rollback, VM and
+// CT), which put a caller's name in the path and once checked only `snapname == ""`. The
+// accepting half is load-bearing: addressing is declared looser than create (MaxLength 128, no
+// two-character minimum) so a snapshot minted outside Nexara stays deletable. Assertions read
+// r.RequestURI; r.URL.Path is already decoded.
 
 const (
 	snapshotAddressNode = "pve-01"
@@ -39,27 +21,10 @@ const (
 	snapshotAddressCTID = 101
 )
 
-// snapshotAddressTraversal pops from the snapshot slot back to the API root —
-// behind a proxy that decodes the %2F url.PathEscape writes into it and then
-// removes dot segments. pveproxy itself decodes the %2F but removes no dot
-// segment (see validatePathSegment), so there the first ".." is the snapshot
-// name and nothing below it routes anywhere.
-//
-// The arithmetic, because an unexplained count is worse than none: the target
-// these methods build is /api2/json/nodes/{node}/{qemu|lxc}/{vmid}/snapshot/{name},
-// so the directory containing the name is /api2/json/nodes/pve-01/qemu/100/snapshot
-// — five segments below /api2/json. Five ".." therefore lands on
-// /api2/json/access/users/root@pam, which is a real endpoint and is the point:
-// a sixth would over-pop past /api2/json and reach nothing. The qemu and lxc
-// forms are the same depth, so one constant serves all four methods.
-//
-// That landing target is exact for the two DELETEs, where the name is the last
-// segment. The two rollbacks append "/rollback" after it, so the same payload
-// resolves to /api2/json/access/users/root@pam/rollback — not an endpoint. The
-// depth arithmetic is what the constant shares; the target is not. Said
-// explicitly because deriving the target from the payload and getting a
-// different answer than the author did is the exact defect the HA payload next
-// door was corrected for.
+// snapshotAddressTraversal pops from the snapshot slot behind a proxy that decodes %2F and
+// removes dot segments (pveproxy does not). The name sits five below /api2/json (qemu and lxc
+// alike), so five ".." land the DELETEs on /api2/json/access/users/root@pam, a real endpoint;
+// the rollbacks append "/rollback" and land on nothing. The depth is shared, not the target.
 const snapshotAddressTraversal = "../../../../../access/users/root@pam"
 
 // snapshotAddressMethod is one of the four. wire builds the exact request
@@ -205,17 +170,10 @@ func TestSnapshotAddressMethods_RefuseBeforeTheWire(t *testing.T) {
 	}
 }
 
-// acceptedSnapshotAddressNames is the half without which the test above is
-// vacuous, and it is also the ratchet against re-tightening.
-//
-// Every entry but the first is a name ValidateSnapshotName REFUSES. That is the
-// point: these four address a snapshot that already exists, so the client is
-// not the layer that decides whether its name was well-formed. PVE's own delete
-// and rollback do re-check snapname against pve-snapshot-name and will answer
-// for themselves — a second refusal here would only replace upstream's clear
-// error with our vaguer one, and for anything Proxmox does accept it would
-// strand the object. registry_vms.go's snapshotNameParam records the same
-// decision at the declaration (MaxLength 128, no two-character minimum).
+// acceptedSnapshotAddressNames keeps the test above from passing vacuously and ratchets against
+// re-tightening: every entry but the first is a name ValidateSnapshotName refuses. PVE's delete
+// and rollback check snapname themselves; refusing here would only hide upstream's clear error,
+// or strand a snapshot PVE accepts (snapshotNameParam records the same decision).
 var acceptedSnapshotAddressNames = []struct{ name, snap, why string }{
 	{"the ordinary form", "snap01", "a plain pve-configid"},
 	{"a single character", "x", "$CONFIGID_RE needs two; the addressing side drops the minimum"},
@@ -271,21 +229,11 @@ func TestSnapshotAddressMethods_AcceptWhatTheCreateRuleRefuses(t *testing.T) {
 	}
 }
 
-// TestSnapshotAddressPercentIsDoubleEscaped is the one golden literal in this
-// file, and it exists because the expectations above are built with the same
-// url.PathEscape the production code uses — which pins "escaped once" but would
-// follow an encoder swap without complaining.
-//
-// "%" is deliberately absent from these guards, unlike in validateVolumeID, and
-// this is the assertion that makes that safe rather than merely asserted. A
-// volume id is interpolated RAW, so "%2e%2e%2f" reaches Proxmox byte-for-byte —
-// the capture-server run recorded on forbiddenVolumeIDChars (client_storage.go)
-// — and pveproxy decodes it to "../" (uri_unescape, before it routes; see
-// validatePathSegment). A snapshot name goes through url.PathEscape, which
-// re-encodes the percent to %25, so the same payload arrives as the literal
-// nine-character name the caller meant. If this ever
-// prints "%2e%2e%2f" rather than "%252e%252e%252f", the escape has been dropped
-// and "%" has to go back into a refusal list.
+// TestSnapshotAddressPercentIsDoubleEscaped is this file's one golden literal: the cases above
+// build expectations with the production url.PathEscape, so they would follow an encoder swap.
+// "%" is absent from these guards (unlike validateVolumeID) only because the name is escaped:
+// pveproxy decodes "%2e%2e%2f" to "../" before routing. If this prints "%2e%2e%2f" rather than
+// "%252e%252e%252f", the escape is gone and "%" must go back into a refusal list.
 func TestSnapshotAddressPercentIsDoubleEscaped(t *testing.T) {
 	const payload = "%2e%2e%2f"
 	const want = "/api2/json/nodes/pve-01/qemu/100/snapshot/%252e%252e%252f"

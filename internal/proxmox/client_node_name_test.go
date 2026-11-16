@@ -8,38 +8,11 @@ import (
 	"testing"
 )
 
-// These cases guard the node half of a Proxmox request path, which is the
-// half validateNodeName was NOT guarding until it was changed to delegate to
-// validatePathSegment.
-//
-// The rule it carried before refused "", any "/", and ".." as a SUBSTRING,
-// which let three things through: a bare "." (a segment a normalising proxy
-// removes, so there /nodes/./tasks/{upid}/status resolves onto
-// /nodes/tasks/{upid}/status; pveproxy itself reads it as a node named "." —
-// see validatePathSegment), a backslash, and every control character. It also
-// refused "pve..01", a name the node-name format itself accepts, with an error
-// that did not wrap ErrInvalidInput and so surfaced as a 500.
-//
-// The reachable path is the one taskUPID (internal/api/handlers/vms.go) opens:
-// it percent-DECODES the :upid parameter and hands colon-field 1 to the client
-// as the node, so "UPID:.:0:0:0:x::root@pam:" names the node ".". The UPID
-// guard cannot see it — that string holds no separator at all — and the two
-// GET task routes are gated on view:task, which the built-in Viewer role
-// holds. POST /api/v1/tasks is the second way in: reconcileRunningTasks
-// (internal/collector/task_reconcile.go) replays its stored "node" through
-// GetTaskStatus unattended. That route carried no pattern when this was
-// written and now carries node-name-or-empty, which closes the route but not
-// the method — the collector, the scheduler and five other packages reach
-// these methods with no declaration in between.
-//
-// Every case drives an EXPORTED method rather than the validator. Asserting on
-// validateNodeName directly would still pass on the day someone drops the call
-// from one of its 144 sites.
-//
-// Every assertion reads r.RequestURI (newCaptureServer records exactly that),
-// never r.URL.Path. net/http has already decoded Path by the time a handler
-// runs, so "%2F.." and "/.." are indistinguishable there and the whole bug
-// class is invisible.
+// validateNodeName now delegates to validatePathSegment; its old rule let "." through (behind a
+// normalising proxy /nodes/./tasks/… resolves elsewhere), plus backslashes and control bytes,
+// and refused "pve..01" with a 500 (client.go records why). Reachable via taskUPID's decoded
+// "UPID:.:0:…", and via POST /api/v1/tasks replayed by the collector. Cases drive exported
+// methods, not the validator, and read r.RequestURI (r.URL.Path is already decoded).
 
 // validNodeTaskUPID is a UPID the UPID guard accepts, so that in the
 // two-argument calls below only the NODE guard can be the thing that refuses.
@@ -81,20 +54,10 @@ var refusedNodeNames = []struct{ name, node string }{
 	{"an absolute path", "/cluster/log"},
 }
 
-// TestNodeNameRefusalsReachTheWireAsNothing drives the guard through three
-// exported methods, chosen for where the node sits in the path each builds.
-//
-// GetNodeStatus puts the node second-to-last, so behind a normalising proxy a
-// "." keeps the request inside /nodes — /nodes/./status is the node named
-// "status" — while a ".." takes it out, onto /status. GetTaskStatus passes a
-// VALID UPID alongside, so only the node guard can refuse. StopNodeTask is the
-// DELETE, and it appends nothing after the UPID — the caller owns the whole
-// tail there, which makes it the worst of the three.
-//
-// The refusal has to wrap ErrInvalidInput: mapProxmoxError
-// (internal/api/handlers/proxmox_error.go) turns that into a 400 and anything
-// else into a 500 that reads like a Proxmox outage rather than like the
-// caller's own input.
+// TestNodeNameRefusalsReachTheWireAsNothing drives three methods chosen for where the node sits:
+// GetNodeStatus (a "." stays inside /nodes, a ".." leaves it), GetTaskStatus with a valid UPID
+// (so only the node guard can refuse), and StopNodeTask, the DELETE whose tail the caller owns.
+// The refusal wraps ErrInvalidInput, which mapProxmoxError makes a 400, not a 500.
 func TestNodeNameRefusalsReachTheWireAsNothing(t *testing.T) {
 	for _, tc := range refusedNodeNames {
 		// url.PathEscape in the subtest name: a control byte in a test name
@@ -186,41 +149,11 @@ func TestNodeNameAcceptCorpusStillReachesProxmoxUnchanged(t *testing.T) {
 	}
 }
 
-// TestPathGuardFamilyShareTheirCoreRefusals holds this client's path-segment
-// guards to the refusals they all have to make.
-//
-// validateNodeName is why this table exists. It was a member of the family by
-// position — same call shape, same job, same file even — and not by rule, and
-// nothing in the tree compared the two until a reader happened to. A table
-// that names the members is a table that fails when the next one drifts.
-//
-// Every CHARACTER probe is derived by injecting into that member's own
-// baseline, which is the only way those rows mean anything. Written as
-// standalone strings they pass for the wrong reason and the test goes quietly
-// vacuous: `a\b` is refused by validateVolumeID for having no colon in it, not
-// for the backslash. Injecting into a value the member ACCEPTS isolates the
-// character.
-//
-// The three WHOLE-VALUE probes — "", "." and ".." — are necessarily absolute,
-// and several members do refuse them on a rule other than the one being
-// probed: validateHAResourceID answers "should be a VMID", validateVolumeID
-// answers "is not in \"storage:name\" form". That is tolerated rather than
-// hidden. The property those rows carry is the weaker "no member accepts a
-// bare traversal", which is still worth pinning; they are not evidence that a
-// member has a dot-segment rule of its own.
-//
-// The baseline itself is asserted as accepted on every row. Without that a
-// member replaced by a blanket refusal would pass the whole table.
-//
-// The snapshot-addressing guard is deliberately NOT a row here, and that was
-// weighed rather than overlooked. The four methods in client_guests.go call
-// validatePathSegment("snapshot name", …) directly, so the row would re-enter
-// the validatePathSegment row above under a different kind label — the same
-// function, unable to drift independently of it, which is the vacuity this
-// table's own doc warns against. The risk that does exist there is a CALL SITE
-// one — someone swapping those four for the create rule, which the table
-// cannot see — and client_guests_snapshot_address_test.go covers it by driving
-// the exported methods and asserting both halves.
+// TestPathGuardFamilyShareTheirCoreRefusals holds the path-segment guards to the refusals they
+// all make (validateNodeName once drifted unnoticed). Character probes are injected into each
+// member's accepted baseline, which is asserted accepted, so a refusal is for the character
+// and a blanket refusal cannot pass; "", "." and ".." only show no member accepts them. The
+// snapshot-addressing guard is validatePathSegment itself: client_guests_snapshot_address_test.go.
 func TestPathGuardFamilyShareTheirCoreRefusals(t *testing.T) {
 	family := []struct {
 		name     string

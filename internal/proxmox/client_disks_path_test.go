@@ -131,22 +131,11 @@ func TestGetDiskSMARTUsesTheSmartPath(t *testing.T) {
 	}
 }
 
-// The pool/VG/thin-pool name lands in the path as its own segment, and until
-// now it reached url.PathEscape with nothing else in front of it. That is the
-// case validatePathSegment's own doc comment calls out as insufficient: escaping
-// a path segment escapes "/", and leaves ".." exactly as it found it. pveproxy
-// would read the segment literally, as a name pve-storage-id refuses (see
-// validatePathSegment), but behind a normalising proxy it is a traversal: ".."
-// pops the collection along with the name, so DELETE
-// /nodes/{node}/disks/zfs/.. arrives at /nodes/{node}/disks, and "." lands it
-// on /nodes/{node}/disks/zfs.
-//
-// Nothing was exploitable even there — PVE registers no DELETE at either
-// level, so both 501 — but "whatever it lands on happens not to take this verb"
-// is a property of PVE's routing table, not of this code, and it
-// is not the kind of thing that should be load-bearing. The guard is the fix;
-// this pins it, including the part that matters most: the request is refused
-// before it is sent, not after.
+// TestDiskPoolNamesRejectPathTraversal: a pool, VG or thin-pool name is its own path segment,
+// and PathEscape leaves ".." alone. pveproxy reads it literally, but behind a normalising
+// proxy DELETE /nodes/{node}/disks/zfs/.. lands on /nodes/{node}/disks. PVE has no DELETE
+// there (501), but that is PVE's routing table, not this code: the guard refuses before
+// anything is sent.
 func TestDiskPoolNamesRejectPathTraversal(t *testing.T) {
 	const node = "pve-01"
 

@@ -11,35 +11,11 @@ import (
 	"testing"
 )
 
-// This is the counterpart to tracktask_guard_test.go over in internal/api/
-// handlers, and it exists to close that guard's blind spot.
-//
-// The handlers guard starts from returnsStringError: it finds every *Client
-// method declared `(string, error)`, forces someone to classify it, and forces
-// the handler to TrackTask it. That enforces "if you have a UPID, track it" —
-// but a method that SHOULD surface a UPID and declares plain `error` is
-// invisible to it. There is nothing to classify, so nothing to track, and the
-// handler falls back to AuditLog and reports success the instant the worker is
-// queued. CreateCephPool and DeleteCephPool sat in exactly that hole: they
-// passed nil as the response destination, threw both UPIDs away, and no guard
-// on either side of the boundary had anything to say about it.
-//
-// So this one starts from the other end — the endpoint. PVE's dispatcher is the
-// authority on which paths fork a worker, and that fact cannot be derived from
-// Go, so it is recorded below by hand. What the test then enforces mechanically
-// is the part that does drift: that a mutating request to one of those paths is
-// written by a method that returns the UPID rather than discarding it.
-//
-// For an endpoint on the list below, the two guards then close the loop:
-//
-//	this test:      hits a worker endpoint  ⇒  must return (string, error)
-//	handlers guard: returns (string, error) ⇒  must be classified, and if it is
-//	                                           a UPID method, TrackTask'd
-//
-// Only for an endpoint on the list, though. This cannot catch the FIRST
-// instance of the bug class at an unlisted path, because adding the entry
-// requires already knowing the endpoint forks a worker — the very knowledge
-// whose absence causes the bug. It is a regression guard, not a discovery tool.
+// The counterpart of handlers' tracktask_guard_test.go, for its blind spot: a method that
+// should return a UPID but declares plain `error` (CreateCephPool and DeleteCephPool threw
+// theirs away). Which PVE paths fork a worker cannot be derived from Go, so it is listed below
+// by hand, and a mutating request to a listed path must return (string, error). A regression
+// guard, not a discovery tool: it cannot catch the first instance at an unlisted path.
 
 // everyMutatingVerb lists the apiClient helpers that issue a state-changing
 // request, and is the `verbs` value for the common path where all mutation
