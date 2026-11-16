@@ -171,19 +171,38 @@ func (e endedSessions) IsConsoleCredentialLive(_ context.Context, arg db.IsConso
 
 // TestAPIKeyLookupIsBounded: anyone can send a bearer that starts nxra_, and the
 // /auth/ paths skip the general limiter, so a key lookup that never answers must end
-// at its deadline with the usual 401, not hold the request (and a pool connection).
+// at its deadline, not hold the request (and a pool connection). It ends as a 503: a
+// lookup that could not answer must not tell a client with a good key that it is bad.
+// Only a key the lookup does not find is a 401.
 func TestAPIKeyLookupIsBounded(t *testing.T) {
 	t.Parallel()
-	fake, _, apiKey := newChainDB(t)
-	fake.keyStalls = true
-	srv := &Server{queries: db.New(fake), jwtService: auth.NewJWTService("key-bound-test-secret", 15*time.Minute, time.Hour),
-		apiKeyLookupTimeout: 50 * time.Millisecond}
-	app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
-	app.Get("/api/v1/auth/me", srv.authRequired(), func(c fiber.Ctx) error { return c.SendStatus(fiber.StatusNoContent) })
-	req := authedRequest(fiber.MethodGet, "/api/v1/auth/me")
-	req.Header.Set(fiber.HeaderAuthorization, "Bearer "+apiKey)
-	status, _, body := sendFull(t, app, req)
-	if status != http.StatusUnauthorized || !strings.Contains(string(body), "Invalid or expired API key") {
-		t.Errorf("status = %d (%s), want 401 Invalid or expired API key", status, body)
+	for _, tc := range []struct {
+		name    string
+		stalls  bool
+		bearer  string // "" is the fixture's own key
+		status  int
+		message string
+	}{
+		{"a lookup that never answers", true, "", http.StatusServiceUnavailable, apiKeyUncheckedMessage},
+		{"a key that is not found", false, "nxra_" + strings.Repeat("u", 43), http.StatusUnauthorized, "Invalid or expired API key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake, _, apiKey := newChainDB(t)
+			fake.keyStalls = tc.stalls
+			if tc.bearer != "" {
+				apiKey = tc.bearer
+			}
+			srv := &Server{queries: db.New(fake), jwtService: auth.NewJWTService("key-bound-test-secret", 15*time.Minute, time.Hour),
+				apiKeyLookupTimeout: 50 * time.Millisecond}
+			app := fiber.New(fiber.Config{ErrorHandler: errorHandler})
+			app.Get("/api/v1/auth/me", srv.authRequired(), func(c fiber.Ctx) error { return c.SendStatus(fiber.StatusNoContent) })
+			req := authedRequest(fiber.MethodGet, "/api/v1/auth/me")
+			req.Header.Set(fiber.HeaderAuthorization, "Bearer "+apiKey)
+			status, _, body := sendFull(t, app, req)
+			if status != tc.status || !strings.Contains(string(body), tc.message) {
+				t.Errorf("status = %d (%s), want %d %s", status, body, tc.status, tc.message)
+			}
+		})
 	}
 }

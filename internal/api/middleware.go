@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	casestrings "github.com/gofiber/utils/v2/strings"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/api/handlers"
@@ -1249,8 +1251,13 @@ func (s *Server) authOptional() fiber.Handler {
 
 		// API key tokens start with "nxra_".
 		if strings.HasPrefix(token, "nxra_") {
-			// Best-effort: if API key auth fails, continue unauthenticated.
+			// Best-effort: a key that is refused continues unauthenticated. A lookup
+			// that could not answer is not a refusal, and is answered as such.
 			if err := s.authenticateAPIKey(c, token); err != nil {
+				var fe *fiber.Error
+				if errors.As(err, &fe) && fe.Code == fiber.StatusServiceUnavailable {
+					return err
+				}
 				return c.Next()
 			}
 			return c.Next()
@@ -1285,6 +1292,9 @@ func extractBearerToken(c fiber.Ctx) string {
 	return auth.BearerToken(c.Get("Authorization"))
 }
 
+// apiKeyUncheckedMessage is the 503 of an API key whose lookup could not answer.
+const apiKeyUncheckedMessage = "The API key could not be checked right now; try again shortly."
+
 // defaultAPIKeyLookupTimeout bounds authenticateAPIKey's lookup: handlers' authDBTimeout.
 const defaultAPIKeyLookupTimeout = 15 * time.Second
 
@@ -1308,7 +1318,14 @@ func (s *Server) authenticateAPIKey(c fiber.Ctx, token string) error {
 	row, err := s.queries.GetAPIKeyByHash(ctx, keyHash)
 	cancel()
 	if err != nil {
-		return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired API key")
+		// GetAPIKeyByHash filters revoked and expired keys, so no row is the only
+		// answer that says the key is bad. Anything else is a lookup that could not
+		// answer, and a client holding a good key must not be told to discard it.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fiber.NewError(fiber.StatusUnauthorized, "Invalid or expired API key")
+		}
+		slog.Warn("API key lookup failed; the key was neither accepted nor refused", "error", err)
+		return fiber.NewError(fiber.StatusServiceUnavailable, apiKeyUncheckedMessage)
 	}
 	if !row.UserIsActive {
 		return fiber.NewError(fiber.StatusUnauthorized, "User account is inactive")

@@ -412,7 +412,8 @@ remedies, which admit a session that has ended: `POST /auth/logout`,
 `POST /auth/logout-all`, `DELETE /auth/sessions/:id` and
 `POST /auth/change-password` (see below). An API key is checked on every request
 too: a revoked or expired key, or one whose owner is deactivated, is refused with
-`401` at once.
+`401` at once, and a key whose lookup could not answer is `503`, never `401`, so a
+client holding a good key can retry it.
 
 ### Interactive-Only Routes
 
