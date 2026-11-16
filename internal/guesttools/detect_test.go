@@ -256,18 +256,10 @@ func TestGuestUpdateResultSucceeded(t *testing.T) {
 	}
 }
 
-// A guest that updates successfully must remain eligible for the NEXT release.
-// Blocking on any non-idle stage silently retired a guest after its first
-// successful update, and parked a guest permanently on one transient failure.
-//
-// The restore retry sweep leans on the same split from the other side: it looks
-// for terminal rows that still name a drive, so terminal and "still holds a
-// prior_cdrom_key" have to be able to coexist — and an in-flight row must stay
-// out of the sweep, or a restore would race a running install for the same
-// drive. That is only half of it: this mirrors the sweep's SQL predicate rather
-// than being it, and cannot catch a caller that clears prior_cdrom_key on the
-// way to a terminal stage, since the row then never reaches the sweep at all.
-// TestNoPathClaimsARestoreItDidNotPerform covers that half.
+// A guest that updates must stay eligible for the next release: blocking on any non-idle stage
+// retired it after one update, or parked it for good on one failure. The restore sweep needs
+// terminal rows that still name a drive and must skip in-flight ones; this mirrors its SQL
+// predicate, and TestNoPathClaimsARestoreItDidNotPerform covers a path clearing the key early.
 func TestIsInFlightStage(t *testing.T) {
 	inFlight := []string{"staging", "staged", "running"}
 	terminal := []string{"idle", "succeeded", "failed", ""}
@@ -571,29 +563,10 @@ func TestRestoreActionAlwaysRemovesTheISO(t *testing.T) {
 	}
 }
 
-// A finished update must not forget which drive to put back until it HAS been
-// put back. Clearing unconditionally stranded the virtio-win ISO on the guest
-// forever after one transient Proxmox error: the row goes terminal, the
-// in-flight sweep never revisits it, and the record is gone.
-// CdromRestored tells FinishGuestToolsUpdate whether the borrowed drive has
-// actually been put back; a true CLEARS prior_cdrom_key, and
-// ListGuestToolsPendingCDROMRestore selects on that column being non-empty. So a
-// path that claims a restore it never performed does not just mislabel the row —
-// it deletes the record the retry sweep needs, and the virtio-win ISO stays
-// mounted on the guest for good, re-pinned against pruning.
-//
-// markFailed did exactly that. It is reached from a staging error and from an
-// expiry, neither of which touches the guest, and it passed true.
-//
-// A literal true is therefore always wrong here: the two paths that really do
-// restore (finishCancel, reconcileOne) pass a variable tracking what happened.
-//
-// Parsed rather than string-matched, and that distinction is not pedantry — the
-// first version of this test searched for "CdromRestored: true" with one space,
-// while gofmt aligns the two multi-line literals with two, so it silently
-// covered only one of the three call sites. It passed a reintroduction check
-// purely because the bug was reinstated at the site that happened to match.
-// Following the AST precedent in internal/api/handlers/tracktask_guard_test.go.
+// TestNoPathClaimsARestoreItDidNotPerform: CdromRestored true clears prior_cdrom_key, the record
+// the retry sweep needs, so the ISO stays mounted for good (markFailed once did this; see it).
+// Only finishCancel and reconcileOne really restore, with a variable, so a literal true is always
+// wrong. Parsed, not string-matched: gofmt's alignment once hid two of three call sites.
 func TestNoPathClaimsARestoreItDidNotPerform(t *testing.T) {
 	// Every non-test file in the package, so a fourth call site added later is
 	// covered on the day it appears rather than the day someone remembers.

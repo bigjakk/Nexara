@@ -39,24 +39,11 @@ func claimsExpiring(user uuid.UUID, exp time.Time) Claims {
 	}
 }
 
-// TestAccessTokenIsSomeoneElses pins what AccessTokenIsSomeoneElses will say and,
-// as much, what it will not.
-//
-// It exists for one refusal — a sign-out whose access token authOptional named no
-// one from must still be held to "this session is yours" — so it answers true for
-// exactly one kind of token: a regular access token this service signed, issued to
-// someone other than the user asked about. Time is not part of it: the token may be
-// live, expired or not yet valid, because the refusal does not care why authOptional
-// left it unnamed. Every row that answers false is a way of getting a refusal out of
-// a string the server never vouched for, or out of a token that is the asker's own.
-//
-// Each token is asked twice, about a stranger and about the user it was issued to.
-// The second answer is false for every row, which is the property the sign-out leans
-// on to end the owner's own session; the first is the row's. The first row is the
-// control for the false ones: on the same service, a sound token is answered true
-// for a stranger, so a false answer is the helper refusing to read the token and not
-// a helper that answers nothing at all. The rows that are tampered with start from
-// that same token.
+// TestAccessTokenIsSomeoneElses: true for exactly one kind of token, a regular access token
+// this service signed for someone other than the user asked about, live or not; every false row
+// is a way to get a refusal from a token the server never vouched for. Each is asked about a
+// stranger and about its own user (always false, which sign-out relies on); the first row is
+// the control that a sound token reads true for a stranger.
 func TestAccessTokenIsSomeoneElses(t *testing.T) {
 	user := uuid.New()
 	other := uuid.New()

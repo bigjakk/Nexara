@@ -609,19 +609,10 @@ func TestIsHARulesUnsupportedError(t *testing.T) {
 	}
 }
 
-// TestSelectTarget_RefusesConstraintsNobodyLoaded puts the check at the choke
-// point rather than in each caller.
-//
-// Every target choice — the drain, the resume, and the evacuate handler — runs
-// through SelectTarget, and the handler is the one that proved a per-caller
-// check is not enough: it read the three listings with their errors discarded
-// and handed the empty results straight in. A validator living in the callers
-// is one the next caller silently skips.
-//
-// The assertion is concrete rather than symbolic. The rule below forbids
-// pve-01; an unloaded set subtracts nothing from any candidate, so scoring one
-// returns the first candidate — pve-01, the forbidden node — and it does so
-// with a nil error, indistinguishable from a correct placement.
+// TestSelectTarget_RefusesConstraintsNobodyLoaded: every target choice (drain, resume, the
+// evacuate handler) runs through SelectTarget, and the handler once passed listings it had read
+// with errors discarded. With the rule forbidding pve-01, an unloaded set would return pve-01,
+// the forbidden node, with a nil error, indistinguishable from a correct placement.
 func TestSelectTarget_RefusesConstraintsNobodyLoaded(t *testing.T) {
 	guest := GuestSnapshot{VMID: 100, Name: "linux01", Type: "qemu"}
 	candidates := []string{"pve-01", "pve-02"}

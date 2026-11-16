@@ -333,18 +333,11 @@ func TestValidateRefreshToken_ThreeAnswers(t *testing.T) {
 	}
 }
 
-// TestFindSessionForLogout pins the lookup a sign-out uses: the session's
-// current token, and the one it had before its last rotation — and nothing else.
-//
-// "previous token" is the race this exists for: a sign-out sent while a refresh
-// was in flight carries the cookie the refresh was about to replace. Without the
-// second lookup that sign-out found no session, revoked nothing and answered
-// success. The window itself is a predicate in the SQL and is exercised against
-// Postgres; here what matters is that the lookup is made, that it is made with
-// the HASH of the token and the named window, that the answer says which token
-// matched, that a session which expired since is not revoked — and that a lookup
-// which could not be made is reported as that, from EITHER of the two, instead of
-// falling through to "no session".
+// TestFindSessionForLogout: a sign-out sent while a refresh was in flight carries the token
+// about to be replaced, so the lookup takes the current token and the one before the last
+// rotation, and nothing else. Pinned: it looks up the HASH with the named window, says which
+// token matched, does not revoke a session that has expired since, and reports a failed lookup
+// of either as that rather than as "no session".
 func TestFindSessionForLogout(t *testing.T) {
 	const current, previous = "current-refresh-token", "previous-refresh-token"
 	infra := errors.New("connection reset by peer")
@@ -477,20 +470,10 @@ func captureDefaultLog(t *testing.T) *bytes.Buffer {
 	return &buf
 }
 
-// TestRefusalSparesCookie pins the one question it answers — does this refusal
-// leave the cookie alone — and, as much, what it is NOT allowed to be.
-//
-// It says yes only for a live session's immediate predecessor token. Every other
-// shape of stale token — no session at all, an expired session, a lookup that
-// failed — says no, which is the 401 that clears the cookie. The lookup that
-// fails is the one worth a row of its own, because it is the only place in this
-// file where "could not look" is allowed to read as "no": the caller already
-// knows the token is not current, so a refusal is certain and the conservative
-// one wins. It is logged.
-//
-// The window handed to the query is the short tolerance, never the logout
-// window: a mix-up would make a token rotated a minute ago read as "just
-// replaced". The match is never a session: the method returns a bool.
+// TestRefusalSparesCookie: yes only for a live session's immediate predecessor token; any
+// other stale token is the 401 that clears the cookie. A failed lookup reads as no (logged),
+// the one place here "could not look" may: the token is already known not to be current. The
+// window passed is the short tolerance, never the logout window, and the answer is a bool.
 func TestRefusalSparesCookie(t *testing.T) {
 	const current, previous = "current-refresh-token", "previous-refresh-token"
 	infra := errors.New("connection reset by peer")
@@ -551,17 +534,10 @@ func TestRefusalSparesCookie(t *testing.T) {
 	}
 }
 
-// TestSessionWindowsAreBounded pins the SIZE of the two windows, which nothing
-// else does: every other test is written relative to the constants, so a window
-// of a day would pass them all.
-//
-// The sign-out grace only has to cover one sign-out request that left the browser
-// carrying a cookie a refresh was replacing — a response and a request in flight
-// — so it is minutes at most; the bound is the top of the range the design allows
-// (see PreviousTokenRevocationWindow). The tolerance behind the 409 has to cover
-// one in-flight race and answers only a question about the SHAPE of a refusal, so
-// it is tens of seconds at most, and shorter than the grace — which is also
-// checked, since the point of two constants is that they are not the same size.
+// TestSessionWindowsAreBounded pins the SIZE of the two windows, which every other test takes
+// relative to the constants: the sign-out grace covers one request in flight (minutes at most;
+// see PreviousTokenRevocationWindow), the 409 tolerance one race (tens of seconds), and the
+// tolerance must be the shorter.
 func TestSessionWindowsAreBounded(t *testing.T) {
 	if w := PreviousTokenRevocationWindow; w <= 0 || w > 5*time.Minute {
 		t.Errorf("PreviousTokenRevocationWindow = %v, want 0 < window <= 5m: a rotated-away token may sign its session out for as "+
@@ -577,25 +553,11 @@ func TestSessionWindowsAreBounded(t *testing.T) {
 	}
 }
 
-// TestRevokeAllUserSessionsIn pins the revoke every sign-out-everywhere, password
-// change and deactivation runs: three statements, in this order — bump the user's
-// auth epoch, list the live sessions, revoke every session — all through the Queries
-// it is handed (the transaction's, for a caller that holds one), saying which
-// sessions were live so that their Redis rows can be deleted once the transaction
-// has committed. It must send nothing anywhere else: the manager's own pool-bound
-// queries and Redis are exactly what a caller holding a transaction must not touch.
-//
-// The ORDER is the property. The bump is first because it waits for the row lock of
-// any sign-in in the middle of its insert, so the listing and the revoke that follow
-// — each with a snapshot of its own — see every session created against the old
-// epoch; bump after the revoke, or bump and revoke as one statement, leaves a session
-// that committed in between live (see CreateSessionAtEpoch and
-// TestRevokeAll_TheWrongShapesLeaveASessionLive against Postgres).
-//
-// A failure of any statement is returned wrapped, with no ids: the caller rolls
-// back, and a list of sessions whose revoke did not happen must not be cleaned up.
-// A failed bump stops everything — the revoke must not run on an epoch that did not
-// move.
+// TestRevokeAllUserSessionsIn: bump the epoch, list the live sessions, revoke every one, all on
+// the Queries it is handed and nothing else, returning the live ids for Redis cleanup after
+// commit. The ORDER is the property: the bump waits for an in-flight sign-in's row lock, so the
+// list and revoke see its session (see CreateSessionAtEpoch). A failed statement returns no ids;
+// a failed bump stops everything.
 func TestRevokeAllUserSessionsIn(t *testing.T) {
 	userID := uuid.New()
 	boom := errors.New("connection reset by peer")

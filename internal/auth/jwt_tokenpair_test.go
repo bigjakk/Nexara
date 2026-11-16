@@ -7,24 +7,10 @@ import (
 	"testing"
 )
 
-// TestTokenPair_RefreshTokenIsNeverMarshalled is the guard for the half of the
-// v1.9.x refresh-token-in-body fix that does not live in a call site.
-//
-// The other half is authResponse.MarshalJSON in internal/api/handlers/auth.go,
-// which blanks the field on every marshal of that type. It cannot stop a
-// DIFFERENT type from being marshalled — an auth.TokenPair reached by a new
-// endpoint, a debug handler, an error path, a wrapper struct that embeds it —
-// and with a live `json:"refresh_token"` tag that would put the token back in
-// a response body with nothing failing. The tag is the latent path; this test
-// is what holds it shut.
-//
-// The shapes below are the ones a careless caller actually reaches for, not a
-// catalogue for its own sake: the value and the pointer are `return
-// c.JSON(pair)`, the slice and the map are a listing endpoint, the wrapper is
-// an envelope type, and the Encoder is a hand-rolled http.ResponseWriter path.
-// Struct tags are resolved per type, not per call site, so one of them failing
-// means all of them would — which is precisely why closing this in the type
-// works and closing it in call sites does not.
+// TestTokenPair_RefreshTokenIsNeverMarshalled: authResponse.MarshalJSON blanks the token for
+// its own type, but a TokenPair marshalled any other way (a new endpoint, a wrapper, an error
+// path) would put it back in a body. Struct tags resolve per type, so the shapes below
+// (value, pointer, slice, map, wrapper, Encoder) fail together: closing it in the type works.
 func TestTokenPair_RefreshTokenIsNeverMarshalled(t *testing.T) {
 	// Synthetic, and deliberately unmistakable: if it ever appears in output
 	// the failure message should be unambiguous about what leaked.

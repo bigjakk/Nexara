@@ -290,20 +290,10 @@ func TestCompileRejectsMeaninglessItemFacets(t *testing.T) {
 	})
 }
 
-// TestCompileIsSufficientForStartup pins the declaration defects that
-// Validate does NOT catch on its own, and proves Compile catches each of
-// them. Three gaps are known and deliberately left lazy-unchecked:
-// checkEnumReachable only guards the enum-miss branch, so a contradictory
-// enum 400s the caller instead of reporting our bug; checkDeclaration only
-// runs on parameters that carry a value, so a typo'd format name in an
-// omitted optional is invisible until someone sends it; and compileItems
-// is Compile-only, so a nested array renders its elements with %v instead
-// of being refused.
-//
-// Adding more lazy checks is not the answer — the answer is that the
-// router calls Compile() on every schema at registration, which turns
-// each of these into a boot failure rather than a per-request 400 or 500.
-// This table is the evidence that doing so is enough.
+// TestCompileIsSufficientForStartup pins the declaration defects Validate leaves lazy (an
+// unreachable enum, a typo'd format on an omitted optional, a nested array's items) and proves
+// Compile catches each. The router compiles every schema at registration, so each is a boot
+// failure rather than a per-request 400 or 500.
 func TestCompileIsSufficientForStartup(t *testing.T) {
 	cases := []struct {
 		name  string

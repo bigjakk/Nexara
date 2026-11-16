@@ -13,26 +13,11 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// The third door onto the same credential.
-//
-// A cross-cluster migration hands Proxmox the target cluster's decrypted API
-// token in the `target-endpoint` property string, and PVE may echo a rejected
-// parameter back. Two writers persist that text: the collector's reconciler,
-// which ListRunningTaskHistoryByCluster now withholds the row from, and
-// ingestTask — which writes PVE's status into task_history.exit_status AND into
-// audit_log.details at INSERT, both Viewer-readable, and which 'qmigrate' does
-// not escape via skipTaskTypes.
-//
-// The reconciler's anti-join cannot cover this one. It filters a SELECT over
-// rows that already exist; ingestTask fires precisely when the row does NOT yet
-// exist — in the few statements between startAndPollMigration setting
-// migration_jobs.upid and its task_history/audit_log inserts landing. Both
-// guards rest on that same ordering, which is what makes the second one
-// possible: migration_jobs.upid is already set throughout the window.
-//
-// Driven through syncTasks rather than by handing ingestTask a pre-built `seen`
-// map, because seenTaskUPIDs is the protected function — a test that builds the
-// map itself would still pass with the lookup deleted.
+// The third door onto the target cluster's token: PVE may echo a cross-cluster migration's
+// target-endpoint into its status, and ingestTask writes that into Viewer-readable rows at
+// INSERT, in the window before startAndPollMigration's own rows land (migration_jobs.upid is
+// already set). Driven through syncTasks, because seenTaskUPIDs is the protected function and a
+// test building the `seen` map itself would pass without it.
 func TestSyncTasks_WithholdsCrossClusterMigrationTasks(t *testing.T) {
 	cluster := db.Cluster{ID: uuid.New()}
 	taskStart := time.Now().Add(-time.Minute).Unix()

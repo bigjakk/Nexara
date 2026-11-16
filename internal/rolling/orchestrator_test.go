@@ -89,18 +89,10 @@ func TestNewOrchestrator_NilShutdownCtxFallback(t *testing.T) {
 	}
 }
 
-// TestOrchestrator_WaitForTask_CancelsOnShutdown is the load-bearing test
-// for the Swarm/K8s rolling-restart resilience fix: if the per-server
-// shutdown context is cancelled while waitForTask is polling a Proxmox
-// task, the function must exit promptly with "interrupted" (NOT "timeout")
-// so callers know to leave the rolling-update node in its current step
-// and let the next scheduler-leader resume — rather than marking it failed.
-//
-// The old behavior returned "timeout" here, which prod-tripped a node
-// failure during a Docker Swarm reschedule: an in-flight migration was
-// labelled "migration of qemu 111 failed (status: timeout)" 105 seconds
-// after job start (well short of the 30-min real timeout) even though
-// the Proxmox migrate task actually succeeded.
+// TestOrchestrator_WaitForTask_CancelsOnShutdown: a cancelled shutdown context while polling
+// must return "interrupted", not "timeout", so the node stays in its step for the next leader.
+// "timeout" once failed a node during a Docker Swarm reschedule: a migration that succeeded on
+// Proxmox was labelled failed 105 seconds into the job.
 func TestOrchestrator_WaitForTask_CancelsOnShutdown(t *testing.T) {
 	// Stub Proxmox: always return a "running" task — never completes on
 	// its own. This way the only way out is via shutdownCtx.

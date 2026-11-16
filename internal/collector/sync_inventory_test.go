@@ -13,28 +13,10 @@ import (
 	"testing"
 )
 
-// TestInventoryHeartbeatWithinGrace pins the relationship between the two
-// windows the gated inventory upserts depend on.
-//
-// What actually keeps a live row from being pruned is the ORDERING, not the
-// margin: the upsert and the prune are adjacent statements in the same block,
-// and the gate's own condition means that the instant the upsert returns, every
-// row in the payload has age(last_seen_at) < inventoryHeartbeat. The prune only
-// deletes past staleInventoryGrace. So as long as the heartbeat is the smaller
-// of the two, no row the node is still reporting can be pruned — whatever the
-// sweep interval, however late a tick runs, however long a sweep takes.
-//
-// The margin's job is narrower but still real: it keeps the two thresholds from
-// meeting at their boundary. With heartbeat == grace, a row sitting a hair past
-// the heartbeat may miss the upsert's now() and then be caught by the prune's
-// now() microseconds later, deleting and re-inserting a row that never changed —
-// which is worse than the churn the gate removes, since an INSERT is never HOT
-// and rewrites every index entry.
-//
-// Both values are compile-time constants, so this is a drift guard: it fails if
-// someone redefines inventoryHeartbeat as an absolute literal, or retunes the
-// grace window without it. It asserts nothing about SQL behaviour — that is
-// TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange in internal/db.
+// TestInventoryHeartbeatWithinGrace: a live row is never pruned because the upsert and the
+// prune are adjacent and the heartbeat is below the grace; the margin keeps the two from meeting
+// at the boundary, where a row would be deleted and re-inserted (see inventoryHeartbeat). A drift
+// guard over two constants; the SQL is TestNodeInventoryUpdatedAt_MovesOnlyOnContentChange's.
 func TestInventoryHeartbeatWithinGrace(t *testing.T) {
 	if inventoryHeartbeat >= staleInventoryGrace {
 		t.Fatalf("inventoryHeartbeat (%s) >= staleInventoryGrace (%s): the stale prune "+
@@ -48,20 +30,10 @@ func TestInventoryHeartbeatWithinGrace(t *testing.T) {
 	}
 }
 
-// TestInventoryPayloadTagsMatchQueryColumns is the contract between the Go row
-// structs and the jsonb_to_recordset column lists they are expanded into.
-//
-// Nothing else checks it. The collector mocks accept any payload bytes, and the
-// DB-backed test in internal/db declares its own local struct, so a single typo
-// in a `json:"..."` tag compiles, lints, and passes the whole suite — then, in
-// production, the key no longer matches its column, the column comes back NULL,
-// and every one of them is NOT NULL. The statement aborts on every sweep. The
-// node's inventory is never refreshed again, and the write is silent: a Warn
-// line is the only trace.
-//
-// Adding `omitempty` to any of these tags is the same bug with a narrower
-// trigger — the key vanishes only for zero values, so it survives testing with
-// populated fixtures and fails on the first empty string from Proxmox.
+// TestInventoryPayloadTagsMatchQueryColumns: the json tags of the row structs must match the
+// jsonb_to_recordset columns, which nothing else checks; a typo makes a NOT NULL column NULL and
+// the statement aborts on every sweep, silently but for a Warn. `omitempty` is the same bug,
+// triggered only by a zero value Proxmox sends.
 func TestInventoryPayloadTagsMatchQueryColumns(t *testing.T) {
 	cases := []struct {
 		query string

@@ -168,20 +168,10 @@ func groupsMigrated(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// TestImportHARules_GroupsMigratedErrorIsQuiet verifies that a legacy path
-// reached against a PVE reporting groups as migrated to rules handles that 500
-// quietly rather than logging a warning on every evaluation. It is PVE saying
-// there are no groups here, which is a complete answer.
-//
-// It reaches the legacy path through a 501 now, not through a blipped rules
-// call: a rules listing that merely failed no longer falls through at all.
-//
-// Which makes the cluster it models defensive rather than reachable — one node
-// would have to answer 501 for /cluster/ha/rules AND "migrated to rules" for
-// /cluster/ha/groups, and those are mutually exclusive pve-ha-manager versions
-// (failover picks the endpoint once per client, so both calls hit the same
-// node). The branch is kept as cheap insurance and this pins it; do not read a
-// green run here as evidence a real PVE takes this path.
+// TestImportHARules_GroupsMigratedErrorIsQuiet: a "migrated to rules" 500 from the legacy groups
+// path is PVE saying there are no groups, handled quietly. It is reached through a 501 on the
+// rules listing, which no real PVE pairs with that 500 (they are different pve-ha-manager
+// versions, and one client asks one node): cheap insurance, not evidence a real PVE takes it.
 func TestImportHARules_GroupsMigratedErrorIsQuiet(t *testing.T) {
 	wc := &warnCounter{}
 	srv, _ := haTestServer(t, map[string]http.HandlerFunc{
@@ -207,28 +197,11 @@ func TestImportHARules_GroupsMigratedErrorIsQuiet(t *testing.T) {
 	}
 }
 
-// TestImportHARules_UnreadableRulesAreSurfaced is the regression test for the
-// three-outcome collapse.
-//
-// An HA listing answers one of three things: here are the rules, this PVE has
-// none, or nobody could look. Only the middle one is a fallback. This used to
-// fall back on ANY error — and the legacy path then returned nil rules — so a
-// transient 500 on a PVE 9 cluster produced an empty rule set, which the
-// planner cannot tell from a cluster with no affinity rules configured. DRS
-// went on to live-migrate guests with every node-affinity pin and
-// anti-affinity pairing invisible to it.
-//
-// The status table matters as much as the outcome:
-//
-//   - 500/503: the cluster could not answer. Surface it.
-//   - 404: a bare ErrNotFound with the body discarded. Nexara sits behind
-//     nginx/Traefik/Caddy, so a proxy rewrite or a misrouted path arrives
-//     exactly like this, and no real PVE answers 404 here — admitting it as
-//     "PVE 8" would only ever admit impostors.
-//   - 403: an API token missing the HA privilege, not a PVE without rules.
-//
-// Each case also asserts /cluster/ha/groups was never touched: reaching the
-// legacy path at all is the mechanism by which the rule set came back empty.
+// TestImportHARules_UnreadableRulesAreSurfaced: only "this PVE has no rules" falls back; any
+// error once did, and a transient 500 gave an empty rule set, so DRS migrated guests blind to
+// every pin (see importHARules). 500/503 could not answer; 404 is a proxy, since no real PVE
+// answers 404 here; 403 is a token without the HA privilege. None may touch /cluster/ha/groups,
+// the path by which the set came back empty.
 func TestImportHARules_UnreadableRulesAreSurfaced(t *testing.T) {
 	for _, tt := range []struct {
 		name   string

@@ -206,34 +206,16 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-// runAt is the instant a test run starts. A fixed one, because executeSnapshot
-// names the snapshot from it: time.Now() would make the expected names
-// unknowable and let two back-to-back runs share a second.
-//
-// It is 02:00 UTC, and every expected name below reads 020000 because a name
-// is in UTC. It is handed over as the scheduler hands over a run's start, off
-// UTC: in a synthetic zone 90 minutes east, where its wall clock reads 03:30.
-// So a name formatted in runAt's own zone reads 033000 and fails, and so does
-// one formatted on the local clock, which TestMain puts at the same offset —
-// on a UTC host without TestMain, that one would read 020000 and pass. No zone
-// in use today has a 90-minute offset.
+// runAt is a fixed run start (snapshot names derive from it): 02:00 UTC, handed over in a
+// synthetic zone 90 minutes east, as TestMain sets the local clock. A name must read 020000 (UTC);
+// one formatted in runAt's zone or on the local clock reads 033000 and fails. No zone in use has
+// a 90-minute offset, so a UTC host cannot hide the mistake.
 var runAt = time.Date(2026, time.September, 26, 2, 0, 0, 0, time.UTC).In(time.FixedZone("synthetic", 90*60))
 
-// TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName is the regression
-// test for the bug a typed name had.
-//
-// executeSnapshot used to send snap_name verbatim on every run. A guest holds
-// each snapshot name once — pve-guest-common's __snapshot_prepare dies with
-// "snapshot name 'nightly' already used" — so the first run took the snapshot
-// and every run after it failed. Only an EMPTY snap_name got a timestamp.
-//
-// The stub does not refuse the duplicate itself, and cannot honestly: upstream
-// refuses inside the worker, so the create call returns a UPID either way and
-// the failure lands on the task. What decides whether a later run fails is the
-// name it asks for, so that is what is asserted — three runs of one
-// twice-daily task, and no run may ask for a name an earlier one already took.
-// The 14:00 run is there for the hour: a 12-hour clock would give it the 02:00
-// run's name.
+// TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName: snap_name sent verbatim made every
+// run after the first fail (a guest holds each name once; PVE refuses inside the worker, so the
+// stub cannot). So no run of a twice-daily task may ask for an earlier run's name; the 14:00
+// run catches a 12-hour clock.
 func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 	t.Parallel()
 
@@ -452,23 +434,10 @@ func newRecordingScheduler(recorder *taskRunRecorder) *Scheduler {
 	}
 }
 
-// TestExecuteTask_NamesTheSnapshotForTheRunItRecords pins the wiring the tests
-// above cannot reach, because they hand executeSnapshot an instant of their
-// own: that executeTask passes each run's OWN start time. Pass it anything
-// fixed — the zero time, a constant — and every run sends the same name again,
-// which is the bug this change exists to fix. The run's start time is also
-// what finishTaskRun records as last_run_at, so the name must be exactly the
-// prefix composed with that recorded instant, and that instant must be now.
-//
-// It also holds two clocks apart, which TestMain's synthetic local zone is what
-// lets it see. last_run_at and the cron stay on the server's local clock: the
-// recorded instant must carry it, and next_run_at must be the cron's next fire
-// read on it — "0 2 * * *" is 02:00 local, never the same instant as 02:00 UTC
-// at a 90-minute offset. Only the name is in UTC. The expected name is composed
-// by proxmox.TimestampedSnapshotName, the function that converts, so this test
-// cannot see that function lose its conversion — the tests on runAt, and
-// package proxmox's own, hold that — but it does see a scheduler that names
-// the run any other way, the local clock included.
+// TestExecuteTask_NamesTheSnapshotForTheRunItRecords: executeTask must pass each run's own start,
+// which is also last_run_at, so the name is the prefix composed with now. It holds two clocks
+// apart (TestMain's synthetic zone): last_run_at and the cron are local, only the name is UTC.
+// The expected name comes from proxmox.TimestampedSnapshotName, whose conversion runAt's tests hold.
 func TestExecuteTask_NamesTheSnapshotForTheRunItRecords(t *testing.T) {
 	t.Parallel()
 
@@ -597,26 +566,10 @@ func TestScheduledSnapshotName(t *testing.T) {
 	}
 }
 
-// TestExecuteSnapshot_RefusesAStoredNameProxmoxWouldReject is the regression
-// test for the bug this path had before the name became a prefix.
-//
-// snap_name is decoded out of scheduled_tasks.params — a jsonb blob the
-// endpoint declaration carries through without describing ("params" is a bare
-// apischema.Object) and whose producer in the SPA was, until v1.14.0, a
-// free-text field with no pattern. So a row can hold a name no run could ever
-// send, and before the client refused it the operator believed a recurring
-// snapshot was protecting the guest while every fire failed with a raw PVE
-// error buried in last_error.
-//
-// What such a row can hold has changed shape since: a reserved word or an
-// over-long value now makes a legal name once the date is added and the cut
-// applied (TestScheduledSnapshotName). A character Proxmox never allows does
-// not, and those are the cases here.
-//
-// The fix is at the client, not here, which is why this test asserts the stub
-// saw NOTHING rather than asserting on the error text: what makes the scheduler
-// safe is that it cannot reach the wire with such a name, not that it happens
-// to check first.
+// TestExecuteSnapshot_RefusesAStoredNameProxmoxWouldReject: params is an unschema'd jsonb, once
+// filled from free text, so a row can hold a name with a character Proxmox never allows (reserved
+// words and length are now made legal by the date and cut). The fix is the client's, so the
+// assertion is that the stub saw NOTHING, not the error text.
 func TestExecuteSnapshot_RefusesAStoredNameProxmoxWouldReject(t *testing.T) {
 	t.Parallel()
 

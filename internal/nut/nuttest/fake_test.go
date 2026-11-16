@@ -9,18 +9,11 @@ import (
 	"time"
 )
 
-// The fake stands in for upsd, so this table pins it to what a real one said.
-// Every "want" was captured on 2026-11-02 from upsd 2.8.1 (Debian trixie
-// nut-server, dummy-ups driver), all on one connection as here. The real
-// LIST VAR carried more variables; the framing, quoting and sort order are
-// what clients rely on. DRIVER-NOT-CONNECTED was captured with the driver
-// stopped and is injected here; ups03 was captured with no desc in ups.conf.
-// LIST CLIENT was captured on 2026-11-03 with two upsmon logins from one
-// host, whose address is replaced with TEST-NET here. The command sessions
-// were captured on 2026-11-03 from dummy-ups's ups01, with an account allowed
-// SET and one command ups01 lacks, the same with a wrong password sent first,
-// and one allowed every command. upsd's tracking ids differ per run:
-// "OK TRACKING *" takes any, and $ID sends the last one.
+// The fake stands in for upsd, so this table pins it to a real one: every "want" was captured
+// on 2026-11-02/03 from upsd 2.8.1 (Debian trixie nut-server, dummy-ups), on one connection as
+// here; DRIVER-NOT-CONNECTED with the driver stopped, ups03 with no desc, LIST CLIENT with two
+// upsmon logins (address now TEST-NET), and command sessions with a SET account, a wrong
+// password first, and an all-commands account. "OK TRACKING *" takes any id; $ID sends the last.
 func TestFake_MatchesRealUpsd(t *testing.T) {
 	t.Parallel()
 	s := NewServer(t)

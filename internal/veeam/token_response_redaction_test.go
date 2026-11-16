@@ -30,21 +30,10 @@ func fixtureTokenResponse() tokenResponse {
 	}
 }
 
-// tokenResponse holds two live VBR credentials and is decoded in
-// requestToken() (internal/veeam/auth.go) with two error returns immediately
-// below it. Nothing renders one today — this closes the route before
-// something does.
-//
-// This type is the exception to the "no test for a one-field secret holder"
-// position taken on handlers.logoutRequest: tokenResponse has FOUR fields, two
-// of which (TokenType, ExpiresIn) are not secrets, so a non-vacuous assertion
-// is expressible here. Every case proves a non-credential value SURVIVES, so a
-// String() returning "" cannot pass by absence alone.
-//
-// The slog case asserts the GROUPED key (tr.token_type=...). tokenResponse
-// implements Stringer, so with LogValue deleted slog falls through to String
-// and still would not leak — an absence-only slog assertion would be masked by
-// String, and LogValue could never be killed on its own.
+// tokenResponse holds two live VBR credentials, decoded in requestToken() just above two error
+// returns; nothing renders one yet. Its two non-secret fields make a non-vacuous test possible:
+// every case proves one survives. The slog case asserts the grouped key: without LogValue slog
+// falls back to String, which does not leak either, and would mask its loss.
 func TestGuard_VeeamTokenResponseNeverPrintsItsTokens(t *testing.T) {
 	tr := fixtureTokenResponse()
 	holder := trHolder{URL: "https://vbr.example.com", Body: tr}
@@ -94,18 +83,10 @@ func TestGuard_VeeamTokenResponseNeverPrintsItsTokens(t *testing.T) {
 	}
 }
 
-// The redactors must be in the method set of the VALUE, not just the pointer:
-// fmt and slog skip a pointer-receiver method on a value they cannot address,
-// and requestToken() holds `var tr tokenResponse` by value.
-//
-// This also makes DELETING a redactor fail a named test rather than break
-// compilation — nothing above calls tr.String() or tr.GoString() directly.
-//
-// json.Marshaler is REQUIRED, and an earlier version of this test asserted
-// the opposite. "Nothing marshals a tokenResponse" was wrong: slog's JSON
-// handler — the one production uses — marshals any non-LogValuer it is given,
-// so a tokenResponse in an exported field of a wrapper reaches encoding/json
-// and not String. See the note on tokenLogLine.
+// The redactors must be in the VALUE's method set (requestToken holds a value), and nothing
+// calls them directly, so deleting one fails a named test. json.Marshaler is required: slog's
+// JSON handler, production's, marshals a tokenResponse in a wrapper's exported field rather
+// than calling String (see tokenLogLine).
 func TestVeeamTokenResponseRedactorsAreInTheValueMethodSet(t *testing.T) {
 	var v any = fixtureTokenResponse()
 
@@ -184,19 +165,10 @@ func mustMarshalTR(t *testing.T, v any) string {
 	return string(raw)
 }
 
-// tokenLogLine renders through a real slog pipeline and returns the line,
-// using the JSON handler when asJSON is set.
-//
-// Both handlers are exercised on purpose, and it is not symmetry for its own
-// sake. For a value that is not itself a LogValuer the two take DIFFERENT
-// routes: TextHandler formats it with %+v, which dispatches String, while
-// JSONHandler MARSHALS it, which dispatches MarshalJSON. Production builds
-// its logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272), so a
-// Text-only probe does not resemble production — and that is exactly how an
-// earlier version of these files passed while the JSON path leaked a live
-// token through a wrapper struct. The wrapper cases are the ones that found
-// it: slog.Any on the type ITSELF is safe under both handlers, because
-// LogValue resolves before either route is taken.
+// tokenLogLine renders attr through a real slog pipeline, JSON handler when asJSON. Both run
+// because they differ for a value that is not a LogValuer: Text dispatches String, JSON
+// (production's) dispatches MarshalJSON. A Text-only version once passed while a wrapper struct
+// leaked a live token through the JSON path.
 func tokenLogLine(t *testing.T, asJSON bool, attr slog.Attr) string {
 	t.Helper()
 	var buf bytes.Buffer

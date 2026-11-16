@@ -17,29 +17,11 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// Evaluate-level coverage for the three listings it must ABORT on rather than
-// proceed past. Each of them is already tested at the level of the helper that
-// reads it — unhealthyHANodes and importHARules both have suites — and that is
-// exactly what was insufficient: a helper returning an error proves nothing
-// about the caller, and Evaluate is the caller that ships.
-//
-// internal/rolling/ha_listing_guard_test.go covers reverting these call sites
-// to `_`. It says itself what it does not cover: an error that is checked and
-// then mishandled. The realistic regression is not the discard, it is
-//
-//	unhealthy, err := unhealthyHANodes(ctx, client, e.logger, clusterID)
-//	if err != nil {
-//	    e.logger.Warn("DRS: HA maintenance filter unavailable, proceeding", "error", err)
-//	    unhealthy = map[string]struct{}{}
-//	}
-//
-// which reads as careful handling, passes the static guard, and restores the
-// original bug in full. These tests are what make that edit go red.
-//
-// They also pin the other half of the contract: an Evaluate that returns an
-// error must leave nothing behind. There is no partial write to undo, and that
-// is a property worth asserting rather than assuming — see
-// assertStoppedAtTheGate.
+// Evaluate must ABORT on its three listings; the helpers' own tests prove nothing about the
+// caller. The realistic regression is not a discard (the rolling guard catches that) but a
+// checked error logged and proceeded past with an empty map, which reads as careful and passes
+// the static guard: these make that edit go red, and pin that a failed Evaluate leaves nothing
+// behind (assertStoppedAtTheGate).
 
 // stubEvalQueries stands in for *db.Queries so Evaluate can run without a
 // database. Both methods are reads; the call counts are what let the tests
@@ -85,22 +67,10 @@ const (
 	evalGuestMemory = 8 << 30
 )
 
-// evaluateHandlers returns the full read-only endpoint set a healthy Evaluate
-// touches, every one of them answering successfully. Tests override a single
-// entry to break exactly one listing, so a failure can only come from the gate
-// under test.
-//
-// The cluster is deliberately IMBALANCED — one guest on pve-01, nothing on
-// pve-02 — and not because the planner is interesting here. It is what makes
-// the rule read in assertStoppedAtTheGate load-bearing: on a balanced fixture
-// Evaluate returns at the imbalance check before ListDRSRules on every path it
-// can take, so "the DRS rules were never read" would hold whether the gate
-// fired or not. Imbalanced, the successful path DOES read them — the control
-// test asserts exactly that — so the error paths not reaching them is a fact
-// about the gate rather than a fact about the fixture.
-//
-// Mode is advisory so /cluster/options — the native-CRS coexistence check,
-// which is deliberately fail-open and has its own test — stays off the path.
+// evaluateHandlers serves every read a healthy Evaluate makes; a test breaks exactly one. The
+// cluster is deliberately imbalanced: a balanced one returns before ListDRSRules on every path,
+// so "the rules were never read" would hold either way, while here the control does read them.
+// Mode is advisory so the fail-open /cluster/options check stays off the path.
 func evaluateHandlers() map[string]http.HandlerFunc {
 	empty := func(w http.ResponseWriter, _ *http.Request) { haData(w, []struct{}{}) }
 	return map[string]http.HandlerFunc{
@@ -201,25 +171,10 @@ func assertOnlyReadEndpoints(t *testing.T, hit *sync.Map, allowed map[string]htt
 	}
 }
 
-// assertStoppedAtTheGate checks that a failed Evaluate stopped where it said it
-// did and left nothing behind.
-//
-// Nothing to undo is a claim about two stores. Proxmox is covered by
-// assertOnlyReadEndpoints: every call Evaluate makes is a GET, and a write
-// would have to appear as a path the fixture does not serve. The database side
-// has three surfaces — evalReads here, veeamOwned (nil on this engine, and
-// gated off anyway with exclude_veeam_workers unset), and the concrete handle
-// that createClient's fallback uses (bypassed by the newClient seam) — and all
-// of them are reads, so there is no write for a failed evaluation to leave
-// half-done in the first place.
-//
-// The rule read is therefore not aimed at the check-then-swallow shape the
-// tests above exist for: that one returns no error at all, so their own err
-// assertions fire first and this never runs. What it catches is the other way
-// of losing a gate — recording the error, carrying on, and returning it at the
-// end. Evaluate would still look correct from the outside while having planned
-// against the very rule set the gate was there to refuse. See evaluateHandlers
-// for why this fixture, and not a balanced one, is what lets that be seen.
+// assertStoppedAtTheGate: a failed Evaluate stopped where it said and left nothing behind. Every
+// Proxmox call is a GET (assertOnlyReadEndpoints) and every database surface a read. The rule
+// read catches the other way to lose a gate: recording the error, planning on, and returning it
+// at the end, having planned against the rules the gate was there to refuse.
 func assertStoppedAtTheGate(t *testing.T, q *stubEvalQueries, hit *sync.Map, allowed map[string]http.HandlerFunc) {
 	t.Helper()
 	if q.rulesCalls != 0 {

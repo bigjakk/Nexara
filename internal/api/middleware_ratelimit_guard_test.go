@@ -64,17 +64,10 @@ func TestGuard_RateLimitedPathsAreRegisteredRoutes(t *testing.T) {
 	}
 }
 
-// TestGuard_CredentialRoutesKeepTheirRateLimit is the other direction, the one that matters more: the
-// routes below accept a credential or mint a token and each has a per-IP cap for a stated reason
-// (password brute force, a TOTP code, refresh replay, an OIDC flow pinning the server on outbound HTTP);
-// dropping one from the path set is a one-line edit with no other symptom. The list is restated, not
-// derived: a guard reading the map it checks passes whatever it says. NOT in the list (the general
-// limiter skips /api/v1/auth/, so absence means NO per-IP cap): logout (deliberately unlimited per address, see
-// TestLogout_HasNoPerAddressLimit);
-// logout-all and DELETE sessions/:id (capped per USER on their own routes, held OUT of this set on
-// purpose, see below); setup-status and sso-status (one boolean from an indexed read); oidc/token-exchange
-// (a 5-second single-use GETDEL key); and the two worth revisiting, totp/setup/verify (its own 5-attempt
-// Redis budget) and console-token (Deferred, so its body decodes before the permission check).
+// TestGuard_CredentialRoutesKeepTheirRateLimit: each route below takes a credential or mints a
+// token and has a per-IP cap for the reason given; dropping one is a one-line edit with no other
+// symptom. The list is restated, not derived, or it would pass whatever the map says. What is
+// deliberately outside the set, and why, is recorded at the limiter in middleware.go.
 func TestGuard_CredentialRoutesKeepTheirRateLimit(t *testing.T) {
 	mustBeLimited := map[string]string{
 		"/api/v1/auth/login":                          "password brute force",

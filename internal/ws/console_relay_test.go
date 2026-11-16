@@ -241,17 +241,9 @@ func readConnected(t *testing.T, browser *gorillaws.Conn) {
 	}
 }
 
-// TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose drives sessions that one
-// side ends and the other never acknowledges, and requires the server to let
-// go of the browser's socket anyway.
-//
-// Each leg of the relay sends a Close to the connection it writes to when it
-// stops, and it is the OTHER leg that reads that connection — so the other
-// leg is the one waiting on the answer. Neither wait was bounded: a peer that
-// never answered kept a leg in ReadMessage for as long as it stayed
-// connected, the handler never got past wg.Wait, and nothing after it — the
-// deferred close, pxConn.Close — ran. closeRelayLeg bounds the wait at
-// closeDrainTimeout, from either end.
+// TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose: each leg closes the connection it writes
+// to, and the OTHER leg waits for the answer; unbounded, a silent peer held the handler in
+// wg.Wait and nothing after it ran. closeRelayLeg bounds the wait at closeDrainTimeout.
 func TestConsoleRelay_EndsWhenAPeerNeverAnswersTheClose(t *testing.T) {
 	scopes := map[string]auth.ConsoleScope{
 		"vnc":     {ClusterID: gateClusterA, Node: "pve-01", VMID: 100, Type: "vm_vnc"},

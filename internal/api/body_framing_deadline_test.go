@@ -83,17 +83,11 @@ func serveAppOnLoopback(t *testing.T, app *fiber.App) string {
 	return ln.Addr().String()
 }
 
-// TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed sends two routes that read a body before any
-// session is checked or any limiter counts (the head of a request declaring a 10 MiB body, the most the
-// size guard allows, and the first 8 KiB of it, then nothing). The read of the rest must be cut at the
-// body deadline, not before and not long after, and the connection closed after the answer so what the
-// client sends next, as the body bytes it still owed, is never read as a request (what it sends IS a
-// request). The precondition twin is the same server with the deadline armed and no close on expiry, the
-// unread-body rule alone: the cut read released the stream as a read to the end would, so that rule keeps
-// the connection, and since fasthttp v1.75 fasthttp closes it instead, on the failed read
-// (requestStream.failed); the close on expiry is the second of two. ReadTimeout is shortened below the body timeout: left
-// armed through the handler it would cut sooner, which the lower bound catches; the upper bound shows
-// the deadline did the cutting, since nothing else ends the read before the test stops waiting.
+// TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed: a body read before any session or
+// limiter check (10 MiB declared, 8 KiB sent, then nothing) is cut at the body deadline, and the
+// connection closed after the answer, so the bytes still owed are never read as a request. The
+// twin shows fasthttp (v1.75+) closes it on the failed read too; the close on expiry is the
+// second of two. ReadTimeout is shortened so the bounds show the body deadline did the cutting.
 func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
 	const readTimeout, bodyTimeout, slack = 300 * time.Millisecond, time.Second, 2 * time.Second
 	for _, tt := range []struct {

@@ -11,17 +11,10 @@ import (
 	"github.com/bigjakk/nexara/internal/auth"
 )
 
-// TestAuthMiddleware_ConsolePathScopeEnforcement covers the per-cluster RBAC
-// fix for /ws/console and /ws/vnc (security review finding #1) AND the
-// hub-scope-required rule for the generic /ws path (remediation 2.7).
-//
-// Rules enforced:
-//   - /ws/console and /ws/vnc REQUIRE claims.ConsoleScope != nil with
-//     scope fields matching the upgrade query parameters.
-//   - /ws REQUIRES claims.WSScope == "hub"; rejects regular access tokens
-//     and console-scoped tokens.
-//   - Tokens on either path may arrive in `?token=` (legacy) OR in
-//     `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>`.
+// TestAuthMiddleware_ConsolePathScopeEnforcement: /ws/console and /ws/vnc require a ConsoleScope
+// matching the upgrade's query parameters; /ws requires WSScope "hub" and refuses access and
+// console tokens. On either path the token may come in `?token=` or in Sec-WebSocket-Protocol
+// (nexara.token, nexara.token.<jwt>).
 func TestAuthMiddleware_ConsolePathScopeEnforcement(t *testing.T) {
 	logger := testLogger()
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)

@@ -44,21 +44,10 @@ type cfgHolder struct {
 	Cfg  Config `json:"cfg"`
 }
 
-// Config.Password and Config.PrivateKey are live node credentials, and the
-// type is passed by value through three construction sites that log heavily
-// around it. Each rendering below is served by a different method — String,
-// GoString, LogValue, MarshalJSON — so removing any one of them fails this
-// test on its own shape and no other.
-//
-// Every case also asserts a NON-credential value SURVIVES. Without that half,
-// a String() returning "" or a MarshalJSON() returning {} would satisfy every
-// absence assertion while destroying the diagnostics the redaction exists to
-// preserve.
-//
-// The slog case asserts the GROUPED key (cfg.host=...), not merely the host.
-// Config implements Stringer, so with LogValue deleted slog falls through to
-// String and still does not leak — an absence-only slog assertion would be
-// masked by String and LogValue could never be killed on its own.
+// Config.Password and Config.PrivateKey are live node credentials, passed by value through
+// heavily logged sites. Each rendering (String, GoString, LogValue, MarshalJSON) is its own case,
+// and each asserts a non-credential value survives, or a blank redactor would pass. The slog
+// case asserts the grouped key: without LogValue slog falls back to String and would mask its loss.
 func TestGuard_SSHConfigNeverPrintsItsCredentials(t *testing.T) {
 	cfg := fixtureCfg()
 	holder := cfgHolder{Node: "pve-01", Cfg: cfg}
@@ -168,19 +157,10 @@ func TestSSHConfigRedactorsAreInTheValueMethodSet(t *testing.T) {
 // printf wrapper and check the call sites instead.
 func renderVerb(verb string, v any) string { return fmt.Sprintf(verb, v) }
 
-// cfgLogLine renders through a real slog pipeline and returns the emitted
-// line, using the JSON handler when asJSON is set.
-//
-// Both handlers are exercised on purpose, and it is not symmetry for its own
-// sake. For a value that is not itself a LogValuer the two take DIFFERENT
-// routes: TextHandler formats it with %+v, which dispatches String, while
-// JSONHandler MARSHALS it, which dispatches MarshalJSON. Production builds
-// its logger with slog.NewJSONHandler (cmd/nexara/main.go:64 and :272), so a
-// Text-only probe does not resemble production — and that is exactly how an
-// earlier version of these files passed while the JSON path leaked a live
-// token through a wrapper struct. The wrapper cases are the ones that found
-// it: slog.Any on the type ITSELF is safe under both handlers, because
-// LogValue resolves before either route is taken.
+// cfgLogLine renders attr through a real slog pipeline, JSON handler when asJSON. Both run
+// because they differ for a value that is not a LogValuer: Text dispatches String, JSON
+// (production's) dispatches MarshalJSON. A Text-only version once passed while a wrapper struct
+// leaked a live token through the JSON path.
 func cfgLogLine(t *testing.T, asJSON bool, attr slog.Attr) string {
 	t.Helper()
 	var buf bytes.Buffer

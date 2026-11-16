@@ -113,21 +113,10 @@ func TestHumanizeWindow(t *testing.T) {
 	}
 }
 
-// TestPendingDurationZeroForWindowedMetrics is the regression test for the bug
-// that made these metrics unable to fire at all.
-//
-// duration_seconds does double duty in the engine: for a level metric it is how
-// long the threshold must hold, and handleRuleResult only transitions
-// pending→firing once time.Since(PendingAt) reaches it. The windowed metrics
-// reuse the same field as their measurement WINDOW — so with a non-zero pending
-// timer, the alert goes pending at the tick that spots the failure and would
-// fire D later, by which point the failure has already left the window
-// (pending > finished, so pending+D > finished+D). The condition is false by
-// then and the alert auto-resolves, having never fired.
-//
-// This shipped past a green test suite and was caught in the browser: the alert
-// row sat state=pending with current_value=1 and fired_at NULL, for a rule
-// whose duration was 30 days.
+// TestPendingDurationZeroForWindowedMetrics: a windowed metric's duration_seconds is its window,
+// and a pending delay of the same length matures after the failure has left the window, so the
+// alert auto-resolves without ever firing (see pendingDuration). It shipped past a green suite
+// and was caught in the browser: state=pending, current_value=1, fired_at NULL.
 func TestPendingDurationZeroForWindowedMetrics(t *testing.T) {
 	for _, metric := range []string{MetricPVETaskFailed, MetricPVEBackupFailed} {
 		rule := db.AlertRule{Metric: metric, DurationSeconds: 86400}

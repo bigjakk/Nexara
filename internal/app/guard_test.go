@@ -11,21 +11,10 @@ import (
 	"testing"
 )
 
-// bannedConstructors are the domain-service constructors that must be called
-// exactly once per process, from the composition root in this package.
-//
-// Before internal/app existed, each of these was called at two to four sites
-// with different dependencies, and the differences were silent bugs: a rolling
-// orchestrator built with a nil notification registry dropped job-failure
-// notifications on the HTTP path; a DRS engine and executor built per request
-// dispatched migrations outside the scheduler's leader lock and raced the tick;
-// only one of three event publishers carried the syslog forwarder, so
-// background audit rows never reached a SIEM; two CVE scanners meant two copies
-// of the ~80MB feed caches.
-//
-// Keyed on the resolved IMPORT PATH, not the local identifier: matching on the
-// qualifier alone is defeated by any alias, and this codebase aliases
-// (internal/api/server.go imports this package as nexapp).
+// bannedConstructors must be called once per process, from this package's composition root:
+// building them at several sites with different dependencies caused the silent bugs app.go
+// lists. Keyed on the resolved import path, not the local name, since an alias defeats the
+// qualifier (internal/api/server.go imports this package as nexapp).
 var bannedConstructors = map[string]map[string]bool{
 	"github.com/bigjakk/nexara/internal/rolling":       {"NewOrchestrator": true},
 	"github.com/bigjakk/nexara/internal/drs":           {"NewEngine": true, "NewExecutor": true},

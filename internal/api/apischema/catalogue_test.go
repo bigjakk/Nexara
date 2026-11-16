@@ -8,22 +8,10 @@ import (
 	"testing"
 )
 
-// The catalogue is documentation that is allowed to be WRONG only if a test
-// fails, which is the difference between it and a comment. These tests hold
-// three lines:
-//
-//	completeness   every registered format has an entry, and every entry
-//	               names a rule that exists
-//	provenance     a Proxmox rule names the file and function it came from
-//	               and quotes the upstream rule; a Nexara rule says so by
-//	               claiming no upstream
-//	truthfulness   every entry's witnesses are run through the rule AS THE
-//	               REQUEST PATH ENFORCES IT, so a Permits line that stops
-//	               being true stops the build
-//
-// The third is the one that matters. A catalogue whose prose can drift from
-// the compiled rule is worse than no catalogue: it is a wrong answer that
-// reads like a checked one.
+// The catalogue may be wrong only if a test fails. These hold completeness (every format has an
+// entry naming a real rule), provenance (a Proxmox rule names and quotes its upstream; a Nexara
+// rule claims none) and truthfulness, the one that matters: every witness runs through the rule
+// as the request path enforces it, so a Permits line that stops being true stops the build.
 
 // ruleProperty builds the property a declaration would write for d, so that
 // a witness is validated through the same path a request takes — Validate,
@@ -305,26 +293,10 @@ func TestOrEmptyRulesInheritTheirBaseWitnesses(t *testing.T) {
 	}
 }
 
-// TestCreateConfigIDIsASubsetOfTheAddressingRule holds the pairing that
-// decides pve-configid's ceiling.
-//
-// pve-configid is the CREATE rule; pve-configid-existing is what the routes
-// that address an existing object carry. A create rule that admits a name
-// the addressing rule refuses produces an object this API cannot then read
-// or delete — the same failure ceph-pool-name's entry records, arrived at
-// from the other side. So create has to stay a SUBSET of addressing, and
-// this asserts it over every witness in the catalogue rather than over
-// pve-configid's own, which would agree by construction.
-//
-// What this canNOT see is the length half, and that is worth saying plainly
-// rather than leaving a reader to assume it is covered: pve-configid-existing
-// carries no length bound in its rule: its cap is a MaxLength: 128 at each
-// declaration (snapshotNameParam in internal/api/registry_vms.go,
-// haConfigIDParam in internal/api/registry_ha.go), which this package cannot
-// reach. pve-configid's own ceiling was raised from 40 to exactly 128 to
-// match those, so RAISING IT FURTHER WITHOUT RAISING THEM re-opens the gap
-// and nothing here will fail. That check belongs in internal/api, where both
-// halves are visible.
+// TestCreateConfigIDIsASubsetOfTheAddressingRule: pve-configid (create) must stay a subset of
+// pve-configid-existing (addressing), or an object can be created that this API cannot read or
+// delete; checked over every witness in the catalogue. It cannot see length: the addressing cap
+// is MaxLength 128 at each declaration, so raising pve-configid past 128 alone reopens the gap.
 func TestCreateConfigIDIsASubsetOfTheAddressingRule(t *testing.T) {
 	t.Parallel()
 
@@ -347,27 +319,10 @@ func TestCreateConfigIDIsASubsetOfTheAddressingRule(t *testing.T) {
 	}
 }
 
-// TestPoolIDNewIsPoolIDMinusTheTwoDotSegments holds pve-poolid-new to what
-// its entry says it is: pve-poolid with exactly "." and ".." taken out,
-// nothing more and nothing less.
-//
-// The oracles are the two OTHER entries, never this one's own witnesses,
-// which would agree with it by construction. pve-poolid, as a regex, says
-// what the language is; path-safe-dotted-name, as a regex, says what the
-// carve-out is for a single segment — pve-poolid-new's first three branches
-// claim to be exactly its language, and the second assertion holds them to
-// that. pve-poolid-new itself goes through Validate, the path a request
-// takes.
-//
-// The corpus has two halves. Every string of up to five characters over an
-// alphabet that reaches each CHARACTER boundary the regexes draw: the dot, a
-// letter, a digit, dash and underscore (both in the charset, and neither a
-// dot), the slash that separates segments, and a space, which is outside the
-// charset. Five characters cannot reach the DEPTH boundary — the shortest
-// four-level id, "a/b/c/d", is seven — so the second half joins one to five
-// segments, each drawn from ".", "..", "a", "a.b" and "", which reaches the
-// three-level limit from both sides, dot segments and empty segments
-// included.
+// TestPoolIDNewIsPoolIDMinusTheTwoDotSegments: pve-poolid-new is pve-poolid without exactly "."
+// and "..", judged against the other two entries' regexes, never its own witnesses. The corpus:
+// every string up to five characters over an alphabet reaching each character boundary, plus
+// one to five segments of ".", "..", "a", "a.b" and "", reaching the three-level depth limit.
 func TestPoolIDNewIsPoolIDMinusTheTwoDotSegments(t *testing.T) {
 	t.Parallel()
 

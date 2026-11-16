@@ -143,17 +143,10 @@ func declaredBackupEndpoints(t *testing.T) map[string]Endpoint {
 	return declaredEndpointsWhere(t, keyedIn(backupLegacyPermissions))
 }
 
-// TestBackupRoutesDeclareTheSamePermissionTheyEnforced is the tally that
-// makes this migration a refactor rather than a change.
-//
-// Six of the 49 hand-placed calls move into middleware and 43 stay, which
-// is the lowest hoist rate of any domain migrated so far. The tally says so
-// out loud rather than leaving a reader to infer it from 22 reason strings.
-// The 49 counts per ROUTE rather than per source line, the way
-// pbsLegacyPermissions does: the 19 Deferred routes share one requirePBSPerm
-// whose two branches are the two calls each of them makes. The restore was
-// the seventh hoisted one until it gained a second, body-dependent check
-// (requireClusterPerm, then requirePBSPerm) and went back into its handler.
+// TestBackupRoutesDeclareTheSamePermissionTheyEnforced is the tally that makes this migration a
+// refactor: of 49 hand-placed calls (counted per route, as pbsLegacyPermissions does) six moved
+// into middleware and 43 stay. The restore went back into its handler when it gained a second,
+// body-dependent check.
 func TestBackupRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	declared := declaredBackupEndpoints(t)
 	if len(declared) != backupRouteCount {

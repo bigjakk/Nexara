@@ -1241,20 +1241,10 @@ func TestVeeamSync_DropsAnUnfinishedSessionVeeamNoLongerHas(t *testing.T) {
 	}
 }
 
-// Every failure that is NOT veeam.ErrSessionNotFound is transient. Deleting a
-// run's history over a momentary error is not recoverable, so the row waits
-// for the next pass — and the pass itself still has to succeed, or the
-// watermark it advances stalls behind one unreadable session.
-//
-// The 404 row is the near-miss this fix nearly shipped: a 404 does NOT reach
-// the collector only from the session endpoint. A failed token grant surfaces
-// the token endpoint's own *APIError verbatim, so a restarting VBR answering
-// 404 on /oauth2/token used to look byte-identical to "this run is gone" —
-// and, because a failed grant leaves the cached token untouched, every
-// remaining id in the batch failed the same way. One restart would have
-// deleted up to fifty rows, including runs in flight at that moment, taking
-// the nexara_stopped provenance that suppresses a false veeam_job_failed with
-// them.
+// Every failure but veeam.ErrSessionNotFound is transient: the row waits for the next pass, and
+// the pass itself still succeeds, or its watermark stalls. The 404 row is the near-miss: a
+// failed token grant surfaces the token endpoint's 404 verbatim, which once read like "this run
+// is gone" and would have deleted the batch on one VBR restart (see the sentinel's comment).
 func TestVeeamSync_KeepsAnUnfinishedSessionWhenTheReReadFails(t *testing.T) {
 	tests := []struct {
 		name string

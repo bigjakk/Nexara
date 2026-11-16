@@ -8,24 +8,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// TestSnapshotNameIsAcceptedByTheClient pins the PREFIX BUDGET.
-//
-// snapshotName pastes an 18-character prefix in front of an upstream ISO
-// version with its dots turned into dashes, and the result goes straight to
-// proxmox.CreateVMSnapshot. Proxmox caps a snapshot name at 40 characters
-// (pve-snapshot-name's maxLength), so the prefix leaves 22 for the version.
-//
-// A real version — "0.1.302" becoming "0-1-302" — spends 7 of those, so the
-// budget is not close and never has been. What this test holds is that the two
-// halves stay in a ratio where that remains true: lengthening the prefix, or
-// widening what counts as a version, would break the update path on the
-// snapshot step with a raw PVE rejection and nothing upstream of it to explain
-// why.
-//
-// The refusal being asserted is the CLIENT's, not this package's. guesttools
-// does no validation of its own and should not start: the rule lives on
-// CreateVMSnapshot (internal/proxmox/client_guests.go) precisely so a caller
-// like this one cannot forget it.
+// TestSnapshotNameIsAcceptedByTheClient pins the prefix budget: an 18-character prefix plus the
+// dashed ISO version must stay within Proxmox's 40-character snapshot name, leaving 22 for the
+// version ("0-1-302" spends 7). The refusal asserted is the client's (CreateVMSnapshot);
+// guesttools validates nothing itself, and should not start.
 func TestSnapshotNameIsAcceptedByTheClient(t *testing.T) {
 	t.Parallel()
 

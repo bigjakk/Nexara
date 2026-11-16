@@ -12,22 +12,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// Evaluate-level coverage for the per-node workload listings, which are the one
-// input where swallowing a read does not merely drop a constraint — it inverts
-// the score.
-//
-// The three gates in evaluate_test.go all fail the evaluation, so a test that
-// asserts "an error came back" is enough for them. This one must not: a single
-// flaky node has to leave the other N-1 balancing, so the treatment is to drop
-// the node rather than abort, and "no error" is therefore also what the BUG
-// looks like. The assertion has to be about the plan itself — specifically that
-// the node nobody could read was not chosen as a target.
-//
-// The fixture is built so the right answer and the wrong answer are different
-// nodes. pve-02 is, in reality, a busy node; when its listing fails nothing in
-// the evaluation can know that, so it scores as idle (or near-idle) and carries
-// no guests for an anti-affinity rule to trip over. The correct target is
-// pve-03, which was actually read and actually has room.
+// A per-node workload listing that fails must drop the node, not abort (one flaky node must
+// not stop the other N-1), so "no error" is also what the bug looks like: the assertion is that
+// the unreadable node is not chosen as a target. pve-02 is busy in reality but would score idle
+// unread; the right target is pve-03, which was read and has room.
 
 const (
 	unreadNode     = "pve-02"
@@ -43,29 +31,10 @@ const (
 	node3VM301Cfg  = "/api2/json/nodes/pve-03/qemu/301/config"
 )
 
-// unreadableNodeHandlers serves a three-node cluster in which every listing
-// reads. Tests break exactly one of them on top of it.
-//
-// Scores under the fixture's weights (cpu 0.3, mem 0.7), each node 8 CPU /
-// 16 GiB, with every guest's Mem equal to its MaxMem:
-//
-//	pve-01  VMs 101+102, 12 GiB, 2.0 CPU   → 0.3*0.2500 + 0.7*0.7500 = 0.6000
-//	pve-02  VM 201 1 GiB + CT 251 10 GiB   → 0.3*0.2125 + 0.7*0.6875 = 0.5450
-//	pve-03  VM 301, 4 GiB, 0.8 CPU         → 0.3*0.1000 + 0.7*0.2500 = 0.2050
-//
-// pve-02's load is split across the two listings on purpose, because the two
-// failures degrade it by different amounts and both have to land below pve-03
-// for the test to be about targeting rather than about arithmetic:
-//
-//	VM listing fails   → no workloads at all (the `continue` skipped the
-//	                     container listing too)          → score 0.0000
-//	CT listing fails   → VM 201 alone, 1 GiB             → score 0.0475
-//
-// Either way the fullest node on the cluster ranks below the genuinely-idle
-// pve-03, so findSourceTargetPairs — which orders by score gap — puts it at the
-// top of the target list. A planner that still targets it is not making a
-// marginal misjudgement; it is sending the guest to the worst node available,
-// chosen precisely because it could not be read.
+// unreadableNodeHandlers serves a three-node cluster (8 CPU / 16 GiB each; weights cpu 0.3, mem
+// 0.7) scoring pve-01 0.6000, pve-02 0.5450, pve-03 0.2050. pve-02's load is split across its VM
+// and CT listings, so a failed VM listing scores it 0.0 and a failed CT listing 0.0475: either
+// way below pve-03, so a planner that still targets it sends the guest to the fullest node.
 func unreadableNodeHandlers() map[string]http.HandlerFunc {
 	empty := func(w http.ResponseWriter, _ *http.Request) { haData(w, []struct{}{}) }
 	noPassthrough := func(w http.ResponseWriter, _ *http.Request) { haData(w, proxmox.VMConfig{}) }

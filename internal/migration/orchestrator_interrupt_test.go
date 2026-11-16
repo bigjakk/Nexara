@@ -16,22 +16,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// A cross-cluster migration's task_history row is withheld from the collector's
-// reconciler (ListRunningTaskHistoryByCluster) because only this package can
-// scrub the target cluster's API token out of PVE's die message. That also
-// takes away the collector's 24h stale-task sweep, which used to be the thing
-// that eventually finalized a row nobody else closed — so pollTaskStatus has to
-// close it on the way out, not just on completion.
-//
-// Without this, a SIGTERM during a long cross-cluster migration leaves a row
-// showing "Running" forever: failJob writes migration_jobs through
-// cleanupCtxFor so the JOB row ends up correct, DeleteCompletedTasks refuses to
-// prune a running row, and no other writer is left.
-//
-// The exit status must be a constant. This is the one finalizing write on the
-// path that has not polled PVE, so there is no vendor text to carry — and a
-// constant is what keeps it that way if someone later reaches for a richer
-// message.
+// A cross-cluster migration's task row is withheld from the collector's reconciler (only this
+// package can scrub the token), which also loses the 24h stale-task sweep, so pollTaskStatus
+// must finalize the row on the way out: otherwise a SIGTERM leaves it Running forever. The exit
+// status is a constant, as this write has polled no vendor text to carry.
 func TestPollTaskStatus_CancelledContextFinalizesTheTaskRow(t *testing.T) {
 	const (
 		node = "pve-01"
@@ -86,19 +74,10 @@ func TestPollTaskStatus_CancelledContextFinalizesTheTaskRow(t *testing.T) {
 	}
 }
 
-// The other way this loop used to leak a permanently-"Running" row, and the
-// likelier one: no process death needed at all.
-//
-// Withholding a cross-cluster migration's row from the collector took away
-// staleTaskGrace, whose own comment names the causes — node reboot, task-log
-// rotation. After either, GetTaskStatus errors forever. The loop used to
-// `continue` on a poll error with no overall bound, so a healthy Nexara would
-// poll every 5s indefinitely while the row sat at "running" and
-// DeleteCompletedTasks refused to prune it.
-//
-// The bound is on CONSECUTIVE failures, not on elapsed runtime, so the
-// companion assertion matters as much as the main one: a migration Proxmox is
-// still answering about must never be finalized, however long it runs.
+// The likelier leak, no process death needed: after a node reboot or task-log rotation
+// GetTaskStatus errors forever, and the loop used to `continue` with no bound while the row sat
+// "running". The bound is on CONSECUTIVE failures, so the companion assertion matters as much: a
+// migration Proxmox still answers about is never finalized, however long it runs.
 func TestPollTaskStatus_UnreachableTaskIsAbandonedAfterTheGrace(t *testing.T) {
 	const (
 		node = "pve-01"

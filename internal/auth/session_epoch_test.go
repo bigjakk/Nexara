@@ -38,17 +38,10 @@ func newEpochSessionManager(t *testing.T, fake *fakeSessionDB) (*SessionManager,
 	return NewSessionManager(db.New(fake), rdb), mr
 }
 
-// TestCreateSession_ARefusalAndAFailureAreDifferentAnswers pins the three-outcome
-// rule at the manager: the insert answering "no row" is the refusal of the sign-in
-// (ErrSessionRefused) and nothing else is — a database that could not be asked, or
-// that failed, is an error of its own and must never be readable as the credential
-// having been refused (it would blame the user for the database) nor as a session
-// that exists. Neither writes a Redis row; only a created session does.
-//
-// The created case also pins WHAT the statement is asked: the user and the epoch the
-// caller passed, in the generated argument order — the arguments the whole
-// guarantee rests on, which a refactor that swapped or dropped one would turn into a
-// check against the wrong value without any other test noticing.
+// TestCreateSession_ARefusalAndAFailureAreDifferentAnswers: only the insert's "no row" is
+// ErrSessionRefused; a database that failed is an error of its own, never a refusal (blaming
+// the user) nor a session, and neither writes a Redis row. The created case also pins the
+// arguments (user, then epoch, in generated order) the whole guarantee rests on.
 func TestCreateSession_ARefusalAndAFailureAreDifferentAnswers(t *testing.T) {
 	userID := uuid.New()
 	const epoch = int64(41)
@@ -248,18 +241,11 @@ func isSessionMirrorWrite(cmd redis.Cmder) bool {
 	return strings.HasPrefix(key, "nexara:session:")
 }
 
-// TestCreateSession_ARedisThatNeverAnswersDoesNotHoldTheSignIn: the Redis row of a
-// session is a mirror nothing reads, written after the insert has committed, and a
-// Redis that accepts the write and never answers must not hold every sign-in for the
-// client's read timeout (five seconds, and a failed read is tried again). The write
-// is waited for for a moment and then left to finish on its own.
-//
-// The command is held by a hook, not by a short context deadline, because that is
-// the point: a deadline does not reach the client's socket, so only not waiting
-// bounds it. What is checked is that the sign-in returns the session it created
-// while the write is still stuck; that the warning names the session and the user and
-// never the token or its hash; and that the write is not abandoned — released, it
-// lands.
+// TestCreateSession_ARedisThatNeverAnswersDoesNotHoldTheSignIn: the session's Redis row is a
+// mirror nothing reads, and a Redis that never answers must not hold the sign-in for the
+// client's retried read timeout. A hook holds the write, since a context deadline does not reach
+// the socket. Checked: the session returns while the write is stuck, the warning names session
+// and user but no token, and the write, released, lands.
 func TestCreateSession_ARedisThatNeverAnswersDoesNotHoldTheSignIn(t *testing.T) {
 	logs := captureLockedLog(t)
 	userID := uuid.New()
@@ -471,51 +457,11 @@ func TestAuthGuardWalkSkipsNestedCopies(t *testing.T) {
 	}
 }
 
-// TestGuard_EveryRevokeAllGoesThroughTheBump holds the structure the epoch rests on,
-// read from the source of the whole tree: ending every session of a user, moving the
-// user's epoch, and creating a session are each done in ONE place.
-//
-//   - Nothing but RevokeAllUserSessionsIn may mention RevokeAllUserSessions or
-//     BumpUserAuthEpoch, and nothing but SessionManager.CreateSession may mention
-//     CreateSessionAtEpoch. "Mention" is any selector of that name — a call, a method
-//     value (`f := q.RevokeAllUserSessions`), a call through an alias
-//     (`store := h.queries; store.RevokeAllUserSessions(…)`), through a db.Querier
-//     field or a locally declared interface — and in a package-level initializer as
-//     well as in a function. It does not depend on what the receiver is called or
-//     what type it has, which is what an earlier version of this guard did, and which
-//     is why SessionManager.RevokeAllUserSessions, whose name collided with the
-//     query's, had to go. A handler that revoked straight through the Queries — the
-//     tempting two-line version — would end the sessions without moving the epoch,
-//     and an in-flight sign-in would mint a live one afterwards; a handler that
-//     bumped on its own would refuse sign-ins for no reason that anything records;
-//     and CreateSessionAtEpoch is what turns "no row" into ErrSessionRefused and
-//     everything else into an error, which a caller of the raw query would read as it
-//     liked.
-//   - Inside RevokeAllUserSessionsIn the three statements are written in the order
-//     bump, list, revoke. TestRevokeAllUserSessionsIn pins the order at run time; this
-//     pins it in the text, so that a reordering fails here too and for the reason
-//     above, not only where a fake happens to count.
-//
-// ListUserSessions is not guarded by caller: the session list endpoint reads it too,
-// and a read is not the hazard.
-//
-// What it does NOT see, so that nobody reads it as more than it is. It matches Go
-// selector NAMES, so:
-//
-//   - a NEW sqlc query that revokes a user's sessions under another name (an
-//     `UPDATE sessions SET is_revoked = true …` that is not RevokeAllUserSessions) is
-//     not seen, nor is a revoke written some other way that never names the three
-//     methods above;
-//   - a call made through reflect (`MethodByName("RevokeAllUserSessions")`) is not seen;
-//   - code in a directory the walk skips by name — generated, vendor, frontend and
-//     .claude — is not seen.
-//
-// What covers them is not this guard. For the revoke-alls that exist, the DB tests —
-// TestRevokeAllUserSessionsIn_EveryPathMovesTheEpochAndEndsTheSessions and
-// TestRevokeAllTransactions_AgainstASignInInProgress in internal/db — run each one
-// against Postgres and fail if a session survives or the epoch does not move. For a
-// new query that revokes a user's sessions without the bump, nothing automated does:
-// review does.
+// TestGuard_EveryRevokeAllGoesThroughTheBump: only RevokeAllUserSessionsIn may mention
+// RevokeAllUserSessions or BumpUserAuthEpoch, only SessionManager.CreateSession may mention
+// CreateSessionAtEpoch (any selector, alias or initializer), and the revoke-all reads bump, list,
+// revoke. It matches selector NAMES: a new query that revokes under another name, reflection, or
+// code in a skipped directory is not seen; internal/db's tests cover the existing revoke-alls.
 func TestGuard_EveryRevokeAllGoesThroughTheBump(t *testing.T) {
 	root := filepath.Join("..", "..")
 	files := authGuardGoFiles(t, root)

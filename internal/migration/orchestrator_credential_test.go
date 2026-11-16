@@ -54,17 +54,10 @@ type execCall struct {
 }
 
 func (s stubDBTX) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	// Honour the context the way pgx does, and do it BEFORE the recording
-	// check. A real pool refuses a write on a cancelled context — the
-	// statement never reaches Postgres — so a stub that accepted one would
-	// make every "this write happened" assertion unable to fail for the one
-	// mistake that matters on a shutdown path: passing the cancelled parent
-	// instead of the cleanupCtxFor-derived context.
-	//
-	// This is what pins cleanupCtxFor. There is no direct unit test of
-	// migration's copy anywhere (internal/rolling tests only its own), so
-	// every caller that reaches a write through it — failJob, and
-	// pollTaskStatus's ctx.Done() branch — is verified here or nowhere.
+	// Honour the context as pgx does, before recording: a real pool refuses a write on a cancelled
+	// context, so a stub that accepted one could not catch the shutdown-path mistake of passing the
+	// cancelled parent instead of cleanupCtxFor's context. This is the only test of migration's
+	// cleanupCtxFor, for failJob and pollTaskStatus's ctx.Done() branch.
 	if err := ctx.Err(); err != nil {
 		return pgconn.CommandTag{}, err
 	}
@@ -155,26 +148,11 @@ func newCredTestOrchestrator(t *testing.T, serverURL string, execs *[]execCall) 
 	)
 }
 
-// Change 1. executeCrossCluster assembles the target cluster's stored,
-// long-lived API token into the target-endpoint property string, and hands
-// whatever error comes back to Execute, which passes err.Error() straight to
-// failJob (orchestrator.go, the TypeCrossCluster branch). failJob both logs
-// that string and writes it to migration_jobs.error_message — a column the
-// migration handlers return as error_message to anyone holding view:migration
-// on the source or target cluster, which is a Viewer-level read.
-//
-// The fixture makes the upstream echo the credential back, because that is the
-// one link in the chain nobody controls: Proxmox's own error formatting. It is
-// not a behaviour PVE has been observed to have; the test asserts the chain
-// holds even if it did.
-//
-// Non-vacuity is load-bearing in three places, and each is checked:
-//   - the handler asserts the secret really did go out on the wire and really
-//     was echoed back, so an absence result cannot come from a broken fixture;
-//   - the error must still carry the client's own context and the upstream
-//     message, so a scrub that returned "" would fail;
-//   - REDACTED must be present, so a pass cannot come from the scrub silently
-//     doing nothing.
+// Change 1: executeCrossCluster puts the target cluster's long-lived token in target-endpoint,
+// and its error reaches failJob, which logs it and writes migration_jobs.error_message, a
+// Viewer-level read. The fixture has Proxmox echo the token (not observed, but out of our
+// control). Non-vacuity: the secret went out and came back, the error keeps its context and the
+// upstream message, and REDACTED is present.
 func TestExecuteCrossCluster_ScrubsTheTargetTokenFromTheFailure(t *testing.T) {
 	bodies := []struct {
 		name string
@@ -386,28 +364,11 @@ func TestScrubEndpointSecretKeepsTheErrorChain(t *testing.T) {
 	}
 }
 
-// L1. The synchronous rejection is only half the exposure. When Proxmox
-// ACCEPTS the remote_migrate and the worker dies later, pollTaskStatus reads
-// PVE's die-message out of the task's exit status and writes it to two
-// Viewer-readable places: migration_jobs.error_message (the same view:migration
-// column the synchronous path lands in) and task_history.exit_status (served
-// to any view:task holder). Same vendor, same lack of control over its error
-// formatting, same column — so the same scrub has to reach it.
-//
-// The credential is not in scope at the pollTaskStatus call site, so the two
-// halves are joined at the point the credential is built: executeCrossCluster
-// arms the migrationContext, and pollTaskStatus reads it back.
-//
-// Non-vacuity: findExecArg fails if the write never happened, the fixture
-// asserts the secret really was in the exit status, and each DB sink is
-// checked for survival as well as absence.
-//
-// The third sink — the o.logger.Error line beside those two writes — is NOT
-// covered here, and that is a stated gap rather than an oversight: replacing
-// mc.scrub with the raw value there leaves this package green. It is
-// defence-in-depth (no HTTP route serves the application log) and capturing
-// slog would buy a regression guard on the one sink a reader cannot reach.
-// Say so rather than letting "each sink" imply three.
+// L1: when Proxmox accepts the remote_migrate and the worker dies later, pollTaskStatus writes
+// PVE's die message to migration_jobs.error_message and task_history.exit_status, both
+// Viewer-readable, so the scrub armed by executeCrossCluster must reach it. Each sink is checked
+// for survival and absence. Not covered, knowingly: the o.logger.Error line beside them (no HTTP
+// route serves the application log).
 func TestPollTaskStatus_ScrubsTheTargetTokenFromTheWorkerFailure(t *testing.T) {
 	const (
 		node = credTestNode
@@ -551,18 +512,10 @@ func TestArmEndpointScrubberLeavesASecretlessTokenUnarmed(t *testing.T) {
 	}
 }
 
-// TestFailJob_ScrubsAnArmedContextsCredential makes failJob's own scrub
-// killable.
-//
-// It is not reachable through executeCrossCluster, which scrubs at its exit
-// and so hands failJob text that is already clean — which is exactly why the
-// scrub inside failJob survived every mutation until this test existed. The
-// hole it closes is the next early `return "", err` added between arming the
-// context and that exit: Execute passes the raw text straight to failJob, and
-// failJob writes it to the job row, the audit details and the log.
-//
-// So this drives failJob DIRECTLY with an armed context and unscrubbed text,
-// which is the only way to exercise the line at all.
+// TestFailJob_ScrubsAnArmedContextsCredential drives failJob directly with an armed context and
+// unscrubbed text: executeCrossCluster scrubs at its exit, so failJob's own scrub survived every
+// mutation. It closes the next early `return "", err` between arming and that exit, whose raw
+// text failJob would write to the job row, the audit details and the log.
 func TestFailJob_ScrubsAnArmedContextsCredential(t *testing.T) {
 	var execs []execCall
 	o := newCredTestOrchestrator(t, "http://127.0.0.1:1", &execs)

@@ -31,17 +31,10 @@ import (
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
-// These cases drive the console and VNC handlers over a REAL WebSocket dial,
-// because the two bypasses they pin both lived past the point app.Test can
-// reach: the handler only runs after the upgrade.
-//
-// HandleConsole and HandleVNC make no permission check of their own. The
-// console gate is the whole of their authorization, so what matters is that
-// (a) no request reaches them without passing it, and (b) what they act on is
-// what it checked. The stand-in database records the cluster each handler
-// goes to look up and then answers "no rows", which stops the handler before
-// it needs a Proxmox client — the lookup is the observable proof of which
-// cluster a console would have been opened on.
+// These drive the console and VNC handlers over a real WebSocket dial (both bypasses lived past
+// the upgrade, out of app.Test's reach). The handlers check no permission themselves, so no
+// request may reach them past the gate, and they must act on what it checked. The stand-in
+// database records which cluster a handler looks up, then stops it with "no rows".
 
 // gateLookupDB records the uuid handed to every QueryRow (GetCluster's id),
 // except the console credential's liveness check, which it answers itself —
@@ -419,31 +412,11 @@ func gateHandlerFor(kind string, queries *db.Queries, jwtSvc *auth.JWTService, l
 	return fiberws.New(NewConsoleHandler(queries, "unused", jwtSvc, logger).HandleConsole, cfg)
 }
 
-// TestGuard_OnlyTheGateReadsTheRequest is the static half of the duplicate-key
-// fix. TestConsoleHandlers_OpenWhatTheScopeNames observes what a handler opens
-// for the scope types it drives; this fails on code in this package that reads
-// the request through one of the accessors it lists, wherever in the package
-// it sits.
-//
-// The whole package, not just the two handlers, because a helper either one
-// calls can read the request as well as the handler can. The hazard is two
-// readings of one query that disagree: any code here holding the
-// *websocket.Conn can call conn.Query — the contrib websocket package's copy
-// of the query string, where the LAST copy of a repeated key wins — while the
-// gate reads c.Query, where the FIRST does. So a selector naming one of the
-// accessors below fails — a call or a method value, on any receiver — outside
-// the functions that ARE the gate, which read the request so that nothing
-// after them has to. Everything a console acts on comes from the scope the
-// gate validated (consoleScopeLocal).
-//
-// It is a NAME check, and says so. It cannot follow a request read into
-// another package, through an interface, or out of a closure created inside
-// a gate function and called later, and it cannot see an accessor it does not
-// list — above all c.Get, which reads a request header: app.Get and the client
-// cache's Get share the name, so banning it would fail this package for
-// nothing. Queries, Request and Body are banned only as calls, for the same
-// reason: sqlc's db.Queries type, *http.Request in a signature and a
-// response's Body field share those names.
+// TestGuard_OnlyTheGateReadsTheRequest: outside the gate functions nothing in this package may
+// read the request through the accessors listed, since conn.Query takes a repeated key's LAST
+// copy and c.Query its FIRST; a console acts only on consoleScopeLocal. A NAME check: it cannot
+// follow another package, an interface or a closure, and leaves c.Get unbanned (app.Get shares
+// the name); Queries, Request and Body are banned only as calls.
 func TestGuard_OnlyTheGateReadsTheRequest(t *testing.T) {
 	banned := map[string]bool{
 		"Query": true, "Params": true, "Headers": true, "Cookies": true,
@@ -526,22 +499,10 @@ func funcDeclName(fd *ast.FuncDecl) string {
 	return fd.Name.Name
 }
 
-// TestConsoleHandlers_CloseTheBrowserSocket pins that a console handler that
-// returns — here on its earliest refusal — closes the browser's connection
-// rather than leaving it for the client to close, and how it gets there.
-//
-// The websocket package closes a hijacked connection only after a panic, and
-// fasthttp leaves it open (KeepHijackedConns), so a handler that wrote its
-// Close frame and returned used to hold the socket until the client let go.
-// closeBrowserSocket closes it now, after reading until the client answers the
-// Close or closeDrainTimeout passes, and both arms are pinned: a client that
-// answers is let go at once, and one that never does is let go anyway — but
-// not before the deadline, because closing on unread input is the reset the
-// drain exists to avoid.
-//
-// So the client here sends first, before it reads the refusal, and the EOF has
-// to be a clean one. Input the drain left unread would turn the close into a
-// reset, and a drain that read one message and gave up would leave most of it.
+// TestConsoleHandlers_CloseTheBrowserSocket: fasthttp keeps hijacked connections open, so a
+// returning handler must close the browser's socket itself (closeBrowserSocket), after reading
+// until the client answers the Close or closeDrainTimeout passes, and not before: closing on
+// unread input is a reset. The client sends first, so the EOF must be clean.
 func TestConsoleHandlers_CloseTheBrowserSocket(t *testing.T) {
 	logger := testLogger()
 	jwtSvc := auth.NewJWTService("test-secret-key-for-testing-only", 15*time.Minute, 168*time.Hour)

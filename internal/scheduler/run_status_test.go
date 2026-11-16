@@ -66,18 +66,10 @@ func recordRun(t *testing.T, task db.ScheduledTask, status int, body string) *ta
 // lockedBody is how Proxmox refuses a call outright, before any task exists.
 const lockedBody = "VM 100 is locked (backup)"
 
-// TestExecuteTask_RecordsWhetherTheRunReachedProxmox is the regression test for
-// the status a run records as it leaves the scheduler.
-//
-// A run that reached Proxmox records 'dispatched' and the UPID of the task it
-// started — not 'success', because nothing is known yet about how the task
-// ends, and the UPID is all RunScheduledTaskReconcile needs to settle it later.
-// A run that did not reach Proxmox records 'failed' and its reason, with
-// last_upid written NULL: a run with no task must give the reconcile nothing to
-// follow.
-//
-// The refusal is an error status from the stub rather than a check the client
-// makes, so the failure crosses the wire the way a real one does.
+// TestExecuteTask_RecordsWhetherTheRunReachedProxmox: a run that reached Proxmox records
+// 'dispatched' and its UPID (how the task ends is not known yet; the reconcile settles it); one
+// that did not records 'failed' with its reason and last_upid NULL. The refusal is an error
+// status from the stub, so it crosses the wire as a real one does.
 func TestExecuteTask_RecordsWhetherTheRunReachedProxmox(t *testing.T) {
 	t.Parallel()
 
@@ -164,20 +156,10 @@ func TestExecuteTask_RecordsWhetherTheRunReachedProxmox(t *testing.T) {
 	}
 }
 
-// TestExecuteTask_ParksARunWithItsOwnOutcome pins what the parking path records
-// for each kind of run, now that a run can end after it is recorded.
-//
-// A task whose cron can never fire again is disabled as its run finishes
-// (parkUnschedulableTask), and the run and the schedule stay independent. A run
-// that reached Proxmox has not ended, so it is parked as 'dispatched' with its
-// UPID, and the reconcile settles it like any other; last_error carries only
-// the schedule's problem, since the run has no error of its own yet. Writing
-// 'success' there would be this change's bug again, and dropping the UPID would
-// leave the row reading Running for good — a disabled task has no next run to
-// overwrite it. A run that failed before dispatch keeps its own reason in front
-// of the schedule's.
-//
-// "0 8 31 4 *" parses and never fires: April has no 31st.
+// TestExecuteTask_ParksARunWithItsOwnOutcome: a task whose cron never fires again is disabled as
+// its run finishes, run and schedule independent. A dispatched run is parked 'dispatched' with
+// its UPID (not 'success', and not without the UPID, or the row reads Running for good); one
+// that failed keeps its own reason before the schedule's. "0 8 31 4 *" never fires.
 func TestExecuteTask_ParksARunWithItsOwnOutcome(t *testing.T) {
 	t.Parallel()
 
@@ -256,21 +238,10 @@ func (f *fakeSettler) ReconcileDispatchedScheduledTasks(
 	return f.settled, nil
 }
 
-// TestSettleDispatchedRuns_LooksForWhatADispatchWrites pins the pairing the
-// reconcile rests on.
-//
-// ReconcileDispatchedScheduledTasks names none of the scheduler's statuses; it
-// is handed them. So the only way it can miss a dispatched run is to be handed
-// a value other than the one executeTask recorded — and then every run would
-// read Running for good, with no error anywhere. A task that failed must
-// settle to the status a run that never reached Proxmox records, so the two
-// failures read the same, and a task that succeeded to the one the Schedules
-// tab shows as Success (runStatusSucceeded, which
-// TestRunStatusVocabularyMatchesTheSPA pins to the tab).
-//
-// The dispatch side is read from what executeTask actually writes rather than
-// from the constants, so the test holds whichever constant either side is
-// changed to use.
+// TestSettleDispatchedRuns_LooksForWhatADispatchWrites: the reconcile is handed the statuses,
+// so a mismatch with what executeTask records leaves every run Running, silently. A failed task
+// must settle to the status of a run that never reached Proxmox, a succeeded one to Success
+// (runStatusSucceeded); the dispatch side is read from what executeTask writes.
 func TestSettleDispatchedRuns_LooksForWhatADispatchWrites(t *testing.T) {
 	t.Parallel()
 
@@ -318,18 +289,10 @@ var (
 	claimSetRe = regexp.MustCompile(`(?i)\bSET\s+last_status\s*=\s*'([^']+)'`)
 )
 
-// TestRunStatusVocabularyMatchesTheSPA pins the last_status values the
-// scheduler writes against the union the Schedules tab reads them through.
-//
-// They are two copies with nothing else comparing them, and the drift is
-// silent in the direction that matters: rename 'dispatched' here and the tab,
-// which shows any value it does not know as Failed, reports every run under
-// way as a failure. tsc holds the tab's table to its union; this holds the
-// union to the scheduler.
-//
-// 'running' is written by ClaimDueTasks as a literal, not through
-// runStatusClaimed, so the constant is checked against that query's literal
-// before the list is compared.
+// TestRunStatusVocabularyMatchesTheSPA: the Schedules tab shows any status it does not know as
+// Failed, so renaming 'dispatched' here would report every run under way as failed; tsc holds the
+// tab to its union, this holds the union to the scheduler. 'running' is ClaimDueTasks's literal,
+// checked against runStatusClaimed first.
 func TestRunStatusVocabularyMatchesTheSPA(t *testing.T) {
 	t.Parallel()
 

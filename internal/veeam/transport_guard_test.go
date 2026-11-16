@@ -9,19 +9,10 @@ import (
 	"testing"
 )
 
-// transportConstructorExempt names the functions allowed to build an
-// http.Transport or http.Client. Everything else in this package must go
-// through buildHTTPClient.
-//
-// buildHTTPClient is the sole owner of the SSRF dial guard, TLS fingerprint
-// pinning (with session tickets disabled), and redirect refusal. A second
-// constructor anywhere in this package silently forks that hardening: the next
-// person to tighten one copy has no way to know the other exists, and the
-// forked client is the one that carries an admin password to an
-// operator-supplied URL.
-//
-// internal/proxmox pins the same invariant for the same reason; the two
-// packages each need their own guard because each owns its own transport.
+// transportConstructorExempt names who may build an http.Transport or http.Client; everything
+// else goes through buildHTTPClient, the sole owner of the SSRF dial guard, fingerprint pinning
+// and redirect refusal. A second constructor silently forks that hardening, on the client that
+// carries an admin password to an operator-supplied URL. internal/proxmox guards its own.
 var transportConstructorExempt = map[string]string{
 	"buildHTTPClient": "sole owner of the hardened transport",
 }

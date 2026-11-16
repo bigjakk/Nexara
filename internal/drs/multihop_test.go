@@ -8,20 +8,10 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// TestPlanCollapsesMultiHopForSameVM is the end-to-end guard for the multi-hop
-// fix. This score landscape (a hot n3 with two movable guests; empty n1/n2 of
-// equal score; light n4) makes the greedy loop route guests through different
-// intermediate nodes depending on Go's randomized map-iteration order — some
-// runs produce a multi-hop or a pure round trip for one VMID. Whatever the path,
-// collapseHops must always guarantee the two deterministic invariants below:
-// at most one recommendation per VMID, and never a no-op (source == target).
-//
-// Asserting a *specific* outcome (e.g. "vm 1001 is the one dropped") would be
-// flaky precisely because the path is map-order dependent — that mistake is what
-// this version fixes. The exact collapse semantics are pinned deterministically
-// by TestCollapseHops; here we run many iterations so the varied orderings
-// (including the multi-hop ones) are exercised, and any unwiring of collapseHops
-// surfaces as a duplicate VMID.
+// TestPlanCollapsesMultiHopForSameVM: this landscape routes guests through intermediate nodes
+// that depend on map iteration order, so it asserts only the invariants collapseHops guarantees
+// (at most one recommendation per VMID, never source == target) over many runs; a specific
+// outcome would be flaky. TestCollapseHops pins the exact semantics.
 func TestPlanCollapsesMultiHopForSameVM(t *testing.T) {
 	weights := DefaultWeights()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))

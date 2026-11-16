@@ -546,19 +546,11 @@ func TestCompression_ErrorEnvelopesAreNeverCompressed(t *testing.T) {
 	t.Logf("GET /api/v1/compress-probe-error: %d-byte error envelope, uncompressed", len(got.body))
 }
 
-// TestCompression_EmbeddedFrontendIsCompressed covers the other half of the
-// win, and a genuinely different code path from every test above.
-//
-// The SPA is not served by a route handler — RegisterFrontend mounts Fiber's
-// static middleware as a root catch-all AFTER setupRoutes, with its own
-// ModifyResponse hook. This asserts the compress middleware still wraps it,
-// and that the two headers that have to survive together actually do:
-// Cache-Control: immutable (set by applyFrontendCacheHeaders) and Vary:
-// Accept-Encoding. Without the second, a shared cache may hand a stored
-// gzipped bundle to a client that cannot decode it — for a year. A JSON answer
-// rides along, and every coding the middleware negotiates is decoded back to
-// the uncompressed bytes, repeatedly: Fiber v3.6 can hand a client zstd, and
-// go-brrr v1.3's pooled brotli writer is reused across responses.
+// TestCompression_EmbeddedFrontendIsCompressed: the SPA is served by the static catch-all
+// RegisterFrontend mounts after setupRoutes, a separate path. Cache-Control: immutable and Vary:
+// Accept-Encoding must survive together, or a shared cache may serve gzip to a client that
+// cannot decode it for a year. Every negotiated coding is decoded back, repeatedly (zstd, and
+// go-brrr's pooled brotli writer, reused across responses).
 func TestCompression_EmbeddedFrontendIsCompressed(t *testing.T) {
 	s, _ := newCompressTestServer(t, true)
 

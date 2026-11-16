@@ -156,40 +156,11 @@ func TestAllChangeTypesCoversEveryConstantAndEveryHeading(t *testing.T) {
 	}
 }
 
-// changeTypeValuesInSource type-checks the package's non-test files and
-// returns every distinct constant string used as a ChangeType.
-//
-// Type-checked, because a match on declaration shapes misses the ways a new
-// value actually arrives: `ChangeRemoved = ChangeType("removed")`, an untyped
-// `ChangeRemoved = "removed"` in the existing const block, or an inline
-// `h.Type = ChangeType("removed")` in the parser. go/types records every USE of
-// such a value as a constant of type ChangeType wherever it is spelled, so
-// every constant the source uses as a ChangeType is found. (An untyped
-// constant nothing uses as a ChangeType is not — and cannot reach the wire
-// either.) A literal the source only COMPARES against — with == or !=, or as
-// a case label, parenthesised or converted — is skipped: it says what the
-// package expects to see, not what it emits, and counting it would force a
-// chip nothing ever shows. A named ChangeType constant still counts even when
-// it is only compared, because its declaration is a use. The empty string is
-// skipped too: it is the zero value, "no chip", not a type.
-//
-// A conversion of a NON-constant to ChangeType — ChangeType(sec.heading), a
-// map[string]string lookup — is refused outright: the values it can produce
-// cannot be enumerated from the source, and it is exactly how a type the
-// frontend has no chip for would slip past everything above. Some ways in
-// stay out of reach, and the package uses none of them today: reflection (a
-// json.Unmarshal into a ChangeType field, fmt.Sscan, reflect's SetString), a
-// package-local generic helper instantiated at ChangeType (`as[ChangeType](s)`
-// returning `T(s)`, whose conversion is of a type parameter), a pointer
-// conversion (`*(*ChangeType)(&s)`), and concatenating a ChangeType variable
-// with another ChangeType variable or a listed constant. (With an unlisted
-// literal it is caught: go/types types the literal as a ChangeType constant.)
-//
-// The files and their imports come from `go list -export`, not a glob and
-// importer.Default: that way the package's build tags decide which files are
-// in it, and an import from this module resolves, where importer.Default
-// knows nothing of modules. The package itself is the one record go list
-// marks DepOnly false.
+// changeTypeValuesInSource type-checks the package's non-test files (via `go list -export`, so
+// build tags and module imports hold) and returns every constant used as a ChangeType, however
+// spelled; a literal only compared against, and "", are skipped. A conversion of a NON-constant
+// to ChangeType is refused outright, since its values cannot be enumerated. Out of reach and
+// unused today: reflection, a generic helper's T(s), pointer conversions, variable concatenation.
 func changeTypeValuesInSource(t *testing.T) []ChangeType {
 	t.Helper()
 	out, err := exec.Command("go", "list", "-deps", "-export",

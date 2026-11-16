@@ -203,24 +203,10 @@ func TestClaimsKind_TokensTheServiceIssuesHaveTheKindTheyWereIssuedFor(t *testin
 	}
 }
 
-// TestGuard_OnlyClaimsKindAndTheWebSocketUpgradeReadTheScopeMarkers holds the one-
-// predicate rule mechanically. "Is this token a session?" is Claims.IsSession's
-// answer and nobody else's: the middleware, the logout ownership check and anything
-// added later ask it, and none re-derives it from ConsoleScope and WSScope. That is
-// the whole point of the predicate — a marker added to Claims is then one change to
-// Kind and not one more test to remember in every function that had copied the
-// others — and with the two exclusions equivalent today, nothing behavioural can
-// tell a function that asks from one that has quietly gone back to the fields. So
-// this reads the source: outside claims_kind.go, a non-test file may read a scope
-// marker (a selector, x.ConsoleScope or x.WSScope) only under internal/ws.
-//
-// internal/ws is the exception and a recorded follow-up, not a decision. The
-// WebSocket upgrade does not ask "a session?" but "which of the scoped kinds?" —
-// a console token on /ws/console, a hub token on /ws — and still checks the markers
-// itself (ws/server.go). It would be better asked of Kind; it is not edited here.
-// The type auth.ConsoleScope, which the console handlers name, is not a read of a
-// marker, and the issuers set the markers in composite literals, which are not
-// reads either.
+// TestGuard_OnlyClaimsKindAndTheWebSocketUpgradeReadTheScopeMarkers: "is this a session?" is
+// Claims.IsSession's answer alone, and no behaviour can tell a caller that re-derives it, so this
+// reads source: outside claims_kind.go only internal/ws may read x.ConsoleScope or x.WSScope.
+// That exception (ws/server.go asks "which scoped kind?") is a recorded follow-up, not a decision.
 func TestGuard_OnlyClaimsKindAndTheWebSocketUpgradeReadTheScopeMarkers(t *testing.T) {
 	root := filepath.Join("..", "..")
 	const allowedFile = "internal/auth/claims_kind.go"

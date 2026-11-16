@@ -273,6 +273,12 @@ func (s *Server) setupMiddleware() {
 	// on the cookie does not help: an attacker sends a fresh random one each time.
 	// TestLogout_HasNoPerAddressLimit holds it so.
 	//
+	// Also outside this set, and with no per-address cap since the general limiter
+	// skips /api/v1/auth/: setup-status and sso-status (one boolean from an indexed
+	// read), oidc/token-exchange (a 5-second single-use GETDEL key), and, worth
+	// revisiting, totp/setup/verify (its own 5-attempt Redis budget). console-token is
+	// outside it too, with a cap of its own below.
+	//
 	// ONE bucket serves every path in the set, on purpose: login, change-password
 	// and the 2FA setup are three oracles for the same password, so an address gets
 	// 15 guesses a minute across all of them, not 15 at each. Because it runs before
