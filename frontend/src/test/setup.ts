@@ -14,16 +14,19 @@ class ResizeObserverStub {
   globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }
 ).ResizeObserver = ResizeObserverStub;
 
-window.matchMedia = (query: string) => ({
+// No addListener/removeListener: they are deprecated, and the only library
+// that calls one (sonner) does so only when addEventListener throws.
+const mediaQueryList = (
+  query: string,
+): Omit<MediaQueryList, "addListener" | "removeListener"> => ({
   matches: false,
   media: query,
   onchange: null,
   addEventListener: () => undefined,
   removeEventListener: () => undefined,
-  addListener: () => undefined,
-  removeListener: () => undefined,
   dispatchEvent: () => false,
 });
+window.matchMedia = (query: string) => mediaQueryList(query) as MediaQueryList;
 
 Element.prototype.scrollIntoView = () => undefined;
 Element.prototype.hasPointerCapture = () => false;
