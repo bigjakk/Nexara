@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Download, RefreshCw } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import {
   useVirtioWinConfig,
@@ -33,6 +33,7 @@ import { VirtioWinScheduleFields } from "./VirtioWinScheduleFields";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { describeError } from "@/lib/api-error";
+import { DateTime } from "@/components/DateTime";
 
 /** Sentinel for the "follow upstream stable" choice — Select cannot hold "". */
 const FOLLOW_STABLE = "__stable__";
@@ -346,15 +347,13 @@ export function VirtioWinConfigCard({ clusterId }: VirtioWinConfigCardProps) {
 
         <PropertyList className="border-t pt-4">
           <PropertyRow label="Last checked">
-            {config?.last_check_at
-              ? new Date(config.last_check_at).toLocaleString()
-              : "never"}
+            <DateTime value={config?.last_check_at} fallback="never" />
           </PropertyRow>
           <PropertyRow label="Next check">
             {!enabled
               ? "not scheduled — automatic downloads are off"
               : config?.next_check_at
-                ? new Date(config.next_check_at).toLocaleString()
+                ? formatDateTime(config.next_check_at)
                 : "within a minute"}
           </PropertyRow>
           {config?.source_url ? (

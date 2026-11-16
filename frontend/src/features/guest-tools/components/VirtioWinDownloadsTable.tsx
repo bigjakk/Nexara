@@ -14,6 +14,7 @@ import type {
   VirtioWinDownload,
   VirtioWinDownloadStatus,
 } from "../types/virtio-win";
+import { DateTime } from "@/components/DateTime";
 
 type DownloadSortKey =
   | "version"
@@ -91,7 +92,7 @@ const COLUMNS: ColumnDef<VirtioWinDownload, DownloadSortKey>[] = [
     sortValue: (d) => new Date(d.started_at).getTime(),
     cell: (d) => (
       <span className="text-muted-foreground">
-        {new Date(d.started_at).toLocaleString()}
+        <DateTime value={d.started_at} />
       </span>
     ),
   },

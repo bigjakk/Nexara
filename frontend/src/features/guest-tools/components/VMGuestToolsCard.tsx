@@ -28,6 +28,7 @@ import {
   guestToolsStageAction,
   guestToolsState,
 } from "../lib/guest-tools-state";
+import { DateTime } from "@/components/DateTime";
 
 /** Sentinel for "follow the cluster's target" — Select cannot hold "". */
 const FOLLOW_CLUSTER = "__cluster__";
@@ -142,9 +143,7 @@ export function VMGuestToolsCard({ clusterId, vmid }: VMGuestToolsCardProps) {
             {guest.agent_running ? "" : " (not running)"}
           </PropertyRow>
           <PropertyRow label="Last checked">
-            {guest.detected_at
-              ? new Date(guest.detected_at).toLocaleString()
-              : "Never"}
+            <DateTime value={guest.detected_at} fallback="Never" />
           </PropertyRow>
         </PropertyList>
 
