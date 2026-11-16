@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -51,10 +52,24 @@ type gateLookupDB struct {
 	ended bool
 	// endsAfter, when set, answers live only to that many checks.
 	endsAfter int
+	// audits is every audit row written: cluster, action and details.
+	audits []string
 }
 
-func (d *gateLookupDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (d *gateLookupDB) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "-- name: InsertAuditLog :exec") {
+		d.mu.Lock()
+		cluster, _ := args[0].(pgtype.UUID)
+		d.audits = append(d.audits, fmt.Sprintf("%s %s %s", uuid.UUID(cluster.Bytes), args[4], args[5]))
+		d.mu.Unlock()
+	}
 	return pgconn.CommandTag{}, nil
+}
+
+func (d *gateLookupDB) audited() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.audits...)
 }
 
 func (d *gateLookupDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
@@ -195,6 +210,7 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 	server := newTestServer(t, hub, jwtSvc, logger, ServerConfig{
 		ConsoleHandler: NewConsoleHandler(queries, "unused", jwtSvc, logger),
 		VNCHandler:     NewVNCHandler(queries, "unused", jwtSvc, logger),
+		Queries:        queries,
 	})
 	app := fiber.New()
 	server.RegisterRoutes(app)
@@ -226,21 +242,33 @@ func TestConsoleGate_RealRoutesRefuseTheBypasses(t *testing.T) {
 		path       string
 		token      string
 		wantStatus int
+		wantAudit  string // the console_open_refused row a refusal of the scope writes
 	}{
 		{"hub token, trailing slash on /ws/console",
-			"/ws/console/?cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", hubToken, http.StatusForbidden},
+			"/ws/console/?cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", hubToken, http.StatusForbidden, ""},
 		{"hub token, trailing slash on /ws/vnc",
-			"/ws/vnc/?cluster_id=" + gateClusterB + "&node=pve-02&vmid=999", hubToken, http.StatusForbidden},
+			"/ws/vnc/?cluster_id=" + gateClusterB + "&node=pve-02&vmid=999", hubToken, http.StatusForbidden, ""},
 		{"hub token, case and slash variant",
-			"/WS/CONSOLE/?cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", hubToken, http.StatusForbidden},
+			"/WS/CONSOLE/?cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", hubToken, http.StatusForbidden, ""},
 		{"vm_serial token for A with a second cluster, node and type appended",
 			"/ws/console?cluster_id=" + gateClusterA + "&node=pve-01&vmid=100&type=vm_serial" +
-				"&cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", serialToken, http.StatusBadRequest},
+				"&cluster_id=" + gateClusterB + "&node=pve-02&type=node_shell", serialToken, http.StatusBadRequest, ""},
+		// The token's own cluster and type are recorded, nothing the query typed.
+		{"vm_serial token for A asking for B",
+			"/ws/console?cluster_id=" + gateClusterB + "&node=pve-02&vmid=100&type=vm_serial", serialToken,
+			http.StatusForbidden, gateClusterA + ` console_open_refused {"reason":"scope","type":"vm_serial"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			before := len(lookups.lookedUp())
+			before, auditsBefore := len(lookups.lookedUp()), len(lookups.audited())
 			status, msg := dialGate(t, port, tt.path, tt.token)
+			var want []string
+			if tt.wantAudit != "" {
+				want = []string{tt.wantAudit}
+			}
+			if got := lookups.audited()[auditsBefore:]; !slices.Equal(got, want) {
+				t.Errorf("audit rows = %q, want %q", got, want)
+			}
 			if status != tt.wantStatus {
 				t.Errorf("status = %d (first message %q), want %d — this request must be refused at the gate",
 					status, msg, tt.wantStatus)

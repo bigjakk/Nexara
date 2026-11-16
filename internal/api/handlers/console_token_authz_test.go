@@ -14,7 +14,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // permCheck records one HasPermission call so tests can pin not just the
@@ -50,14 +52,16 @@ func (e *recordingEngine) LoadUserPermissions(_ context.Context, _ uuid.UUID) (*
 	return &auth.UserPermissions{}, nil
 }
 
-// newConsoleTokenTestApp wires ConsoleToken behind the given engine. The
-// handler has nil queries/pool — the deny path never reaches them, and the
-// allow path's nil-deref panic is contained by the recoverer (see the
-// not-403 assertion below).
-func newConsoleTokenTestApp(t *testing.T, engine permissionEngine) *fiber.App {
+// newConsoleTokenTestApp wires ConsoleToken behind the given engine, over a
+// database that records what it is sent and answers no row: the deny path
+// writes only its audit row, and the allow path stops at the user lookup (see
+// the not-403 assertion below).
+func newConsoleTokenTestApp(t *testing.T, engine permissionEngine) (*fiber.App, *captureDBTX) {
 	t.Helper()
 
+	capture := &captureDBTX{}
 	handler := &AuthHandler{
+		queries:    db.New(capture),
 		jwtService: auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour),
 	}
 
@@ -77,7 +81,7 @@ func newConsoleTokenTestApp(t *testing.T, engine permissionEngine) *fiber.App {
 		return c.Next()
 	})
 	app.Post("/auth/console-token", withRequestParams(t, consoleTokenMirror(), nil, handler.ConsoleToken))
-	return app
+	return app, capture
 }
 
 // consoleTokenMirror is a local copy of POST /api/v1/auth/console-token's
@@ -138,9 +142,10 @@ func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 	for _, tt := range consoleTokenTypes {
 		t.Run(tt.consoleType, func(t *testing.T) {
 			engine := &recordingEngine{actions: map[string]bool{"view": true}}
-			app := newConsoleTokenTestApp(t, engine)
+			app, capture := newConsoleTokenTestApp(t, engine)
+			clusterID := uuid.New()
 
-			resp, err := app.Test(mintConsoleTokenReq(uuid.New(), tt.consoleType, tt.vmid))
+			resp, err := app.Test(mintConsoleTokenReq(clusterID, tt.consoleType, tt.vmid))
 			if err != nil {
 				t.Fatalf("request failed: %v", err)
 			}
@@ -150,6 +155,14 @@ func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 				t.Errorf("status = %d, want %d (view:* must not mint %s tokens)",
 					resp.StatusCode, http.StatusForbidden, tt.consoleType)
 			}
+			// The refusal is audited in the row the WebSocket gate writes too,
+			// with nothing the caller typed (no node).
+			rows := capture.auditInserts(t)
+			want := `{"reason":"permission","type":"` + tt.consoleType + `"}`
+			if len(rows) != 1 || rows[0].Action != audit.ConsoleOpenRefused || string(rows[0].Details) != want ||
+				uuid.UUID(rows[0].ClusterID.Bytes) != clusterID {
+				t.Errorf("audit rows = %+v, want one %s %s on the cluster asked for", rows, audit.ConsoleOpenRefused, want)
+			}
 		})
 	}
 }
@@ -158,15 +171,15 @@ func TestConsoleToken_ViewOnlyDenied(t *testing.T) {
 // direction: an account holding the console action clears the RBAC gate for
 // every console type, and the gate asked exactly the right question —
 // action "console", the type's resource, scoped to the requested cluster.
-// With nil queries the handler cannot complete the mint (the recoverer
-// converts the nil-deref into a 500), so the status assertion is "not 403"
+// With no user row the handler cannot complete the mint (it answers 401 at
+// the user lookup), so the status assertion is "not 403"
 // — proof the permission check accepted console:* — rather than a full 200
 // path, which needs a real user row.
 func TestConsoleToken_ConsolePermPassesGate(t *testing.T) {
 	for _, tt := range consoleTokenTypes {
 		t.Run(tt.consoleType, func(t *testing.T) {
 			engine := &recordingEngine{actions: map[string]bool{"console": true}}
-			app := newConsoleTokenTestApp(t, engine)
+			app, _ := newConsoleTokenTestApp(t, engine)
 			clusterID := uuid.New()
 
 			resp, err := app.Test(mintConsoleTokenReq(clusterID, tt.consoleType, tt.vmid))

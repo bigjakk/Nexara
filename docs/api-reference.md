@@ -2624,6 +2624,11 @@ or a password change.
   removed from Nexara, whatever grant its user holds. The sign-in is untouched: a client should
   stop reconnecting, and not sign out. Permission changes can take up to the
   RBAC cache's lifetime (about five minutes) to be seen.
+- A refused console open is audited as `console_open_refused`, on the console's
+  cluster, with `reason` and the console `type` and nothing else: `permission` when
+  the mint is refused for want of `console:*` (`403`), `scope` when `/ws/console` or
+  `/ws/vnc` is opened with a token minted for another console (`403`). An expired
+  or invalid token is not audited.
 - A console whose sign-in or permission could not be checked for about a minute is closed with
   `1011`; that, and any other error or close code, may be retried, except
   `{"type":"error","code":"guest_not_running"}`, which means the guest is powered off.

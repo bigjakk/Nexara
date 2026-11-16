@@ -12,7 +12,9 @@ import (
 	"github.com/gofiber/contrib/v3/websocket"
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
@@ -393,6 +395,7 @@ func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 			}
 		}
 		if err := validateConsoleScope(c, claims.ConsoleScope); err != nil {
+			s.auditScopeRefusal(c, claims.UserID, claims.ConsoleScope)
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 		}
 		c.Locals(consoleScopeLocal, claims.ConsoleScope)
@@ -434,6 +437,31 @@ func (s *Server) authenticate(c fiber.Ctx, consoleRoute bool) error {
 	c.Locals("role", claims.Role)
 
 	return c.Next()
+}
+
+// auditScopeRefusal records a console token refused for a console other than the
+// one it was minted for, as the mint records a refused permission
+// (audit.ConsoleOpenRefused). The cluster and type are the signed token's, never
+// the query's. A failed write is logged; the refusal stands either way.
+func (s *Server) auditScopeRefusal(c fiber.Ctx, userID uuid.UUID, scope *auth.ConsoleScope) {
+	if s.queries == nil { // NewServer refuses that; a test's bare Server has none
+		s.logger.Warn("ws auth: no database to audit a console token refused for another console", "user_id", userID)
+		return
+	}
+	var cluster pgtype.UUID
+	if id, err := uuid.Parse(scope.ClusterID); err == nil {
+		cluster = pgtype.UUID{Bytes: id, Valid: true}
+	}
+	if err := audit.Write(c.Context(), s.queries, nil, db.InsertAuditLogParams{
+		ClusterID:    cluster,
+		UserID:       pgtype.UUID{Bytes: userID, Valid: userID != uuid.Nil},
+		ResourceType: "auth",
+		ResourceID:   userID.String(),
+		Action:       audit.ConsoleOpenRefused,
+		Details:      audit.ConsoleOpenRefusedDetails(audit.ConsoleRefusedScope, scope.Type),
+	}); err != nil {
+		s.logger.Warn("ws auth: could not audit a console token refused for another console", "user_id", userID, "error", err)
+	}
 }
 
 // tokenFromSubprotocolHeader extracts the JWT from the request's

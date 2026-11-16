@@ -22,6 +22,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/audit"
 	"github.com/bigjakk/nexara/internal/auth"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -1547,6 +1548,12 @@ func (h *AuthHandler) ConsoleToken(c fiber.Ctx, p *apischema.Params) error {
 	// cmode=shell is a root shell inside it, with no login.
 	// console_token_authz_test.go pins this invariant.
 	if err := requireClusterPerm(c, "console", resource, clusterUUID); err != nil {
+		// A refusal for the permission is audited, in the row shape the WebSocket
+		// gate writes for a token used on another console (audit.ConsoleOpenRefused).
+		if fe := (*fiber.Error)(nil); errors.As(err, &fe) && fe.Code == fiber.StatusForbidden {
+			AuditLogAs(c, h.queries, h.eventPub, userID, ClusterUUID(clusterUUID), "auth", userID.String(),
+				audit.ConsoleOpenRefused, audit.ConsoleOpenRefusedDetails(audit.ConsoleRefusedPermission, consoleType))
+		}
 		return err
 	}
 
