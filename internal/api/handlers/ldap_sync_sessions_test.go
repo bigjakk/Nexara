@@ -350,8 +350,8 @@ func TestLDAPSync_TheLeaseIsShortRenewedAndNamedInThe409(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict || !strings.Contains(messageOf(body), "03:04:05 UTC") {
 		t.Errorf("busy: %d %v, want 409 naming when the lease ends", resp.StatusCode, body)
 	}
-	if got := ldapSyncLease; got > 5*time.Minute {
-		t.Errorf("the lease lasts %v past a renewal: a stopped sync blocks the next one that long", got)
+	if got := ldapSyncLease; got < 5*time.Minute || got > 10*time.Minute {
+		t.Errorf("the lease lasts %v past a renewal: under one account's worst case (5 min) the sync loses it to itself, over 10 a stopped sync blocks the next too long", got)
 	}
 }
 

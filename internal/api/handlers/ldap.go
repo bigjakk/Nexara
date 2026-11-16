@@ -612,10 +612,12 @@ func (h *LDAPHandler) Sync(c fiber.Ctx, p *apischema.Params) error {
 
 // ldapSyncLease is how long a sync's lease (ClaimLDAPSyncLease) lasts past its last
 // renewal: the sync renews it before every account, so a process that died or stopped
-// holds the config for this long at most. It outlasts the slowest single step, a dial
-// (one minute) and a search (30 s). ldapSyncMaxDuration bounds the whole sync.
+// holds the config for this long at most. It outlasts one account's worst case with a
+// margin: against a degraded directory a search can be a dial, StartTLS, a bind, the
+// search and the group search, each up to the one-minute request timeout
+// (internal/auth ldapRequestTimeout). ldapSyncMaxDuration bounds the whole sync.
 const (
-	ldapSyncLease       = 3 * time.Minute
+	ldapSyncLease       = 6 * time.Minute
 	ldapSyncMaxDuration = time.Hour
 )
 
