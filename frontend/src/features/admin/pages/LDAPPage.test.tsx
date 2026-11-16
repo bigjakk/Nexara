@@ -461,3 +461,25 @@ describe("a Sync Now the mass-miss rule stopped", () => {
     expect(mockedToastError).not.toHaveBeenCalled();
   });
 });
+
+describe("the filter hints", () => {
+  // The hints name the literal {{username}} / {{userDN}} tokens through an
+  // interpolated value; i18next must not interpolate that value a second time.
+  it("show the placeholder tokens with their braces", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(
+      await screen.findByRole("button", { name: "Add configuration" }),
+    );
+    expect(
+      await screen.findByText(
+        "{{username}} stands for what was typed at sign-in.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "{{userDN}} stands for the DN of the person signing in.",
+      ),
+    ).toBeVisible();
+  });
+});

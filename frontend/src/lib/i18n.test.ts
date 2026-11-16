@@ -24,6 +24,7 @@ describe("i18n configuration", () => {
       "dashboard",
       "settings",
       "admin",
+      "access",
       "clusters",
       "inventory",
       "vms",
