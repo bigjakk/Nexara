@@ -165,6 +165,17 @@ describe("buildTopologyGraph", () => {
     expect(storageEdge?.source).toBe("cluster-c1");
   });
 
+  // A halted VM is "running" to Proxmox; the chip showed it as running.
+  it("gives a halted VM's chip its state, not running", () => {
+    const vm = makeVM({ status: "running", run_state: "io-error" });
+    const graph = buildTopologyGraph(
+      makeInput({ vmsByCluster: new Map([["c1", [vm]]]) }),
+      defaultFilters,
+    );
+    const guest = graph.nodes.find((n) => n.type === "guestNode");
+    expect((guest?.data as { status: string }).status).toBe("io-error");
+  });
+
   it("returns empty graph for empty input", () => {
     const input = makeInput({
       clusters: [],

@@ -16,6 +16,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { usePermissions } from "@/hooks/usePermissions";
 import type { VMResponse, NodeResponse } from "@/types/api";
 import type { ConsoleClickKeys } from "../lib/console-session";
+import { guestState } from "@/lib/guest-state";
 import { openConsole } from "../lib/open-console";
 
 interface VMEntry {
@@ -26,6 +27,8 @@ interface VMEntry {
   name: string;
   type: string;
   status: string;
+  /** guestState(): what the dot shows, a halted VM's state included. */
+  state: string;
   resourceId: string;
 }
 
@@ -92,6 +95,7 @@ export function QuickConnect({
           name: vm.name,
           type: vm.type,
           status: vm.status.toLowerCase(),
+          state: guestState(vm.status, vm.run_state),
           resourceId: vm.id,
         });
       }
@@ -179,7 +183,7 @@ export function QuickConnect({
                     key={`${vm.clusterId}-${String(vm.vmid)}`}
                     className="flex items-center gap-3 py-1.5 pl-6 pr-4"
                   >
-                    <StatusIcon status={vm.status} />
+                    <StatusIcon status={vm.state} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline gap-2">
                         <span className="truncate text-sm font-medium">

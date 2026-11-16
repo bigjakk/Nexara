@@ -5,6 +5,7 @@ import type {
   VMResponse,
   StorageResponse,
 } from "@/types/api";
+import { guestState } from "@/lib/guest-state";
 import type { UpsTone } from "@/features/power/lib/ups-state";
 
 // --- Node data payloads ---
@@ -219,7 +220,8 @@ export function buildTopologyGraph(
               `${vm.type === "qemu" ? "VM" : "CT"} ${String(vm.vmid)}`,
             vmid: vm.vmid,
             type: vm.type as "qemu" | "lxc",
-            status: vm.status,
+            // A halted VM is running to Proxmox; its state says what it is.
+            status: guestState(vm.status, vm.run_state),
             cpuCount: vm.cpu_count,
             memTotal: vm.mem_total,
             haState: vm.ha_state,
