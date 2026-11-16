@@ -21,6 +21,7 @@ import { ApplyTemplateDialog } from "./ApplyTemplateDialog";
 import type { FirewallTemplate } from "../types/network";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { DateTime } from "@/components/DateTime";
 
 interface FirewallTemplatesTableProps {
   clusterId: string;
@@ -90,7 +91,7 @@ export function FirewallTemplatesTable({
                     {tmpl.rules.length !== 1 ? "s" : ""}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(tmpl.updated_at).toLocaleDateString()}
+                    <DateTime value={tmpl.updated_at} kind="date" />
                   </TableCell>
                   <TableCell className="py-1">
                     <div className="flex items-center justify-end gap-1">
