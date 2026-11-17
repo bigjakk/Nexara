@@ -42,11 +42,14 @@ func isKernelPackage(name string) bool {
 // from packagesJSON: the pending updates startNode recorded from Proxmox's apt
 // listing, which names both the series package being upgraded and the new build
 // it pulls in. It serves the automated and the manual path alike, and needs
-// nothing from the node. An automated upgrade counts only kernel packages it
-// upgrades and does not hold: a new build or series is listed even when the
-// held package that would pull it in keeps apt from installing it, and the
-// upgraded package that pulls one in is always listed beside it. A list that cannot be read is not a "no", as in
-// rebootOwed.
+// nothing from the node. An automated upgrade never counts a kernel package it
+// holds, and while it holds any kernel package it counts no NEW kernel entry
+// either: one is listed even when the held package that would pull it in keeps
+// apt from installing it. Without such a hold a new entry counts, as when
+// proxmox-ve pulls in proxmox-default-kernel on a node that never had it. Still
+// wrong, towards "not owed": a job holding one kernel package while a different,
+// new series arrives through a package it does not hold. A list that cannot be
+// read is not a "no", as in rebootOwed.
 func upgradeInstallsKernel(job db.RollingUpdateJob, packagesJSON []byte) bool {
 	if len(packagesJSON) == 0 {
 		return false
@@ -55,11 +58,12 @@ func upgradeInstallsKernel(job db.RollingUpdateJob, packagesJSON []byte) bool {
 	if err := json.Unmarshal(packagesJSON, &updates); err != nil {
 		return true
 	}
+	holdsKernel := job.AutoUpgrade && slices.ContainsFunc(job.PackageExcludes, isKernelPackage)
 	for _, u := range updates {
 		if !isKernelPackage(u.Package) {
 			continue
 		}
-		if job.AutoUpgrade && (u.OldVersion == "" || slices.Contains(job.PackageExcludes, u.Package)) {
+		if job.AutoUpgrade && slices.Contains(job.PackageExcludes, u.Package) || holdsKernel && u.OldVersion == "" {
 			continue
 		}
 		return true

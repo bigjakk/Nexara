@@ -151,6 +151,8 @@ func TestUpgradeInstallsKernel(t *testing.T) {
 		{"series held, its new build listed", auto, `[{"Package":"pve-manager","OldVersion":"9.0.1"},` + series + `,` + build + `]`, false},
 		{"default kernel held, its new series listed", excluding("proxmox-default-kernel"), toNewSeries, false},
 		{"default kernel not held, bringing a new series", excluding("pve-manager"), toNewSeries, true},
+		{"proxmox-ve pulls in the default kernel, nothing held", excluding(), `[{"Package":"proxmox-ve","OldVersion":"8.0.2"},` +
+			`{"Package":"proxmox-default-kernel"},{"Package":"proxmox-kernel-6.5"},{"Package":"proxmox-kernel-6.5.11-4-pve-signed"}]`, true},
 		{"excluded, but a manual upgrade", db.RollingUpdateJob{PackageExcludes: auto.PackageExcludes}, `[` + series + `,` + build + `]`, true},
 		{"unreadable list", db.RollingUpdateJob{}, `{`, true},
 	}
