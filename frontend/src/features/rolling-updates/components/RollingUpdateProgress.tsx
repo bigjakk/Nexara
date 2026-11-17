@@ -51,9 +51,6 @@ interface RollingUpdateProgressProps {
   canManage: boolean;
 }
 
-/** Where the job list lives: the trail back from a job. */
-const JOBS_PATH = "/security?tab=rolling-updates";
-
 const STEP_ORDER = [
   "pending",
   "draining",
@@ -430,7 +427,11 @@ export function RollingUpdateProgress({
 
   const crumbs = [
     { label: "Security", to: "/security" },
-    { label: "Rolling updates", to: JOBS_PATH },
+    // The trail back lands on this job's cluster, not the default one.
+    {
+      label: "Rolling updates",
+      to: `/security?tab=rolling-updates&cluster=${clusterId}`,
+    },
     { label: "Job" },
   ];
 

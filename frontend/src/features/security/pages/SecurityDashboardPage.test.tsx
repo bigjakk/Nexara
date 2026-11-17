@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
-import { stubApi } from "@/test/fetch-stub";
+import { listOf, stubApi } from "@/test/fetch-stub";
 import { makeCluster } from "@/test/cluster.fixtures";
+import { makeRollingUpdateJob } from "@/test/rolling-update.fixtures";
 import { SecurityDashboardPage } from "./SecurityDashboardPage";
 
 afterEach(() => {
@@ -26,5 +27,50 @@ describe("SecurityDashboardPage — posture", () => {
     expect(
       within(notice as HTMLElement).getByRole("button", { name: "Retry" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("SecurityDashboardPage — job links", () => {
+  const clusters = {
+    items: [
+      makeCluster({ id: "c1", name: "cluster01" }),
+      makeCluster({ id: "c2", name: "cluster02" }),
+    ],
+    total: 2,
+  };
+
+  // The cluster rides in the URL beside the job: a reload of a job on the
+  // second cluster used to ask the first for it and show "Job not found".
+  it("opens a job on the second cluster from its link", async () => {
+    stubApi({
+      "/api/v1/clusters": clusters,
+      "/api/v1/clusters/c2/rolling-updates/j1": makeRollingUpdateJob({
+        cluster_id: "c2",
+        status: "running",
+      }),
+      "/api/v1/clusters/c2/rolling-updates/j1/nodes": listOf([]),
+    });
+    renderWithProviders(<SecurityDashboardPage />, {
+      router: {
+        initialEntries: ["/security?tab=rolling-updates&cluster=c2&job=j1"],
+      },
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Rolling update" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("cluster02")).toBeInTheDocument();
+  });
+
+  // A link saved before the fix names no cluster; when the default cluster
+  // does not have the job, it lands on that cluster's jobs list.
+  it("opens the jobs list for an old link the default cluster cannot find", async () => {
+    stubApi({ "/api/v1/clusters": clusters });
+    renderWithProviders(<SecurityDashboardPage />, {
+      router: { initialEntries: ["/security?tab=rolling-updates&job=j1"] },
+    });
+
+    expect(await screen.findByText("Rolling update jobs")).toBeInTheDocument();
+    expect(screen.queryByText("Job not found")).not.toBeInTheDocument();
   });
 });

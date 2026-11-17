@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldAlert, Loader2, RefreshCw } from "lucide-react";
@@ -28,6 +28,7 @@ import { ScanScheduleSettings } from "../components/ScanScheduleSettings";
 import { ScanHistoryTable } from "../components/ScanHistoryTable";
 import { VulnerabilityTable } from "../components/VulnerabilityTable";
 import {
+  useRollingUpdateJob,
   useRollingUpdateJobs,
   useStartRollingUpdateJob,
   useCancelRollingUpdateJob,
@@ -48,24 +49,40 @@ export function SecurityDashboardPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: clusters, isLoading: clustersLoading } = useClusters();
-  const [selectedClusterId, setSelectedClusterId] = useState<string>("");
   const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
   const [kevDialogScanId, setKEVDialogScanId] = useState<string | null>(null);
 
-  // Persist selected job ID in URL search params so page refresh preserves the view.
+  // The tab, the cluster and the job live in the URL, so a reload or a pasted
+  // link lands where it was: a job belongs to one cluster, and asking another
+  // for it answers 404.
   const selectedJobId = searchParams.get("job");
   const activeTab = searchParams.get("tab") ?? "vulnerabilities";
+  const urlClusterId = searchParams.get("cluster") ?? "";
+  const urlClusterKnown = clusters?.some((c) => c.id === urlClusterId) ?? false;
 
   const setSelectedJob = useCallback(
-    (job: RollingUpdateJob | null) => {
+    (job: Pick<RollingUpdateJob, "id" | "cluster_id"> | null) => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         if (job) {
           next.set("job", job.id);
+          next.set("cluster", job.cluster_id);
           next.set("tab", "rolling-updates");
         } else {
           next.delete("job");
         }
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
+
+  const setSelectedCluster = useCallback(
+    (clusterId: string) => {
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("cluster", clusterId);
+        next.delete("job");
         return next;
       });
     },
@@ -84,9 +101,30 @@ export function SecurityDashboardPage() {
     [setSearchParams],
   );
 
-  const activeClusterId =
-    selectedClusterId ||
-    (clusters && clusters.length > 0 ? (clusters[0]?.id ?? "") : "");
+  const activeClusterId = urlClusterKnown
+    ? urlClusterId
+    : (clusters?.[0]?.id ?? "");
+
+  // A job link without a known cluster (one saved before the cluster was kept
+  // in the URL) is tried on the default cluster. If that cluster does not have
+  // it, the link opens that cluster's jobs list rather than "Job not found".
+  const legacyJob = useRollingUpdateJob(
+    selectedJobId && !urlClusterKnown ? activeClusterId : "",
+    selectedJobId ?? "",
+  );
+  const legacyJobMissing =
+    selectedJobId !== null && !urlClusterKnown && legacyJob.isError;
+  useEffect(() => {
+    if (!legacyJobMissing) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("job");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [legacyJobMissing, setSearchParams]);
 
   // CVE scanning hooks
   const postureQuery = useSecurityPosture(activeClusterId);
@@ -123,7 +161,7 @@ export function SecurityDashboardPage() {
 
   // Rolling update progress detail view: a page about one job, with its own
   // header and a trail back to the list.
-  if (selectedJobId) {
+  if (selectedJobId && !legacyJobMissing) {
     return (
       <RollingUpdateProgress
         clusterId={activeClusterId}
@@ -147,9 +185,8 @@ export function SecurityDashboardPage() {
                 size="md"
                 value={activeClusterId}
                 onValueChange={(clusterId) => {
-                  setSelectedClusterId(clusterId);
+                  setSelectedCluster(clusterId);
                   setSelectedScanId(null);
-                  setSelectedJob(null);
                 }}
                 options={clusters.map((cluster) => ({
                   value: cluster.id,

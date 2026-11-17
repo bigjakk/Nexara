@@ -1940,6 +1940,8 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 
 ### Managing Jobs
 
+**View** opens a job's page. Its address names the job's cluster as well, so a reload or a pasted link opens the same job; an older link, which names no cluster, opens the job if it is on the first cluster and that cluster's jobs list otherwise.
+
 - **Start** — begin the rolling update. It asks first, naming how many nodes the job updates and what happens to each in turn
 - **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way stops after the guest it is moving and carries on from there once you resume. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
 - **Resume** — continue a paused job

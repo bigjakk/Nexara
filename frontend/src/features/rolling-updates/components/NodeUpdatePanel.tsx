@@ -150,7 +150,7 @@ export function NodeUpdatePanel({
             {/* Deep-linked: /security lands on the vulnerabilities tab by
                 default, and the job is what the operator wants to see. */}
             <Link
-              to={`/security?tab=rolling-updates&job=${update.data.id}`}
+              to={`/security?tab=rolling-updates&cluster=${update.data.cluster_id}&job=${update.data.id}`}
               className="underline"
             >
               Watch its progress
