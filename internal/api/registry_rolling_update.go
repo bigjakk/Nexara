@@ -485,8 +485,25 @@ func createRollingUpdateParams() apischema.Properties {
 		"parallelism": rollingParallelismParam(),
 		"reboot_after_update": {
 			Type: apischema.Boolean, Optional: true, Default: false, Typetext: "<boolean>",
-			Description: "Reboot each node after its upgrade even when apt did not ask for one. " +
-				"An in-place job defers any reboot regardless and flags the node instead.",
+			Description: "Reboot every node after its upgrade. False reboots a node only when its upgrade " +
+				"installs a kernel or, for an automated upgrade, when a package asks for a reboot " +
+				"(/var/run/reboot-required); true reboots it either way. An in-place job defers any reboot " +
+				"while guests run on the node and flags the node instead.",
+		},
+		"ceph_wait": {
+			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",
+			Description: "On a Ceph cluster, wait until every placement group is active+clean, and as many " +
+				"OSDs are up as before, before taking a node down and before calling a node healthy and " +
+				"moving its guests back. A wait longer than 30 minutes pauses the job. Ignored on a cluster " +
+				"without Ceph.",
+		},
+		"ceph_noout": {
+			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",
+			Description: "On a Ceph cluster, set Ceph's noout flag before the first node goes down and clear " +
+				"it when the job ends, however it ends, so a rebooting node's OSDs are not marked out and " +
+				"re-replicated. A flag already set is left as it is and never cleared. Needs Sys.Modify on / " +
+				"for the cluster's API token; without it the job goes on without noout. Ignored on a " +
+				"cluster without Ceph.",
 		},
 		"auto_restore_guests": {
 			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",

@@ -399,6 +399,8 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 		HaWarnings:        haWarningsJSON,
 		AutoUpgrade:       autoUpgrade,
 		DrainGuests:       drainGuests,
+		CephWait:          p.Bool("ceph_wait"),
+		CephNoout:         p.Bool("ceph_noout"),
 		CreatedBy:         userID,
 		NotifyChannelID:   notifyChannelID,
 	})

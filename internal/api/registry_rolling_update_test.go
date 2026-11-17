@@ -414,6 +414,8 @@ func TestRollingUpdateCreateKeepsItsDefaults(t *testing.T) {
 		{"auto_restore_guests", true, "a drained job migrates its guests back"},
 		{"auto_upgrade", false, "an upgrade runs by hand unless SSH is configured and the caller opts in"},
 		{"drain_guests", true, "the drained shape is the only one that existed before in-place was added"},
+		{"ceph_wait", true, "a job on a Ceph cluster waits for Ceph unless the caller turns it off"},
+		{"ceph_noout", true, "a job on a Ceph cluster holds noout unless the caller turns it off"},
 	} {
 		prop, ok := e.Parameters[want.name]
 		if !ok {
@@ -459,6 +461,9 @@ func TestRollingUpdateCreateKeepsItsDefaults(t *testing.T) {
 	}
 	if !cap.params.Bool("drain_guests") || !cap.params.Bool("auto_restore_guests") {
 		t.Error("a create with no body flags did not arrive drained and auto-restoring")
+	}
+	if !cap.params.Bool("ceph_wait") || !cap.params.Bool("ceph_noout") {
+		t.Error("a create with no body flags did not arrive waiting for Ceph and holding noout")
 	}
 	if cap.params.Bool("reboot_after_update") || cap.params.Bool("auto_upgrade") {
 		t.Error("a create with no body flags arrived rebooting or auto-upgrading")

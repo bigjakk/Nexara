@@ -21,7 +21,9 @@ func TestCephCheck(t *testing.T) {
 		}
 		return s
 	}
-	pg := func(state string, n int) proxmox.PGStateCount { return proxmox.PGStateCount{StateName: state, Count: n} }
+	pg := func(state string, n int) proxmox.PGStateCount {
+		return proxmox.PGStateCount{StateName: state, Count: n}
+	}
 	for _, tt := range []struct {
 		name     string
 		status   *proxmox.CephStatus

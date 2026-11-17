@@ -1089,8 +1089,14 @@ type RollingUpdateJob struct {
 	CleanupPending    bool               `json:"cleanup_pending"`
 	CleanupAttempts   int32              `json:"cleanup_attempts"`
 	// False upgrades each node in place, leaving its guests running (no migration, no target node needed)
-	DrainGuests bool               `json:"drain_guests"`
-	ResumedAt   pgtype.Timestamptz `json:"resumed_at"`
+	DrainGuests      bool               `json:"drain_guests"`
+	ResumedAt        pgtype.Timestamptz `json:"resumed_at"`
+	CephWait         bool               `json:"ceph_wait"`
+	CephNoout        bool               `json:"ceph_noout"`
+	CephPresent      pgtype.Bool        `json:"ceph_present"`
+	CephOsdsBaseline int32              `json:"ceph_osds_baseline"`
+	CephNooutState   string             `json:"ceph_noout_state"`
+	PauseReason      string             `json:"pause_reason"`
 }
 
 type RollingUpdateNode struct {
@@ -1119,7 +1125,9 @@ type RollingUpdateNode struct {
 	SkipReason             string             `json:"skip_reason"`
 	StoppedPassthroughJson []byte             `json:"stopped_passthrough_json"`
 	// Upgrade applied but a reboot is still pending; set when the node could not be rebooted because guests are running on it
-	RebootRequired bool `json:"reboot_required"`
+	RebootRequired    bool               `json:"reboot_required"`
+	CephWaitReason    string             `json:"ceph_wait_reason"`
+	CephWaitStartedAt pgtype.Timestamptz `json:"ceph_wait_started_at"`
 }
 
 type ScheduledTask struct {

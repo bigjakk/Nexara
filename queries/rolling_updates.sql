@@ -1,6 +1,6 @@
 -- name: InsertRollingUpdateJob :one
-INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id, drain_guests)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id, drain_guests, ceph_wait, ceph_noout)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING *;
 
 -- name: GetRollingUpdateJob :one
@@ -44,13 +44,20 @@ WHERE id = $1 AND status IN ('pending', 'running', 'paused');
 
 -- name: PauseRollingUpdateJob :exec
 UPDATE rolling_update_jobs
-SET status = 'paused', updated_at = now()
+SET status = 'paused', pause_reason = '', updated_at = now()
 WHERE id = $1 AND status = 'running';
+
+-- The engine pauses a job itself when a node has waited too long for Ceph; the
+-- reason is what the job view shows, and a resume clears it.
+-- name: PauseRollingUpdateJobWithReason :execrows
+UPDATE rolling_update_jobs
+SET status = 'paused', pause_reason = sqlc.arg(pause_reason), updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'running';
 
 -- resumed_at restarts the step timeouts of the nodes in flight; see stepElapsed.
 -- name: ResumeRollingUpdateJob :exec
 UPDATE rolling_update_jobs
-SET status = 'running', resumed_at = now(), updated_at = now()
+SET status = 'running', resumed_at = now(), pause_reason = '', updated_at = now()
 WHERE id = $1 AND status = 'paused';
 
 -- A job that was created and never started holds nothing on the cluster (DRS,
@@ -276,6 +283,7 @@ SET cleanup_pending = false, updated_at = now()
 WHERE rolling_update_jobs.id = $1
   AND rolling_update_jobs.drs_was_enabled = false
   AND rolling_update_jobs.native_crs_paused = false
+  AND rolling_update_jobs.ceph_noout_state <> 'held'
   AND (rolling_update_jobs.disabled_ha_rules IS NULL OR rolling_update_jobs.disabled_ha_rules::text IN ('null', '[]'))
   AND NOT EXISTS (
       SELECT 1 FROM rolling_update_nodes n
@@ -332,3 +340,33 @@ SELECT * FROM rolling_update_nodes
 WHERE job_id = $1 AND step = 'pending'
 ORDER BY node_order
 LIMIT 1;
+
+-- Whether the job's cluster runs Ceph, decided once per job; see cephPresent.
+-- name: SetJobCephPresent :exec
+UPDATE rolling_update_jobs
+SET ceph_present = sqlc.arg(ceph_present), updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: SetJobCephOSDBaseline :exec
+UPDATE rolling_update_jobs
+SET ceph_osds_baseline = sqlc.arg(ceph_osds_baseline), updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- 'held' is written before noout is set, as the HA rules are recorded before
+-- they are disabled; see holdNoout.
+-- name: SetJobCephNooutState :exec
+UPDATE rolling_update_jobs
+SET ceph_noout_state = sqlc.arg(ceph_noout_state), updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- The wait's start is kept across ticks (COALESCE) for the time limit.
+-- name: SetNodeCephWait :exec
+UPDATE rolling_update_nodes
+SET ceph_wait_reason = sqlc.arg(ceph_wait_reason),
+    ceph_wait_started_at = COALESCE(ceph_wait_started_at, now())
+WHERE id = sqlc.arg(id);
+
+-- name: ClearNodeCephWait :exec
+UPDATE rolling_update_nodes
+SET ceph_wait_reason = '', ceph_wait_started_at = NULL
+WHERE id = $1;

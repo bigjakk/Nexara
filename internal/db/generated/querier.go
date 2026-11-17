@@ -354,6 +354,7 @@ type Querier interface {
 	// An administrator's reset of one directory account's binding: its next sign-in or
 	// sync binds it again by address. 0 rows: not a directory account, or not bound.
 	ClearLDAPEntry(ctx context.Context, id uuid.UUID) (int64, error)
+	ClearNodeCephWait(ctx context.Context, id uuid.UUID) error
 	// An administrator's reset of one SSO account's link: its next sign-in links again by
 	// address. 0 rows: not an SSO account, or not linked.
 	ClearOIDCIdentity(ctx context.Context, id uuid.UUID) (int64, error)
@@ -2943,6 +2944,9 @@ type Querier interface {
 	// At most one open episode per (UPS, kind); a second open is a no-op.
 	OpenUpsEvent(ctx context.Context, arg OpenUpsEventParams) error
 	PauseRollingUpdateJob(ctx context.Context, id uuid.UUID) error
+	// The engine pauses a job itself when a node has waited too long for Ceph; the
+	// reason is what the job view shows, and a resume clears it.
+	PauseRollingUpdateJobWithReason(ctx context.Context, arg PauseRollingUpdateJobWithReasonParams) (int64, error)
 	// PruneCVEScanHistory deletes each cluster's scans beyond its newest keep,
 	// counted in the created_at order ListCVEScans and GetLatestCVEScan read. A
 	// scan's node rows and vulnerabilities go with it by cascade (000020; 000139
@@ -3238,6 +3242,12 @@ type Querier interface {
 	// guest's CD-ROM looked like before we borrowed it.
 	SetGuestToolsStage(ctx context.Context, arg SetGuestToolsStageParams) error
 	SetGuestToolsUptime(ctx context.Context, arg SetGuestToolsUptimeParams) error
+	// 'held' is written before noout is set, as the HA rules are recorded before
+	// they are disabled; see holdNoout.
+	SetJobCephNooutState(ctx context.Context, arg SetJobCephNooutStateParams) error
+	SetJobCephOSDBaseline(ctx context.Context, arg SetJobCephOSDBaselineParams) error
+	// Whether the job's cluster runs Ceph, decided once per job; see cephPresent.
+	SetJobCephPresent(ctx context.Context, arg SetJobCephPresentParams) error
 	SetJobDRSWasEnabled(ctx context.Context, arg SetJobDRSWasEnabledParams) error
 	SetJobDisabledHARules(ctx context.Context, arg SetJobDisabledHARulesParams) error
 	SetJobNativeCRSPaused(ctx context.Context, arg SetJobNativeCRSPausedParams) error
@@ -3249,6 +3259,8 @@ type Querier interface {
 	// a cluster's tree give their connections back instead of holding the pool.
 	SetLocalLockTimeout(ctx context.Context, timeout string) error
 	SetMigrationJobStarted(ctx context.Context, arg SetMigrationJobStartedParams) error
+	// The wait's start is kept across ticks (COALESCE) for the time limit.
+	SetNodeCephWait(ctx context.Context, arg SetNodeCephWaitParams) error
 	// Legacy: new code records disabled HA rules at job scope (see
 	// SetJobDisabledHARules); this remains only so the release path can clear
 	// per-node records written by pre-000073 versions.
