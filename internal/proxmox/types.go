@@ -1016,6 +1016,8 @@ type CephPGMap struct {
 	WritOpPerSec int64          `json:"write_op_per_sec"`
 	PGsPerState  []PGStateCount `json:"pgs_by_state,omitempty"`
 	NumPGs       int            `json:"num_pgs"`
+	// NumPools is how many pools the PGs belong to; with pools there are PGs.
+	NumPools     int            `json:"num_pools"`
 	DataBytes    int64          `json:"data_bytes"`
 	UsedFraction float64        `json:"used_pct,omitempty"`
 }
