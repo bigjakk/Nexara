@@ -57,6 +57,8 @@ type memberDB struct {
 	queried map[string][]any
 	// drs, when set, answers GetDRSConfig.
 	drs *db.DrsConfig
+	// clusterErr, when set, answers GetCluster: the engine cannot build a client.
+	clusterErr error
 	// ssh, when set, answers NodeSSHConfig's three lookups.
 	ssh *sshAnswers
 }
@@ -187,6 +189,8 @@ func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row 
 	case name == "GetRollingUpdateJob" && d.jobStatus != "":
 		id, _ := args[0].(uuid.UUID)
 		return structRow{db.RollingUpdateJob{ID: id, ClusterID: d.cluster, Status: d.jobStatus}}
+	case name == "GetCluster" && d.clusterErr != nil:
+		return rowErr{d.clusterErr}
 	case name == "GetDRSConfig" && d.drs != nil:
 		return structRow{*d.drs}
 	case d.ssh != nil && slices.Contains(sshLookups, name):
