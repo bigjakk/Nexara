@@ -1,9 +1,27 @@
 package handlers
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/crypto"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 // The bug this guards: GetHistorical used to hand the raw ceph_cluster_metrics
@@ -126,5 +144,160 @@ func TestCephOSDActionsCoverTheDisruptiveSet(t *testing.T) {
 			t.Errorf("osdServingAfter(serving, %q) = %v, want %v — the action is %sdisruptive",
 				action, got, want, map[bool]string{true: "", false: "not "}[cephDisruptiveOSDActions[action]])
 		}
+	}
+}
+
+// cephNodesDBTX is pathParamDBTX with a node list of its own and the cluster
+// row GetCluster reads; anything else still fails.
+type cephNodesDBTX struct {
+	pathParamDBTX
+	nodes   []db.Node
+	cluster db.Cluster
+}
+
+func (d cephNodesDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	if !strings.Contains(sql, "FROM nodes") {
+		return nil, errPathParamUnexpectedQuery
+	}
+	return &nodeRows{rows: d.nodes}, nil
+}
+
+func (d cephNodesDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: GetCluster :one") {
+		return replayRow{row: d.cluster}
+	}
+	return failRow{err: errPathParamUnexpectedQuery}
+}
+
+// cephMember is a stand-in Proxmox node: it records each path asked of it and
+// answers those in reply, 595 (pveproxy failing to forward) for any other.
+func cephMember(t *testing.T, srv *httptest.Server, reply map[string]string) *proxmoxCapture {
+	t.Helper()
+	capture := &proxmoxCapture{}
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capture.record(r.URL.Path, nil)
+		body, ok := reply[r.URL.Path]
+		if !ok {
+			w.WriteHeader(595)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":` + body + `}`))
+	})
+	t.Cleanup(srv.Close)
+	return capture
+}
+
+// cephReadApp mounts the Ceph routes these tests drive on a fresh app whose
+// client cache points every client at apiURL.
+func cephReadApp(t *testing.T, apiURL string, nodes []db.Node) (*fiber.App, uuid.UUID) {
+	t.Helper()
+	encrypted, err := crypto.Encrypt("token-secret-value", pathParamEncKey)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	cluster := db.Cluster{ID: uuid.New(), Name: "cluster01", ApiUrl: apiURL,
+		TokenID: "user@pam!test", TokenSecretEncrypted: encrypted, IsActive: true}
+	cache := proxmox.NewClientCache(pathParamCacheQueries{cluster: cluster}, pathParamEncKey, nil, nil)
+	h := NewCephHandler(db.New(cephNodesDBTX{nodes: nodes, cluster: cluster}), pathParamEncKey, nil)
+
+	clusterOnly := apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")}
+	app := fiber.New()
+	app.Use(func(c fiber.Ctx) error { SetProxmoxCacheLocal(c, cache); return c.Next() })
+	base := "/api/v1/clusters/:cluster_id/ceph"
+	app.Get(base+"/status", withRequestParams(t, clusterOnly, []string{"cluster_id"}, h.GetStatus))
+	app.Get(base+"/osds", withRequestParams(t, clusterOnly, []string{"cluster_id"}, h.ListOSDs))
+	app.Delete(base+"/pools/:pool_name", withRequestParams(t, cephPoolNameMirror(t),
+		[]string{"cluster_id", "pool_name"}, h.DeletePool))
+	return app, cluster.ID
+}
+
+func cephCall(t *testing.T, app *fiber.App, method, target string) (int, string) {
+	t.Helper()
+	resp, err := app.Test(httptest.NewRequest(method, target, nil), fiber.TestConfig{Timeout: 0})
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+const cephStatusFixture = `{"health":{"status":"HEALTH_WARN"},"monmap":{"num_mons":3},
+	"osdmap":{"num_osds":3,"num_up_osds":2,"num_in_osds":3},
+	"pgmap":{"num_pgs":97,"pgs_by_state":[{"state_name":"active+undersized+degraded","count":16},
+	{"state_name":"active+clean","count":81}]}}`
+
+// D5: the node behind the cluster's api_url reboots. Reads must carry on through
+// another member — directly at its own address and pinned certificate, since
+// the endpoint itself is gone — and a write must not be re-sent anywhere.
+func TestCephReadsSurviveTheEndpointNodeGoingDown(t *testing.T) {
+	t.Parallel()
+	// The member listens on 127.0.0.2; the endpoint is 127.0.0.3 on the same
+	// port, where nothing listens, so every connection to it is refused.
+	ln, err := net.Listen("tcp", "127.0.0.2:0")
+	if err != nil {
+		t.Skipf("no 127.0.0.2 loopback alias: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(nil)
+	_ = srv.Listener.Close()
+	srv.Listener = ln
+	member := cephMember(t, srv, map[string]string{
+		"/api2/json/cluster/ceph/status":   cephStatusFixture,
+		"/api2/json/nodes/pve-02/ceph/osd": `{"root":{"type":"root","children":[]}}`,
+	})
+	srv.StartTLS()
+	sum := sha256.Sum256(srv.Certificate().Raw)
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	app, clusterID := cephReadApp(t, fmt.Sprintf("https://127.0.0.3:%d", port), []db.Node{
+		{Name: "pve-01", Status: "online", Address: "127.0.0.3", SslFingerprint: strings.Repeat("AA", 32)},
+		{Name: "pve-02", Status: "online", Address: "127.0.0.2", SslFingerprint: hex.EncodeToString(sum[:])},
+	})
+	base := "/api/v1/clusters/" + clusterID.String() + "/ceph"
+
+	for _, tt := range []struct {
+		method, target, wantPath string
+		wantStatus               int
+	}{
+		{http.MethodGet, base + "/status", "/api2/json/cluster/ceph/status", http.StatusOK},
+		{http.MethodGet, base + "/osds", "/api2/json/nodes/pve-02/ceph/osd", http.StatusOK},
+		{http.MethodDelete, base + "/pools/store01", "", http.StatusBadGateway},
+	} {
+		member.reset()
+		status, body := cephCall(t, app, tt.method, tt.target)
+		if status != tt.wantStatus {
+			t.Errorf("%s %s = %d %s, want %d", tt.method, tt.target, status, body, tt.wantStatus)
+		}
+		var want []string
+		if tt.wantPath != "" {
+			want = []string{tt.wantPath}
+		}
+		if got := member.seen(); !slices.Equal(got, want) {
+			t.Errorf("%s %s: the other member was asked %q, want %q", tt.method, tt.target, got, want)
+		}
+	}
+}
+
+// The endpoint is up but the node in the path is not: pveproxy answers 595, and
+// the read is asked again about the next node through the same endpoint.
+func TestCephReadMovesOnFromANodeTheEndpointCannotReach(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewUnstartedServer(nil)
+	endpoint := cephMember(t, srv, map[string]string{
+		"/api2/json/nodes/pve-02/ceph/osd": `{"root":{"type":"root","children":[]}}`,
+	})
+	srv.Start()
+	app, clusterID := cephReadApp(t, srv.URL, []db.Node{
+		{Name: "pve-01", Status: "online"}, {Name: "pve-02", Status: "online"},
+	})
+
+	status, body := cephCall(t, app, http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/ceph/osds")
+	if status != http.StatusOK {
+		t.Errorf("status = %d %s, want 200", status, body)
+	}
+	want := []string{"/api2/json/nodes/pve-01/ceph/osd", "/api2/json/nodes/pve-02/ceph/osd"}
+	if got := endpoint.seen(); !slices.Equal(got, want) {
+		t.Errorf("Proxmox was asked %q, want %q", got, want)
 	}
 }

@@ -1078,6 +1078,8 @@ A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change a
 
 **Before a daemon stops or an OSD goes out,** Nexara shows the hosts serving data, the OSDs up and in, and each pool's redundancy, and warns *Redundancy will be reduced* or *This can stall guest I/O*, in which case the button reads "… anyway". This assumes host-level failure domains. It advises and never blocks, and reads **Safety check unavailable** when it cannot be worked out.
 
+**While a node is down,** the tab keeps reading through the others. A read that cannot reach the node it asked is asked once more of each other node, and when the node behind the cluster's API URL is the one down, the others are asked at their own addresses with their own pinned certificates (a node with none recorded is skipped). Changes are never retried: a pool or OSD action that cannot reach its node fails and says so.
+
 Creating or destroying an OSD and creating a CephFS are not offered.
 
 ---

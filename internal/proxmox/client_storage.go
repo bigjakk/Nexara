@@ -716,6 +716,20 @@ func (c *Client) GetCephStatus(ctx context.Context, node string) (*CephStatus, e
 	}
 	return &status, nil
 }
+
+// GetClusterCephStatus reads GET /cluster/ceph/status, which names no node: the
+// node that answers is the one the client is connected to, so the read does not
+// depend on any other member being up. pve-manager (PVE/API2/Cluster/Ceph.pm,
+// stable-7, stable-8 and master) runs the same ceph_cluster_status call as the
+// node route, under the same check (Sys.Audit or Datastore.Audit on /); only the
+// node route's proxyto differs.
+func (c *Client) GetClusterCephStatus(ctx context.Context) (*CephStatus, error) {
+	var status CephStatus
+	if err := c.do(ctx, "/cluster/ceph/status", &status); err != nil {
+		return nil, fmt.Errorf("get cluster ceph status: %w", err)
+	}
+	return &status, nil
+}
 func (c *Client) GetCephOSDs(ctx context.Context, node string) (*CephOSDResponse, error) {
 	if err := validateNodeName(node); err != nil {
 		return nil, err

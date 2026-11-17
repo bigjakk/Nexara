@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -128,14 +129,14 @@ func (h *CephHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	// The cluster-level route, so the answer does not hang on the node the
+	// database picked; cephRead moves on to another member if the endpoint is
+	// down.
+	status, err := cephRead(h, c, clusterID, func(px *proxmox.Client, ctx context.Context, _ string) (*proxmox.CephStatus, error) {
+		return px.GetClusterCephStatus(ctx)
+	})
 	if err != nil {
 		return err
-	}
-
-	status, err := pxClient.GetCephStatus(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	return c.JSON(cephStatusResponse{
@@ -171,14 +172,9 @@ func (h *CephHandler) ListOSDs(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	osdResp, err := cephRead(h, c, clusterID, (*proxmox.Client).GetCephOSDs)
 	if err != nil {
 		return err
-	}
-
-	osdResp, err := pxClient.GetCephOSDs(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	osds := flattenOSDTree(&osdResp.Root)
@@ -232,14 +228,9 @@ func (h *CephHandler) ListPools(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	pools, err := cephRead(h, c, clusterID, (*proxmox.Client).GetCephPools)
 	if err != nil {
 		return err
-	}
-
-	pools, err := pxClient.GetCephPools(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	resp := make([]cephPoolResponse, len(pools))
@@ -270,14 +261,9 @@ func (h *CephHandler) ListMonitors(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	mons, err := cephRead(h, c, clusterID, (*proxmox.Client).GetCephMonitors)
 	if err != nil {
 		return err
-	}
-
-	mons, err := pxClient.GetCephMonitors(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	resp := make([]cephMonResponse, len(mons))
@@ -299,14 +285,9 @@ func (h *CephHandler) ListFS(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	fs, err := cephRead(h, c, clusterID, (*proxmox.Client).GetCephFS)
 	if err != nil {
 		return err
-	}
-
-	fs, err := pxClient.GetCephFS(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	resp := make([]cephFSResponse, len(fs))
@@ -327,14 +308,9 @@ func (h *CephHandler) ListCrushRules(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	pxClient, nodeName, err := h.resolveClusterNode(c, clusterID)
+	rules, err := cephRead(h, c, clusterID, (*proxmox.Client).GetCephCrushRules)
 	if err != nil {
 		return err
-	}
-
-	rules, err := pxClient.GetCephCrushRules(c.Context(), nodeName)
-	if err != nil {
-		return mapProxmoxError(err)
 	}
 
 	resp := make([]cephCrushRuleResponse, len(rules))
