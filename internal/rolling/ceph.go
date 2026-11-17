@@ -126,7 +126,7 @@ func AnalyzeCeph(ctx context.Context, client *proxmox.Client, parallelism int32)
 		warn("ceph_unknown", "Could not read the Ceph status. With Wait for Ceph on, the job waits until it can.")
 	}
 	if parallelism > 1 {
-		warn("ceph_parallelism", fmt.Sprintf("Parallelism is %d on a Ceph cluster: taking more than one node down at a time can leave placement groups without enough copies.", parallelism))
+		warn("ceph_parallelism", fmt.Sprintf("Parallelism is %d on a Ceph cluster. With Wait for Ceph on, Nexara takes the nodes one at a time whatever the parallelism; with it off, taking more than one node down at a time can leave placement groups without enough copies.", parallelism))
 	}
 	return out, conflicts
 }

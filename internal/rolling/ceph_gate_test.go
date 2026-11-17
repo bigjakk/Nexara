@@ -48,7 +48,8 @@ func cephStub(osdsUp int, pgs string) http.HandlerFunc {
 // TestCephGate_APendingNodeWaitsForCleanCeph: with ceph_wait on, the next
 // pending node is not started (drained, or upgraded in place) while PGs are
 // degraded, and says why; once Ceph is clean it is, with the OSD baseline taken.
-// A compute-only endpoint does not hide a degraded Ceph.
+// A compute-only endpoint does not hide a degraded Ceph, and on Ceph the nodes
+// go one at a time whatever the parallelism.
 func TestCephGate_APendingNodeWaitsForCleanCeph(t *testing.T) {
 	t.Parallel()
 	const degraded = "active+clean=100,active+undersized+degraded=28"
@@ -63,6 +64,8 @@ func TestCephGate_APendingNodeWaitsForCleanCeph(t *testing.T) {
 		{"clean", "active+clean=120,active+clean+scrubbing=8", 1, 0, true},
 		{"no Ceph", "", 1, 0, true},
 		{"degraded behind a compute-only endpoint", "mixed:" + degraded, 1, 0, false},
+		{"parallelism 2, the first node still under way", "active+clean=128", 2, 1, false},
+		{"parallelism 2, the first node done", "active+clean=128", 2, 0, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

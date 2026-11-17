@@ -235,6 +235,18 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 	}
 }
 
+// cephParallelism is how many nodes the job may have under way at once. With
+// ceph_wait on a cluster that runs Ceph, or one not yet known not to, it is one
+// whatever parallelism says: Ceph is still clean while a node drains, so a
+// second node started then would reboot with the first and leave PGs below
+// min_size.
+func cephParallelism(job db.RollingUpdateJob) int64 {
+	if job.CephWait && (!job.CephPresent.Valid || job.CephPresent.Bool) {
+		return 1
+	}
+	return int64(job.Parallelism)
+}
+
 // startNextNode starts the next pending node when the job has room for one and
 // Ceph allows it. False means the active nodes could not be counted.
 func (o *Orchestrator) startNextNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob) bool {
@@ -243,7 +255,7 @@ func (o *Orchestrator) startNextNode(ctx context.Context, client *proxmox.Client
 		o.logger.Error("failed to count active nodes", "job_id", job.ID, "error", err)
 		return false
 	}
-	if activeCount < int64(job.Parallelism) {
+	if activeCount < cephParallelism(job) {
 		nextNode, err := o.queries.GetNextPendingNode(ctx, job.ID)
 		if err == nil && o.cephAllowsStart(ctx, client, &job, nextNode) {
 			o.startNode(ctx, client, job, nextNode)
