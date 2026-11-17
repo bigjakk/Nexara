@@ -53,14 +53,23 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 	}
 
 	for _, row := range rows {
-		// row.Node can be what a caller named (POST /api/v1/tasks), and it
-		// goes to Proxmox as /nodes/{node}/tasks/…, which pveproxy resolves
-		// and dials whatever it names. The API refuses a non-member when the
-		// row is written, but a row can predate that check, so it is checked
-		// again here: one the cluster does not hold is never polled, and
-		// ages out through the staleTaskGrace path below like any task
-		// Proxmox cannot report on. A failed lookup skips the row this tick.
-		err := nodemember.Require(ctx, s.queries, cluster.ID, row.Node)
+		// A task is asked about on the node its UPID names, which is not
+		// always row.Node: an upload's worker runs on the node that took the
+		// request, whichever node the row records (proxmox.TaskNode).
+		//
+		// That node is what the UPID says, and the UPID can be what a caller
+		// supplied (POST /api/v1/tasks); it goes to Proxmox as
+		// /nodes/{node}/tasks/…, which pveproxy resolves and dials whatever
+		// it names. The API refuses a non-member when the row is written, but
+		// a row can predate that check, so it is checked again here: a UPID
+		// that names no node, or one the cluster does not hold, is never
+		// polled, and ages out through the staleTaskGrace path below like any
+		// task Proxmox cannot report on. A failed lookup skips the row this
+		// tick.
+		node, err := proxmox.TaskNode(row.Upid)
+		if err == nil {
+			err = nodemember.Require(ctx, s.queries, cluster.ID, node)
+		}
 		if lookupErr := (*nodemember.LookupError)(nil); errors.As(err, &lookupErr) {
 			s.logger.Warn("task reconcile: node membership lookup failed",
 				"cluster_id", cluster.ID, "upid", row.Upid, "error", lookupErr.Err)
@@ -68,7 +77,7 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 		}
 		var st *proxmox.TaskStatus
 		if err == nil {
-			st, err = client.GetTaskStatus(ctx, row.Node, row.Upid)
+			st, err = client.GetTaskStatus(ctx, node, row.Upid)
 		}
 		if err != nil {
 			// Task may have aged out of Proxmox's task log. If it has been
@@ -83,7 +92,7 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 			continue // still running
 		}
 		status, exit := classifyTaskExit(st.ExitStatus)
-		s.finalizeTask(ctx, cluster, row.Upid, status, exit, taskEndTime(ctx, client, row))
+		s.finalizeTask(ctx, cluster, row.Upid, status, exit, taskEndTime(ctx, client, node, row))
 	}
 }
 
@@ -96,14 +105,15 @@ type nodeTaskFinder interface {
 // taskEndTime is when a stopped task ended by Proxmox's own record, so a row
 // closed late (a node that was down, a missed tick) still says when the task
 // ended rather than when a poll noticed. Now when Proxmox gives no end time;
-// held between the row's start and now, as the node's clock is not ours.
-func taskEndTime(ctx context.Context, client ProxmoxClient, row db.TaskHistory) time.Time {
+// held between the row's start and now, as the node's clock is not ours. node
+// is the task's own, checked by the caller (reconcileRunningTasks).
+func taskEndTime(ctx context.Context, client ProxmoxClient, node string, row db.TaskHistory) time.Time {
 	now := time.Now()
 	finder, ok := client.(nodeTaskFinder)
 	if !ok {
 		return now
 	}
-	task, err := finder.FindNodeTask(ctx, row.Node, row.Upid)
+	task, err := finder.FindNodeTask(ctx, node, row.Upid)
 	if err != nil || task == nil || task.EndTime <= 0 {
 		return now
 	}
