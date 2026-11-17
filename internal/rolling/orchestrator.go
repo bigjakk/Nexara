@@ -1320,7 +1320,7 @@ func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJo
 			return
 		}
 
-		if err := client.RebootNode(ctx, node.NodeName); err != nil {
+		if err := o.rebootNode(ctx, client, job, node.NodeName); err != nil {
 			o.failNode(ctx, job, node, fmt.Sprintf("reboot node after upgrade: %v", err))
 			return
 		}
@@ -1609,6 +1609,16 @@ func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Cli
 	o.advanceHealthCheck(ctx, client, job, node)
 }
 
+// rebootNode asks Proxmox to reboot the node and, once it has accepted, files
+// the reboot under the key the node reboot handler uses.
+func (o *Orchestrator) rebootNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, nodeName string) error {
+	if err := client.RebootNode(ctx, nodeName); err != nil {
+		return err
+	}
+	o.auditObject(ctx, job.ClusterID, job.ID, "node", nodeName, "reboot", nil)
+	return nil
+}
+
 // ConfirmUpgrade is called by the API when an admin confirms a node upgrade is done.
 func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode) error {
 	// Only a running job's node can be confirmed. A failed or cancelled job
@@ -1678,7 +1688,7 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 	}
 
 	if reboot {
-		if err := client.RebootNode(ctx, node.NodeName); err != nil {
+		if err := o.rebootNode(ctx, client, job, node.NodeName); err != nil {
 			// Mark reboot started even on failure — the node might still reboot.
 			_ = o.queries.SetNodeRebootStarted(ctx, node.ID)
 			o.failNode(ctx, job, node, fmt.Sprintf("reboot node: %v", err))
@@ -1835,7 +1845,38 @@ func (o *Orchestrator) disableDRSIfEnabled(ctx context.Context, job db.RollingUp
 	}); err != nil {
 		o.logger.Warn("failed to disable DRS during rolling update",
 			"job_id", job.ID, "error", err)
+		return
 	}
+	// Under the key the DRS settings handler files a change under.
+	o.auditObject(ctx, job.ClusterID, job.ID, "drs", cfg.ID.String(), "config_update", map[string]any{"enabled": false})
+}
+
+// releaseDRSPause turns Nexara's DRS back on for a job that paused it, files
+// the change as disableDRSIfEnabled filed the pause, and clears the job's
+// marker. It reports whether the pause is released.
+func (o *Orchestrator) releaseDRSPause(ctx context.Context, job db.RollingUpdateJob) bool {
+	// Only for the audit row's key; a failed read files it under the cluster,
+	// which the DRS tab reads too.
+	resourceID := job.ClusterID.String()
+	if cfg, err := o.queries.GetDRSConfig(ctx, job.ClusterID); err == nil {
+		resourceID = cfg.ID.String()
+	}
+	if err := o.queries.SetDRSEnabled(ctx, db.SetDRSEnabledParams{
+		ClusterID: job.ClusterID,
+		Enabled:   true,
+	}); err != nil {
+		o.logger.Warn("failed to re-enable DRS after rolling update", "job_id", job.ID, "error", err)
+		return false
+	}
+	o.auditObject(ctx, job.ClusterID, job.ID, "drs", resourceID, "config_update", map[string]any{"enabled": true})
+	if err := o.queries.SetJobDRSWasEnabled(ctx, db.SetJobDRSWasEnabledParams{
+		ID:            job.ID,
+		DrsWasEnabled: false,
+	}); err != nil {
+		return false
+	}
+	o.logger.Info("re-enabled DRS after rolling update", "job_id", job.ID, "cluster_id", job.ClusterID)
+	return true
 }
 
 // releaseJobState re-reads the job and releases everything it may still
@@ -1881,21 +1922,8 @@ func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, aud
 		len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0
 
 	// 1. Nexara DRS — DB-only, no client needed.
-	if job.DrsWasEnabled {
-		if err := o.queries.SetDRSEnabled(ctx, db.SetDRSEnabledParams{
-			ClusterID: job.ClusterID,
-			Enabled:   true,
-		}); err != nil {
-			o.logger.Warn("failed to re-enable DRS after rolling update", "job_id", job.ID, "error", err)
-			released = false
-		} else if err := o.queries.SetJobDRSWasEnabled(ctx, db.SetJobDRSWasEnabledParams{
-			ID:            job.ID,
-			DrsWasEnabled: false,
-		}); err != nil {
-			released = false
-		} else {
-			o.logger.Info("re-enabled DRS after rolling update", "job_id", job.ID, "cluster_id", job.ClusterID)
-		}
+	if job.DrsWasEnabled && !o.releaseDRSPause(ctx, job) {
+		released = false
 	}
 
 	// The rest needs a Proxmox client.
@@ -3332,8 +3360,8 @@ func (o *Orchestrator) auditLog(ctx context.Context, clusterID uuid.UUID, jobID 
 	}
 }
 
-// auditObject files a row for an object of the cluster page the engine changed —
-// an HA rule, the cluster options — under the object's own key, the one the
+// auditObject files a row for an object the engine changed — an HA rule, the
+// cluster options, DRS, a node it rebooted — under the object's own key, the one the
 // HTTP handlers file the same change under, beside the job's rolling_update
 // row. The object's History reads its rows by that key. The actor is the system
 // user, as for auditLog; "by" and job_id say whose doing it was.

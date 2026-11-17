@@ -1913,6 +1913,8 @@ Each node goes through these steps:
 
 > **Native CRS:** if the cluster runs Proxmox VE 9.2's native CRS dynamic balancer with auto-rebalance enabled, Nexara pauses `ha-auto-rebalance` for the duration of the job — so the balancer can't move guests back onto a node being drained — and restores it when the job finishes or fails.
 
+What the job changes outside itself is audited under the object it changed, as the system user with the job's id: the DRS pause and its release under DRS, the native CRS pause and its restore under the cluster options, each HA rule it disables and re-enables, and each node reboot it orders under the node. Each appears in that object's **History**.
+
 ### Updating a Single Node In Place
 
 A node's own **Updates** tab lists its pending packages and offers **Update this node**. This is the same job machinery — same SSH path, same progress view — with the drain turned off: the node is upgraded where it stands and its guests keep running.

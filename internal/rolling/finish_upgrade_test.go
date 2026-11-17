@@ -27,7 +27,7 @@ func TestFinishUpgrade_RebootsOnlyWhileTheJobRuns(t *testing.T) {
 	} {
 		t.Run(tt.status, func(t *testing.T) {
 			t.Parallel()
-			d := &memberDB{t: t, jobStatus: tt.status, accept: map[string]int64{"SetNodeUpgradeCompleted": 1}}
+			d := &memberDB{t: t, audits: true, jobStatus: tt.status, accept: map[string]int64{"SetNodeUpgradeCompleted": 1}}
 			// An empty node, and a reboot Proxmox accepts.
 			o, client, sent := engineOn(t, d, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")

@@ -14,12 +14,14 @@ import (
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
+	sshpkg "github.com/bigjakk/nexara/internal/ssh"
 )
 
 // TestRollingUpdateFilesTheObjectsItChanges: the update disables HA rules and
 // pauses the CRS option, and restores both. Each is filed under the object's own
 // key (ha_rule/<name>, cluster_options/<cluster>) beside the job's rolling_update
 // row, as the handlers file the same change; a change Proxmox refused is not.
+// The DRS pause and release, and each reboot, are filed the same way.
 func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 	t.Parallel()
 	clusterID, jobID := uuid.New(), uuid.New()
@@ -122,6 +124,44 @@ func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 		}
 		if n := len(d.rowsOf("cluster_options")); n != 0 {
 			t.Errorf("%d cluster_options rows for a write that did not happen", n)
+		}
+	})
+
+	t.Run("DRS paused and released", func(t *testing.T) {
+		t.Parallel()
+		cfgID := uuid.New()
+		d := &memberDB{t: t, audits: true, drs: &db.DrsConfig{ID: cfgID, ClusterID: clusterID, Enabled: true},
+			accept: map[string]int64{"SetJobDRSWasEnabled": 1, "SetDRSEnabled": 1}}
+		o, _, _ := engineOn(t, d, nil)
+		o.disableDRSIfEnabled(ctx, job)
+		if !o.releaseDRSPause(ctx, job) {
+			t.Fatal("releaseDRSPause = false")
+		}
+		got := d.rowsOf("drs")
+		if len(got) != 2 || got[0].details["enabled"] != false || got[1].details["enabled"] != true {
+			t.Fatalf("drs rows = %+v, want a pause then a release", got)
+		}
+		for _, row := range got {
+			if row.resourceID != cfgID.String() || row.action != "config_update" || row.details["job_id"] != jobID.String() {
+				t.Errorf("drs row = %+v, want the DRS config's config_update, by this job", row)
+			}
+		}
+	})
+
+	t.Run("a node rebooted after its upgrade", func(t *testing.T) {
+		t.Parallel()
+		d := &memberDB{t: t, audits: true, jobStatus: "running", accept: map[string]int64{"SetNodeUpgradeCompleted": 1}}
+		// An empty node, and a reboot Proxmox accepts.
+		o, client, _ := engineOn(t, d, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		})
+		rebootJob := db.RollingUpdateJob{ID: jobID, ClusterID: clusterID, DrainGuests: true, RebootAfterUpdate: true}
+		o.finishUpgrade(ctx, rebootJob, db.RollingUpdateNode{ID: uuid.New(), JobID: jobID, NodeName: "pve-01"}, client, sshpkg.Config{})
+		got := d.rowsOf("node")
+		if len(got) != 1 || got[0].resourceID != "pve-01" || got[0].action != "reboot" ||
+			got[0].details["by"] != "rolling_update" || got[0].details["job_id"] != jobID.String() {
+			t.Errorf("node rows = %+v, want one reboot of pve-01 by this job", got)
 		}
 	})
 }
