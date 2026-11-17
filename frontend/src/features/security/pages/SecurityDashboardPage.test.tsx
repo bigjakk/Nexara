@@ -5,10 +5,13 @@ import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
 import { makeCluster } from "@/test/cluster.fixtures";
 import { makeRollingUpdateJob } from "@/test/rolling-update.fixtures";
+import { setupUser } from "@/test/user";
+import { useAuthStore } from "@/stores/auth-store";
 import { SecurityDashboardPage } from "./SecurityDashboardPage";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  useAuthStore.setState({ permissions: [] });
 });
 
 /** The page with the router's current search string beside it. */
@@ -107,6 +110,32 @@ describe("SecurityDashboardPage — job links", () => {
     await queryClient.refetchQueries({ queryKey: ["rolling-update-job"] });
     expect(
       screen.getByRole("heading", { name: "Rolling update" }),
+    ).toBeInTheDocument();
+  });
+
+  // Start, once confirmed and accepted, opens the job's own view.
+  it("opens the job's view after Start in the jobs table", async () => {
+    useAuthStore.setState({ permissions: ["manage:rolling_update"] });
+    const job = makeRollingUpdateJob();
+    stubApi(
+      {
+        "/api/v1/clusters": clusters,
+        "/api/v1/clusters/c1/rolling-updates?limit=50": listOf([job]),
+        "/api/v1/clusters/c1/rolling-updates/j1": job,
+        "/api/v1/clusters/c1/rolling-updates/j1/nodes": listOf([]),
+      },
+      { "POST /api/v1/clusters/c1/rolling-updates/j1/start": job },
+    );
+    const user = setupUser();
+    renderWithProviders(<SecurityDashboardPage />, {
+      router: { initialEntries: ["/security?tab=rolling-updates&cluster=c1"] },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Start" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Start" }));
+    expect(
+      await screen.findByRole("heading", { name: "Rolling update" }),
     ).toBeInTheDocument();
   });
 });
