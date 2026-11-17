@@ -53,12 +53,12 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 
 The dashboard is the landing page. It needs no permission of its own: each widget shows what your grants on each cluster let you read.
 
-- **Controls.** The preset menu, **Customize** (on screens at least 768 px wide), the time range (**Live**, **1h**, **6h**, **24h**, **7d**, which applies to the charts and is not saved), the refresh rate (5, 10, 30 or 60 seconds, remembered per browser) and **Add Cluster**.
-- **Default layout.** **Stats Overview** and **Cluster Cards**; for each cluster the **CPU Usage**, **Memory Usage**, **Disk I/O** and **Network In** charts and **Live Metric Cards**; and **Top Consumers**, the top 10 per cluster.
-- **Customize.** **Add Widget**, drag a widget by its grip, resize it, remove it with its ✕, or **Reset to Default**. **Lock** saves; leaving the page before that loses the changes. **UPS Status** appears only if you add it, and needs a global `view:ups`.
-- **Presets.** Pick a preset, or **Save Current as Preset**; a name already in use is overwritten. Picking a preset and **Reset to Default** replace the layout at once, without asking.
+- **Controls.** The **Layout** menu of presets, **Customize** (on screens at least 768 px wide), the time range (**Live**, **1h**, **6h**, **24h**, **7d**, which applies to the charts and is not saved), the refresh rate (5, 10, 30 or 60 seconds, remembered per browser) and **Add cluster**.
+- **Default layout.** **Needs attention**, the open health issues (above every layout, only while there are some); **Fleet**, each node's load with a cell per guest; for each cluster the **CPU Usage**, **Memory Usage**, **Disk I/O** and **Network In** charts and **Live load**; and **Top consumers**, the top 10 per cluster. **All clusters** and **Clusters**, the old stat and cluster cards, are in **Add widget**.
+- **Customize.** **Add widget**, drag a widget by its bar, resize it by its corner, remove it with its ✕, or **Reset to default**. **Lock** saves; leaving the page before that loses the changes. **UPS status** appears only if you add it, and needs a global `view:ups`.
+- **Presets.** In the **Layout** menu, pick a preset (**Default** resets), or **Save current as preset**; a name already in use is overwritten. Picking a preset and **Reset to default** replace the layout at once, without asking.
 
-Layouts and presets are stored per user on the server, so they follow you between browsers. A saved layout does not gain widgets for a cluster added later: add them, or reset.
+Layouts and presets are stored per user on the server, so they follow you between browsers. A saved layout does not gain new widgets on its own, such as **Fleet** or the charts of a cluster added later: a **New widgets** panel offers them once, with **Add to my layout** and **Dismiss**, and a reset brings them too.
 
 ---
 
@@ -66,10 +66,10 @@ Layouts and presets are stored per user on the server, so they follow you betwee
 
 ### Adding a Cluster
 
-1. Click **Add Cluster** in the Dashboard's header, or the **+** beside **Datacenter** in the inventory tree
+1. With no cluster yet, click **Add Cluster** on the Dashboard. After that, use **Add cluster** in the Dashboard's header, or the **+** beside **Datacenter** in the inventory tree's **Hosts** view
 2. Fill in the **Cluster Name** and the **API URL** (e.g., `https://pve.example.com:8006`) and click **Connect**. Nexara probes the endpoint's certificate:
    - a CA-signed certificate is confirmed as **Trusted Certificate** and you continue
-   - a self-signed certificate shows its **SHA-256 fingerprint**; verify it against the Proxmox host, then tick *I have verified this fingerprint and trust this certificate*
+   - a self-signed certificate shows its **SHA-256 Fingerprint**; verify it against the Proxmox host, then tick *I have verified this fingerprint and trust this certificate*
 3. Choose how Nexara gets its credential:
 
    **Create a token for me** (the default tab). Supply a privileged Proxmox login once — typically `root@pam` and its password; a **One-Time Code** field appears only if Proxmox asks for one. Nexara logs in, creates a dedicated `nexara@pve` user, grants it an ACL, mints an API token and verifies it works before saving anything. It retries the verification to ride out ACL replication across the cluster.
@@ -88,7 +88,7 @@ The collector starts syncing inventory (nodes, VMs, containers, storage) and met
 
 ### Editing a Cluster
 
-Open the cluster's **⋮** menu in the inventory tree, or right-click it, and choose **Edit** to update the name, API URL, or token.
+Open the cluster's **⋯** menu in the inventory tree's **Hosts** view, or right-click it there, and choose **Edit** (or click **Edit** on the cluster's page) to update the name, API URL, or token.
 
 **Changing the API URL requires re-entering the token secret.** A stored credential is only ever sent to the address it was saved for — leaving the secret blank while moving the address would deliver it to whatever the new URL points at. The refusal is audited.
 
@@ -96,7 +96,7 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 ### Removing a Cluster
 
-From the same **⋮** menu choose **Delete** and type the cluster's name. It is refused while a rolling update runs on the cluster. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster, unless you tick **Also delete the Proxmox user and API token Nexara created for this cluster**. Everything else scoped to the cluster goes with it and does not come back if you add it again: DRS rules and settings, alert rules scoped to it with their alerts, maintenance windows, scheduled tasks, report schedules and runs, rolling-update jobs, CVE scans and schedules, migration jobs, folders, guest tools and virtio-win settings, and favorites. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters. Role assignments scoped to the removed cluster are removed with it, so a user who held one loses it and it leaves their role list (a global role is not affected). The removal itself is recorded among them, with how many role assignments went with the cluster. A cluster you add again is a new cluster, and its entries do not join the old ones.
+From the same **⋯** menu choose **Delete**, or **Delete cluster** under the cluster page's **More actions** (**⋯**), and type the cluster's name. It is refused while a rolling update runs on the cluster. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster, unless you tick **Also delete the Proxmox user and API token Nexara created for this cluster**. Everything else scoped to the cluster goes with it and does not come back if you add it again: DRS rules and settings, alert rules scoped to it with their alerts, maintenance windows, scheduled tasks, report schedules and runs, rolling-update jobs, CVE scans and schedules, migration jobs, folders, guest tools and virtio-win settings, and favorites. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters. Role assignments scoped to the removed cluster are removed with it, so a user who held one loses it and it leaves their role list (a global role is not affected). The removal itself is recorded among them, with how many role assignments went with the cluster. A cluster you add again is a new cluster, and its entries do not join the old ones.
 
 Removing a cluster leaves its audit entries untouched, so it takes no longer for having many.
 
@@ -138,7 +138,7 @@ Once a cluster is connected, the cluster's **Configure** → **Access control** 
 
 ## Infrastructure Health
 
-Nexara aggregates health across everything it manages, server-side, and surfaces it as a health pill in the header. Click the pill to see every current issue with its reason.
+Nexara aggregates health across everything it manages, server-side, and surfaces it as a health pill in the top bar. Click the pill to see every current issue with its reason; the dashboard's **Needs attention** lists the same issues.
 
 ### What It Checks
 
@@ -162,7 +162,7 @@ Nexara aggregates health across everything it manages, server-side, and surfaces
 ### Dismissing and Muting
 
 - **Dismiss** hides one specific current issue. It stays hidden until the underlying condition resolves; if the same problem comes back later, it reappears.
-- **Mute** suppresses an entire issue type everywhere until you restore it from the same menu.
+- **Mute** suppresses an entire issue type everywhere until you click **Restore** at the foot of the pill's list, which brings back everything dismissed and muted.
 
 Both are stored in your browser (localStorage), not server-wide — other admins still see the issues. Signing out clears dismissals; mutes stay in that browser for whoever uses it next.
 
@@ -170,9 +170,9 @@ Both are stored in your browser (localStorage), not server-wide — other admins
 
 ## Topology Map
 
-Navigate to **Topology** from the sidebar for an interactive map of your infrastructure — clusters, nodes, guests, and storage rendered as a live graph.
+Open **Topology** in the navigation rail for an interactive map of your infrastructure — clusters, nodes, guests, and storage rendered as a live graph.
 
-- **Filters** — pick a **Cluster**, toggle **VMs/CTs** (off by default) and **Storage**; switch **Layout** between Top-Down and Left-Right
+- **Filters** — pick a cluster (**All clusters** by default), toggle **Guests** (off by default) and **Storage**; switch the layout between **Top-down** and **Left-right**
 - **Health coloring** — elements are colored by status: healthy, degraded, or offline
 - **Click-through** — click any element to jump to its detail page
 - **Power** — with a global `view:ups`, the **Power** toggle shows each UPS just above the hosts it powers (left of the clusters in the Left-Right layout), joined to them by a solid line while it is on mains and a dashed one on battery, and marks **No upsmon** on a host that would lose power without shutting down (see [Shutdown Protection](#shutdown-protection))
@@ -185,37 +185,37 @@ Navigate to **Topology** from the sidebar for an interactive map of your infrast
 
 ### Creating a Guest
 
-Click **Create** in the top bar and choose **Virtual Machine** or **Container**, or right-click a cluster in the tree. They need `manage:vm` and `manage:container`. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
+Click **Create** in the top bar and choose **Virtual Machine** or **Container**, or right-click a cluster in the tree's **Hosts** view for **Create VM** or **Create CT**. They need `manage:vm` and `manage:container`. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
 
-- The VM wizard's steps are General, OS, System, Disks, CPU, Memory, Network, Cloud-Init and Confirm, which also has **Start after creation** and **Start on boot**.
-- The container wizard's are General, Template, Root Disk, CPU & Memory, Network, DNS & Options and Confirm. **Unprivileged container** is on by default.
+- The VM wizard's steps are General, OS, System, Disks, CPU, Memory, Network, Cloud-init and Review, which also has **Start after creation** and **Start on boot**.
+- The container wizard's are General, Template, Root disk, CPU and memory, Network, DNS and options, and Review. **Unprivileged container** is on by default.
 
-> The wizard's Cloud-Init step saves the settings but adds no drive, and without one they never reach the guest. Add it afterwards from **Hardware** → **Add Device** → **Cloud-Init Drive**.
+> The wizard's Cloud-init step saves the settings but adds no drive, and without one they never reach the guest. Add it afterwards from **Hardware** → **Add device** → **Cloud-init drive**.
 
 ### The Guest Page
 
-A VM's tabs are **Overview**, **Hardware**, **Snapshots**, **Cloud-Init**, **Guest Tools** (Windows guests), **Backups**, **Schedules** and **History**. A container's have **Resources** in place of Hardware, and no Cloud-Init or Guest Tools.
+A VM's tabs are **Overview**, **Hardware**, **Snapshots**, **Cloud-Init**, **Guest Tools** (Windows guests), **Backups**, **Schedules** and **History**. A container's have **Resources** in place of Hardware, and no Cloud-Init or Guest Tools. The header leads with the console (**VNC Console** or **Attach**), then the power actions in one split button (the one that fits the guest's state, the rest under its arrow), **Snapshot** and **Migrate**; **Clone**, **Clone to Template**, **Convert to Template** and **Destroy** are under **More actions** (**⋯**).
 
 | Action | Needs | Notes |
 |--------|-------|-------|
 | **Start**, **Shutdown**, **Reboot**, **Stop**, **Reset** (VMs), **Suspend**, **Resume** | `execute:vm` / `execute:container` | Shutdown, Stop and Reset ask first |
-| **Take Snapshot** | `execute:vm` / `execute:container` | |
-| **Clone**, **Clone to Template**, **Deploy from Template** (on a template) | `manage:vm` / `manage:container` | Asks for the new VMID (the first free one from 100), name, target node and storage. **Full clone (independent copy)** is on by default |
+| **Snapshot** (**Take Snapshot** in the right-click menu) | `execute:vm` / `execute:container` | |
+| **Clone**, **Clone to Template**, **Deploy from Template** (on a template) | `manage:vm` / `manage:container` | Asks for the new VMID (the first free one from 100), name, target node and storage. **Full clone** is on by default |
 | **Convert to Template** | `manage:vm` / `manage:container` | Stopped guests only. Irreversible, so you type the name |
 | **Migrate** | `manage:migration` | See [Migration](#migration) |
 | **Destroy** | `delete:vm` / `delete:container` | Disabled while the guest runs. Irreversible, so you type the name |
 
 **Halted VMs.** A VM whose QEMU process is up while the guest is halted still counts as running (in counts, the Running filter, DRS and rolling updates), but Inventory, the tree and the guest page show its state instead: **I/O error** (paused on a storage error), **Asleep** (S3 sleep), **Watchdog fired**, **Panicked**, **Shut down** (the guest shut down and QEMU is still up), **Internal error** or **In debugger**. The `status:` search finds it by that state (`status:io-error`, `status:asleep`) as well as by `status:running`. On the guest page, in the right-click menus and in the console toolbar such a VM offers **Stop** and **Reset**, and **Resume** where Proxmox can resume it: from I/O error once the storage is back (QEMU retries the failed I/O), from Asleep (Proxmox wakes it), Watchdog fired and In debugger. Start, Shutdown and Reboot are not offered for it or for a paused VM. Proxmox refuses Start for any running VM, and Shutdown and Reboot for a paused or sleeping one; for the other halted states it accepts them, but the request times out because the guest cannot answer.
 
-These are also on a guest's right-click menu, with **Console**: in the tree, the search results and Favorites, where it also has **Move to folder…**, and in tables. In the guest and node table the menu is also on each guest row's **⋮** button, at the end of the row. The Inventory page lists templates under **Templates**.
+These are also on a guest's right-click menu, with **Console**: in the tree, the search results and Favorites, where it also has **Move to folder…**, and in tables. In those tables the menu is also on each guest row's **⋮** button, at the end of the row. The Inventory page lists templates under **Templates**.
 
-**Hardware** (`manage:vm`). Changes are staged until **Save Changes**, and on a running VM stay pending until it restarts. **Add Device** offers Hard Disk, CD/DVD Drive, Network Device, USB Device and PCI Device ([Device Passthrough](#device-passthrough)), Serial Port, VirtIO RNG, Cloud-Init Drive, VirtioFS Share, EFI Disk and TPM State. A disk row has move, **Resize To** (growing only) and **Remove**. A container's **Resources** tab is the equivalent for it.
+**Hardware** (`manage:vm`). Changes are staged until **Save changes**, and on a running VM stay pending until it restarts. **Add device** offers Hard disk, CD/DVD drive, Network device, USB device and PCI device ([Device Passthrough](#device-passthrough)), Serial port, Cloud-init drive, VirtIO RNG, VirtioFS share, EFI disk and TPM state. A disk row has move, **Resize to** (growing only) and **Remove**. A container's **Resources** tab is the equivalent for it.
 
-**Cloud-Init** needs a Cloud-Init drive. It sets User, Password, IP Config, DNS Server, Search Domain and SSH Public Keys. An empty field is not sent, so a value cannot be cleared from this tab.
+**Cloud-Init** needs a Cloud-Init drive. It sets User, Password, IP config, DNS server, Search domain and SSH public keys. An empty field is not sent, so a value cannot be cleared from this tab.
 
 ### Bulk Actions
 
-Tick rows in a guest table (Inventory, a cluster's or node's VMs, a folder's) and the toolbar offers **Start**, **Stop**, **Shutdown**, **Reboot**, **Migrate** and **Delete**. Stop, Shutdown and Delete ask first, without a typed name, and the progress count includes failures.
+Tick rows in a guest table (Inventory, a cluster's or node's VMs, a folder's) and the toolbar offers **Start**, **Shutdown**, **Reboot** and **Migrate**, with **Stop** and **Delete** under its **⋯** menu. Stop, Shutdown and Delete ask first, without a typed name, and the progress count includes failures.
 
 ---
 
@@ -223,9 +223,9 @@ Tick rows in a guest table (Inventory, a cluster's or node's VMs, a folder's) an
 
 A console needs `console:vm`, `console:container` or `console:node`, which the built-in Viewer does not hold.
 
-- **Open one** with **VNC Console** on a VM's page or **Attach** on a container's, **Console** on a running guest's right-click menu, **Shell** on a node's page or a cluster's **Overview**, or **New Console** on the **Console** page in the sidebar. A guest that is stopped parks the console on **Start VM** and **Connect anyway**, and connects when the guest powers on. A running VM's page also shows a small view-only preview.
+- **Open one** with **VNC Console** on a VM's page or **Attach** on a container's, **Console** on a running guest's right-click menu, **Shell** on a node's page or a cluster's **Overview**, or **New console** on the **Console** page in the navigation rail. A guest that is stopped parks the console on **Start VM** (**Start Container** for a container) and **Connect anyway**, and connects when the guest powers on. A running VM's page also shows a small view-only preview.
 - **Node shell.** It opens at the host's login prompt, not a root shell: Proxmox logs a shell straight in only for `root@pam` itself, and an API token is never that.
-- **The floating window** holds a tab per console, with **New Console**, minimize, maximize and **Open in new tab**. **Close** hides it and disconnects; the tabs remain.
+- **The floating window** holds a tab per console, with **New console** (**+**), minimize, maximize and **Open in new tab**. **Close** hides it and disconnects; the tabs remain.
 - **In its own browser tab.** Set **Open consoles in** to **New browser tab** under [Appearance](#appearance), or Ctrl/⌘-click any console button. The tab has **Reconnect** and **Fullscreen**, and a link to a console that Nexara did not open itself asks **Open this console?** first.
 - **The VNC toolbar** has **Power**; **Media** on a VM (**Mount ISO...** and **Eject CD-ROM**, `execute:vm`, which creates `ide2` if the VM has no CD-ROM); **Keys** (Ctrl+Alt+Del, Ctrl+Alt+F1–F12, Alt+Tab, Alt+F4, Print Screen, SysRq); paste, typed on a US layout, which reports any character it cannot type; a PNG screenshot; and **Scale** and **Resize**.
 - **A console ends with its sign-in.** Within about 5 seconds of the session that opened it ending, the server closes the console and it reads **Session ended**.
@@ -238,27 +238,29 @@ A VM's button opens VNC, and a container's **Attach** is its VNC terminal. The `
 
 **Migrate** on a guest, or in the bulk toolbar, moves it within its cluster or to another one.
 
-1. Set **Migration Type**. Within a cluster, choose a **Migration Mode** (Live, Storage or Both), a **Target Node** (automatic picks the least loaded) and a **Target Storage**, per disk where there are several. Across clusters, choose a **Target Cluster**, **Target Node**, **Storage Mapping** and **Network Mapping** (an unmapped network keeps its name), and optionally a **Target VMID**
-2. Set **Live Migration** (for a container, a restart migration), **Bandwidth Limit (KiB/s)**, **Format** where the target allows a choice, and **Delete Source After Migration**, which is on for a storage move and off across clusters, where it destroys the source
-3. Click **Create & Run Pre-Flight Checks**, then **Execute Migration**. A failed check blocks it; a warning does not
+1. Set **Migration type**: **Within this cluster** or **To another cluster**. Within a cluster, choose **What to move** (the guest, its disks, or both), a **Target node** (the least loaded is picked for you) and a **Target storage**, per disk where there are several. Across clusters, choose a **Target cluster**, **Target node**, **Storage mapping** and **Network mapping** (an unmapped network keeps its name), and optionally a **Target VMID**
+2. Under **Options**, set **Live migration** (for a container, a restart migration), **Bandwidth limit (KiB/s)**, **Format** where the target allows a choice, and **Delete source after migration**, which is on for a storage move and off across clusters, where it destroys the source
+3. Click **Run pre-flight checks**, then **Execute migration**. A failed check blocks it; a warning does not
+
+The bulk toolbar's dialog keeps the older labels (**Migration Mode**: Live, Storage or Both), has no **Target VMID**, and starts every guest that passed with one **Execute *n* Migrations** button.
 
 For an HA-managed guest, Proxmox only queues the migration with the HA manager. The job follows the migration the HA manager starts and ends as that does; if the HA manager starts none within two minutes, the job fails as not moved, and the HA log on the source node says why. A stopped HA guest is handed to the HA manager to move offline, and when that cannot run it stays where it is, so both migrate dialogs warn about one and execute only after **Execute migration anyway**; to move it now, start it and migrate it live.
 
 Within a cluster the checks are that the target node is online and the VMID is free. Across clusters they add both clusters being Proxmox VE 7 or later, CPU compatibility (a warning) and the storage and network mappings. Nothing checks capacity.
 
-This needs `manage:migration` on the source cluster and, across clusters, on the target too. There is no page of migration jobs: `GET /api/v1/migrations` lists them and `POST /api/v1/migrations/:id/cancel` cancels one. The API's simpler `POST …/vms/:vm_id/migrate` and `…/containers/:ct_id/migrate` need `execute:vm` and `execute:container`.
+This needs `manage:migration` on the source cluster and, across clusters, on the target too. The **Migrations** page (`view:migration`) lists the jobs and has **New Migration**. It is not in the navigation rail: **View migrations**, in the migrate dialog once a migration starts and on the **Imports** page, opens it. `GET /api/v1/migrations` lists the jobs too, and a job can be cancelled only through the API, with `POST /api/v1/migrations/:id/cancel`. The API's simpler `POST …/vms/:vm_id/migrate` and `…/containers/:ct_id/migrate` need `execute:vm` and `execute:container`.
 
 ### Node Evacuation
 
-**Evacuate** in a node's header (`manage:node`; needs another online node) moves its running guests away, **Distribute across nodes (DRS-aware)** or to a **Single target**. Stopped guests stay. The results list per-guest errors, and "migrated" there means the migration started, so follow the tasks. See [API Token Requirements](#api-token-requirements) for what Proxmox must let the token read.
+**Evacuate**, under **More actions** (**⋯**) in a node's header (`manage:node`; needs another online node) moves its running guests away, **Distribute across nodes (DRS-aware)** or to a **Single target**. Stopped guests stay. The results list per-guest errors, and "migrated" there means the migration started, so follow the tasks. See [API Token Requirements](#api-token-requirements) for what Proxmox must let the token read.
 
 ---
 
 ## Folders and Favorites
 
-**Folders** live in the inventory tree's **VMs & Templates** view, and belong to Nexara, not Proxmox. Right-click a cluster for **New folder**, and a folder for **New subfolder**, **Rename** or **Delete** (its guests fall back to **Discovered**, and its subfolders are deleted). Move a guest by dragging it or with **Move to folder…**. A name is 1 to 128 characters, unique at its level, and this needs `view:vm_folder` and `manage:vm_folder`.
+**Folders** live in the inventory tree's **Folders** view, and belong to Nexara, not Proxmox. Right-click a cluster for **New folder**, and a folder for **New subfolder**, **Rename** or **Delete** (its guests fall back to **Discovered**, and its subfolders are deleted). Move a guest by dragging it or with **Move to folder…**. A name is 1 to 128 characters, unique at its level, and this needs `view:vm_folder` and `manage:vm_folder`.
 
-A folder's page has **Summary**, **VMs**, **History** (see [A Folder's History](#a-folders-history)) and **Alerts** (`view:alert`).
+A folder's page has **Overview** (its totals, subfolders and guests), **History** (see [A Folder's History](#a-folders-history)) and **Alerts** (`view:alert`).
 
 **Favorites.** **Add to Favorites** on a cluster's, node's or guest's menu pins it to a **Favorites** section above the tree, per user. The section shows only what your grants still let you see, and a guest there keeps its full menu.
 
@@ -266,23 +268,23 @@ A folder's page has **Summary**, **VMs**, **History** (see [A Folder's History](
 
 ## Node Management
 
-A node's tabs are **Summary**, **VMs**, **Network**, **Disks**, **Services**, **Firewall**, **Syslog**, **PCI Devices**, **Updates** and **History**. While it is online, its header has:
+A node's tabs are **Summary**, **VMs**, **Network**, **Disks**, **Services**, **Firewall**, **Syslog**, **PCI devices**, **Updates** and **History**. While it is online, its header has **Shell** and **Enter maintenance** (or **Exit maintenance**); the rest are under **More actions** (**⋯**):
 
 - **Shell** — see [Consoles](#consoles)
-- **Support Bundle** (`manage:node`, audited) — downloads its `pvereport`, which discloses storage paths, network layout, packages and every guest's configuration
+- **Enter maintenance** / **Exit maintenance** — see [Node Maintenance](#node-maintenance)
+- **Support bundle** (`manage:node`, audited) — downloads its `pvereport`, which discloses storage paths, network layout, packages and every guest's configuration
 - **Evacuate** — see [Node Evacuation](#node-evacuation)
-- **Enter Maintenance** / **Exit Maintenance** — see [Node Maintenance](#node-maintenance)
 - **Reboot** and **Shutdown** (`manage:node`) — they ask first and do not migrate anything
 
-**Summary** shows the processor, memory and system, with a pencil for the time zone and another for **Network & DNS** (**Search Domain**, **DNS Server 1** to **3**; a save replaces them all, `manage:node`). Below are [Options and Notes](#node-options), [Memory modules](#memory-modules) and **Temperatures**, the node's hardware sensors, read over the cluster's [SSH credentials](#prerequisites) with a pinned host key (`view:node`).
+**Summary** shows the node's **Performance**, the **Guests on this node**, its **Hardware** (processor and memory) and its **System**, with a pencil for the **Timezone** and another for the **DNS servers** (**Search Domain**, **DNS Server 1** to **3**; a save replaces them all, `manage:node`). It also has [Options and Notes](#node-options), [Memory modules](#memory-modules) and **Temperatures**, the node's hardware sensors, read over the cluster's [SSH credentials](#prerequisites) with a pinned host key (`view:node`).
 
 **Network** — see [Network Interfaces](#network-interfaces). **Firewall** — see [Node Firewall](#node-firewall).
 
-**Disks** (`manage:node`). Click a device for its S.M.A.R.T. data. **Init GPT** and **Wipe** act on a disk, and ZFS, LVM, LVM-Thin and Directory storage can be created from the node's disks. Destroying one offers **Cleanup Disks** and **Cleanup Storage Configuration**; a Directory cannot be destroyed here.
+**Disks** (`manage:node`). Click a device for its S.M.A.R.T. data. **Initialize with GPT** and **Wipe disk**, in a disk's **⋯** menu, act on it, and ZFS, LVM, LVM-Thin and Directory storage can be created from the node's disks. Destroying one offers **Clean up disks** and **Clean up storage configuration**; a Directory cannot be destroyed here.
 
-**Services.** Start, restart and stop node daemons (`manage:node`). **Restart** and **Stop** ask first; **Start** does not. Proxmox will not stop `pveproxy`, `pvedaemon` or `pve-cluster`, so those offer **Restart** only. **Syslog.** The node's log for the last hour, day, three days or week, filtered by service, 500 lines a page. **PCI Devices** is read-only.
+**Services.** Start, restart and stop node daemons (`manage:node`). **Restart** and **Stop** ask first; **Start** does not. Proxmox will not stop `pveproxy`, `pvedaemon` or `pve-cluster`, so those offer **Restart** only. **Syslog.** The node's log for the last hour, day, three days or week, filtered by service, 500 lines a page. **PCI devices** is read-only.
 
-**Updates.** **Pending updates** with [**Update this node**](#updating-a-single-node-in-place) (`view:rolling_update` and `manage:rolling_update`), and **APT Repositories**, which switches repositories on and off and adds the standard Proxmox ones (`view:apt_repository` and `manage:apt_repository`).
+**Updates.** **Pending updates** with [**Update this node**](#updating-a-single-node-in-place) (`view:rolling_update` and `manage:rolling_update`), and **APT repositories**, which switches repositories on and off and adds the standard Proxmox ones (`view:apt_repository` and `manage:apt_repository`).
 
 ### Node Removal
 
@@ -294,7 +296,7 @@ The node's guests, storage and hardware rows go with it. Proxmox keeps a removed
 
 ## Node Options
 
-A node's own settings are on its page, in the **Options** and **Notes** cards. They are the settings Proxmox shows in a node's **Options** and **Notes** panels, changed with the pencil (**Edit**) button on each card and saved to the node without leaving Nexara.
+A node's own settings are on its **Summary** tab, in the **Options** and **Notes** panels. They are the settings Proxmox shows in a node's **Options** and **Notes** panels, changed with the pencil button on each and saved to the node without leaving Nexara.
 
 | Setting | What it does | Shown when unset |
 |---------|--------------|------------------|
@@ -310,7 +312,7 @@ A node's own settings are on its page, in the **Options** and **Notes** cards. T
 
 **Version floors.** A field is shown only when the node's Proxmox VE is new enough to have it, and is not sent to one that is not: **RAM ballooning target** needs pve-manager 8.3.6, the Wake-on-LAN interface and broadcast address need 8.1.9, and **Location** needs 9.1.13 (Proxmox VE 9.2). A setting already stored on an older node is still shown and can be removed; changing it needs a Proxmox VE that knows the setting, because Proxmox refuses a setting it has no schema for, while removing one works for any.
 
-**The node must be online.** Proxmox forwards the read and the write to the node itself, so an offline node shows no options and cannot be edited.
+**The node must be online.** Proxmox forwards the read and the write to the node itself, so an offline node cannot be edited, and shows no options, or only those it last read, with a note saying so.
 
 **Concurrent edits.** Saving is a compare-and-swap against the whole node config file, and that file is shared with the node's ACME certificate settings and with the Notes panel in Proxmox's own UI. If anything changed it after you opened the dialog, the save is refused with *The node's configuration changed since it was read*; Nexara re-reads the node's stored settings, so check what changed and save again. The exception is a node that had no config file when you opened the dialog, or whose file was empty (every setting and the notes cleared, which Proxmox reads as no file): it has nothing to be checked against, so that next save is unconditional and cannot conflict.
 
@@ -330,15 +332,15 @@ A node's own settings are on its page, in the **Options** and **Notes** cards. T
 
 ## Memory Modules
 
-A node's page shows its memory DIMM layout in the **Memory modules** card on the Summary tab: every slot, the module in it (size, type, the speed the board runs it at against its rating, manufacturer and part number), and the totals: installed memory, slots used, the firmware's maximum and ECC. The same layout feeds the **Memory headroom** section of the capacity forecast report.
+A node's page shows its memory DIMM layout in the **Memory modules** panel on the Summary tab: every slot, the module in it (size, type, the speed the board runs it at against its rating, manufacturer and part number), and the totals: installed memory, slots used, the firmware's maximum and ECC. The same layout feeds the **Memory headroom** section of the capacity forecast report.
 
-Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 -t 17` over the cluster's **SSH credentials** (Security → Rolling Updates → SSH Credentials). That needs root.
+Proxmox has no API for this, so Nexara reads it with `/usr/sbin/dmidecode -t 16 -t 17` over the cluster's **SSH credentials** (Security → Rolling updates → SSH access). That needs root.
 
 - **Daily.** The collector reads each online node of every active cluster once its last read is older than `NODE_MEMORY_READ_INTERVAL` (default `24h`; `0` turns it off). That is one root SSH login per node per day, recorded in the audit log as the system user. A cluster without SSH credentials, or a node whose host key is not pinned, is never dialed.
-- **Read now.** The card's **Read now** button (`manage:node`) reads the node at once, and is audited. It works once a minute per node: each read is a root login, and repeated rejected logins get Nexara's address banned by fail2ban.
-- **A failed read keeps the last good one.** The card shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
+- **Read now.** The panel's **Read now** button (`manage:node`) reads the node at once, and is audited. It works once a minute per node: each read is a root login, and repeated rejected logins get Nexara's address banned by fail2ban.
+- **A failed read keeps the last good one.** The panel shows why the newest read failed above the last good read, for example *Reading the memory layout needs root* when the SSH user is not root, or a warning when the node's host key no longer matches the pinned one.
 - **What is not stored.** Serial numbers and asset tags are skipped and never kept. The firmware's maximum is the board's own figure, which boards often misstate.
-- **Virtual nodes.** A node that is itself a VM lists only the memory it booted with; memory hot-plugged later is in no DIMM table. When the firmware lists less than the node has, the card says so, and the capacity forecast calls that node's table incomplete rather than reading its headroom from it.
+- **Virtual nodes.** A node that is itself a VM lists only the memory it booted with; memory hot-plugged later is in no DIMM table. When the firmware lists less than the node has, the panel says so, and the capacity forecast calls that node's table incomplete rather than reading its headroom from it.
 
 ---
 
@@ -351,9 +353,9 @@ The CPU, memory, disk and network charts on the dashboard, a node's page and a g
 - **A break in a line means nothing was measured:** Nexara took no sample (for example while a collection pass stalled), a counter fell (a guest restarted or moved), or Proxmox left it unreported. A drop to zero is a real zero.
 - **A cluster's charts** show the total disk and network throughput of its nodes, the average of their CPU, and memory as a share of the cluster's total.
 
-**Pressure.** Below those charts, the **Pressure** card shows Linux pressure stall information (PSI): the share of time tasks waited for CPU, memory or IO. The area is time at least one task waited ("some"); the dashed line is time every non-idle task waited at once ("full"). A storage stall shows here even when throughput only dips, because the tasks wait. Each point is the highest value in its interval.
+**Pressure.** Below those charts, the **Pressure** panel shows Linux pressure stall information (PSI): the share of time tasks waited for CPU, memory or IO. The area is time at least one task waited ("some"); the dashed line is time every non-idle task waited at once ("full"). A storage stall shows here even when throughput only dips, because the tasks wait. Each point is the highest value in its interval.
 
-- **Proxmox VE 9 or later.** A node or guest on Proxmox VE 8 shows no pressure data. A node's RRD keeps no CPU "full", so a node's card has no dashed CPU line.
+- **Proxmox VE 9 or later.** A node or guest on Proxmox VE 8 shows no pressure data. A node's RRD keeps no CPU "full", so a node's panel has no dashed CPU line.
 - **Guests** report pressure with every metrics cycle.
 - **Nodes** keep it in their RRD, at one-minute steps for a day. A background pass copies new steps every `NODE_PRESSURE_SYNC_INTERVAL` (default `5m`; `0` turns it off), so a node's pressure survives a Nexara outage of up to a day.
 - Pressure is kept as long as the other raw metrics, 30 days.
@@ -364,7 +366,7 @@ The CPU, memory, disk and network charts on the dashboard, a node's page and a g
 
 A running VM's [History](#a-guests-history) tab opens with the QEMU block jobs working on its disks, as live rows above the history: a mirror while a disk moves, a live migration copies local disks, or a running VM is cloned; a stream during a live restore from Proxmox Backup Server, or while a snapshot is removed on Proxmox VE 9's volume-chain storage; a backup. Each shows how far it has got, its speed limit, and the rate and time left, worked out between refreshes. The rows refresh every 3 seconds while a job runs, every 15 seconds otherwise, and every minute after a failed read, and only while the History tab is open. With no job running there are no rows.
 
-- The read needs `view:vm`, and the History tab it sits in needs `view:audit` and `view:task` — every built-in role holds all three. Nexara reads the jobs through Proxmox's QEMU monitor with one fixed, read-only command (`info block-jobs`). For that the cluster's API token needs `Sys.Audit` on the VM on Proxmox VE 9, or `VM.Monitor` on Proxmox VE 8.
+- The read needs `view:vm`, and the History tab it sits in needs `view:audit` and `view:task` — every built-in role holds all three. Without the History tab, the jobs show in a **Block jobs** panel on the **Overview** instead. Nexara reads the jobs through Proxmox's QEMU monitor with one fixed, read-only command (`info block-jobs`). For that the cluster's API token needs `Sys.Audit` on the VM on Proxmox VE 9, or `VM.Monitor` on Proxmox VE 8.
 - A QEMU too stuck to answer (a hung storage backend, say) shows that as a row's message: Proxmox waits up to 25 seconds for QEMU, and Nexara up to 30 for Proxmox. Several people watching the same VM share one read.
 - A line QEMU prints in a shape Nexara does not recognise is shown as printed rather than dropped.
 
@@ -378,7 +380,7 @@ All four are under the cluster's **Configure** tab.
 
 **Replication** (`view:replication`, `manage:replication`). **Create Job** takes the guest, **Target Node**, **Schedule** (a Proxmox calendar event, `*/15` by default), **Rate Limit** and **Comment**. A row's action triggers a sync now. Deleting a job also removes the target's copy once Proxmox gets to it. A job's log is available only through the API.
 
-**Options** (`manage:cluster`). **Notes**; **General**, whose **Datacenter Options** are the migration network, fencing, the HA **Shutdown Policy**, [CRS](#native-crs-coexistence-proxmox-ve-92), **Bandwidth Limits** and the **Next VMID Range**, saved with **Save Changes**; **Tags**; and **Cluster Info**.
+**Options** (`manage:cluster`). **Notes**; **General**, whose **Datacenter options** include the migration network, fencing, the HA **Shutdown policy**, [CRS](#native-crs-coexistence-proxmox-ve-92), **Bandwidth limits** and the **Next VMID range**, saved with **Save Changes**; **Tags**; and **Cluster info**.
 
 **Metric servers** (`manage:cluster`). **Add Server** points Proxmox at an external metrics server by ID, Type, Server and Port. There is no edit, and an InfluxDB v2 server, which needs a token and a bucket, can be added only through the API.
 
@@ -388,22 +390,22 @@ All four are under the cluster's **Configure** tab.
 
 The user menu (your name, top right) holds **Profile**, **Security**, **API Keys**, **What's New**, **About**, **Sign Out** and **Sign Out All Devices**.
 
-**Profile** shows your email, role, auth source, 2FA status and join date. A local account can change its **Display Name** and use **Change Password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes on that sign-in; signing in again starts afresh.
+**Profile** shows your email, role, sign-in method, 2FA status and join date. A local account can change its **Display name** and use **Change password**: 8 to 72 characters with an upper-case letter, a lower-case letter, a digit and a special character. Changing it ends every session. Five wrong current passwords within 60 minutes, here and at Enable 2FA together, lock both for 30 minutes on that sign-in; signing in again starts afresh.
 
-**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active Sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. That sign-in is refused at its next request. Once an hour Nexara deletes the records of sessions that have expired.
+**Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. That sign-in is refused at its next request. Once an hour Nexara deletes the records of sessions that have expired.
 
 **Sign Out All Devices** ends every session without asking, and each is refused at its next request. An API key is not affected.
 
 ### API Keys
 
-**API Keys** → **Create API Key** takes a name and an expiration (**Never**, **30 days**, **90 days** or **1 year**; through the API, from an hour to 100 years) and shows the key once. Send it as `Authorization: Bearer nxra_…`.
+**API Keys** → **Create API key** takes a name and an expiration (**Never**, **30 days**, **90 days** or **1 year**; through the API, from an hour to 100 years) and shows the key once. Send it as `Authorization: Bearer nxra_…`.
 
 - It acts with its owner's permissions as they are at each request, and stops working if the owner is deactivated.
-- It survives a password change and **Sign Out All Devices**, so revoke it yourself if it may have leaked: **Revoke** → **Revoke Key**.
+- It survives a password change and **Sign Out All Devices**, so revoke it yourself if it may have leaked: **Revoke** → **Revoke key**.
 - It cannot change its owner's credentials or end their sessions: change-password, the two-factor routes, sign-out-all, ending a session and creating another key answer 403.
 - Creating one needs a global `manage:api_key`, which every built-in role holds. An account holds at most 25 unrevoked keys, expired ones counted. `manage:user` lists and revokes other users' keys through the API (`/api/v1/admin/api-keys`).
 
-**View API Documentation** on that page opens the live catalog of every route, with its permission and parameters, for any signed-in user.
+**API reference** on that page opens the live catalog of every route, with its permission and parameters, for any signed-in user.
 
 ---
 
@@ -415,7 +417,7 @@ Navigate to **Admin > Users** to manage user accounts.
 
 The **first** user self-registers via the registration page and is automatically promoted to Admin — that is the install bootstrap. After that, self-registration is closed: only an administrator can create accounts.
 
-To add a user, go to **Admin > Users** and click **Create User**, then supply an email, a password, and an optional display name. New accounts receive the **Viewer** role globally; assign anything more from the user's role dialog.
+To add a user, go to **Admin > Users** and click **Create user**, then supply an email, a password, and an optional display name. New accounts receive the **Viewer** role globally; assign anything more from the user's role dialog.
 
 Creating a user takes the `manage:user` permission, which the Admin role carries. Until this release it took the legacy `role` field being `admin`, which only the first user had, so someone granted the Admin role got 403 *Only admins can register new users*.
 
@@ -425,9 +427,9 @@ From the Users page, administrators can:
 
 - **View** all registered users with their roles, auth source, and 2FA status. The Roles column lists global roles only, so a user who holds only cluster-scoped roles reads "No roles"
 - **Active** — a switch that deactivates the account, without asking: it ends the user's sessions and refuses their API keys at once, and a browser they are signed in on is signed out at its next request. You cannot switch off your own, but nothing stops the last administrator being deactivated by another
-- **Manage roles** — the shield icon
-- **Reset 2FA** — remove a user's TOTP enrollment if they lose access to their authenticator. It also signs the user out everywhere: every session ends, and a sign-in waiting for its code has to start again. The user's API keys are left as they are
-- **Delete user** — answers *Failed to delete user* for anyone who has created an alert rule, channel, maintenance window, report, rolling update or import, or acknowledged or resolved an alert, since those records name them. Deactivate such an account instead
+- **Manage roles** — opens the user's role dialog
+- **More > Reset 2FA** (offered for a user with 2FA on) — remove a user's TOTP enrollment if they lose access to their authenticator. It also signs the user out everywhere: every session ends, and a sign-in waiting for its code has to start again. The user's API keys are left as they are
+- **More > Delete user** — answers *Failed to delete user* for anyone who has created an alert rule, channel, maintenance window, report, rolling update or import, or acknowledged or resolved an alert, since those records name them. Deactivate such an account instead
 
 There is no way to reset someone's password from the UI or API. See [Recovering from a Lost Admin Account](#recovering-from-a-lost-admin-account).
 
@@ -466,10 +468,10 @@ Built-in roles cannot be edited or deleted.
 
 ### Custom Roles
 
-1. Click **Create Role**
+1. Click **Create role**
 2. Enter a role name and description
 3. Tick permissions in the matrix
-4. Click **Create Role** (**Save Changes** when editing)
+4. Click **Create role** (**Save changes** when editing)
 
 A change takes effect at each holder's next request.
 
@@ -514,7 +516,7 @@ The complete catalog is whatever **Admin > Roles** lists — it is seeded from t
 ### Assigning Roles
 
 1. Go to **Admin > Users**
-2. Click the shield icon (**Manage roles**) on a user's row
+2. Click **Manage roles** on a user's row
 3. Choose from **Select a role...** and click **Assign**, once for each role
 4. Permissions are the union of all assigned roles
 
@@ -528,7 +530,7 @@ curl -X POST https://nexara.example.com/api/v1/rbac/users/$USER_ID/roles \
   -d '{"role_id":"'$ROLE_ID'","scope_type":"cluster","scope_id":"'$CLUSTER_ID'"}'
 ```
 
-The assignment's scope shows as a badge next to the role name in the user's role dialog; it says `cluster`, not which one. A route that belongs to no one cluster never accepts a cluster-scoped grant, and an account that signs in through LDAP or OIDC loses cluster-scoped and hand-assigned roles at its next sign-in ([see below](#how-ldap-login-works)).
+The assignment's scope shows next to the role name in the user's role dialog; it says `cluster`, not which one. A route that belongs to no one cluster never accepts a cluster-scoped grant, and an account that signs in through LDAP or OIDC loses cluster-scoped and hand-assigned roles at its next sign-in ([see below](#how-ldap-login-works)).
 
 ---
 
@@ -559,13 +561,13 @@ would make Operator silently equivalent to Admin.
 
 What Nexara can actually do is bounded by what the cluster's stored credential is
 permitted to do. `GET /api/v1/clusters/{cluster_id}/access/permissions` (`view:access`) reports
-exactly that, and the tab uses it to mark what it cannot change as read-only; check it first when
+exactly that, and **Access control** uses it to mark what it cannot change as read-only; check it first when
 an action fails with a Proxmox-side error rather than a Nexara 403.
 
 ### What You Can Manage
 
 - **Users** — `name@realm`. Deleting a user takes **every API token it owns** with it; that is Proxmox behaviour, not Nexara's
-- **API tokens** — create, edit, regenerate and revoke
+- **API tokens** — create, regenerate and revoke; editing one is API only
 - **Groups** — so an ACL can name a set of users rather than one
 - **Roles** — built-in roles are read-only; custom ones can be created and edited
 - **ACL entries** — grant a role to a user, token or group on a path (`/vms/101`, `/storage/local`, `/` for the whole cluster), with optional propagation
@@ -679,29 +681,29 @@ Navigate to **Admin > LDAP** to configure LDAP/AD authentication. Only one enabl
 
 #### Setup
 
-1. Click **Add Config**
-2. Choose a **Directory Type** preset, name it, and tick **Enabled** (off by default)
+1. Click **Add configuration**
+2. Choose a **Directory type** preset, name it, and turn on **Enabled** (off by default)
 3. Configure connection:
    - **Server URL** — `ldaps://ad.example.com:636`, or `ldap://ad.example.com:389` with **StartTLS**. A plain `ldap://` URL sends passwords in the clear, so saving it asks for confirmation (**Save without encryption**)
-   - **Skip TLS Verify** — for a self-signed directory certificate
+   - **Skip TLS verify** — for a self-signed directory certificate
    - **Bind DN** — service account DN (e.g., `cn=nexara,ou=services,dc=example,dc=com`)
-   - **Bind Password** — service account password (encrypted at rest)
-   - **Search Base DN** — search base (e.g., `dc=example,dc=com`)
+   - **Bind password** — service account password (encrypted at rest)
 4. Configure user search:
-   - **User Filter** — filter template, where `{{username}}` is what the user typed at sign-in: an address, or an account name such as a `sAMAccountName` or `uid` when the filter matches on one, as the Active Directory preset's `(|(sAMAccountName={{username}})(userPrincipalName={{username}})(mail={{username}}))` does. A sync searches each account with the name it last signed in with, and accepts the entry it finds only when the entry's address is the account's: a name the directory has since given to someone else counts as missing (an entry with no address leaves the account as it is). An account that has not signed in since this release is searched by its stored address only when the filter matches the **Email Attribute** against `{{username}}` (such as `(mail={{username}})`); with any other filter it is left as it is, counted as *not signed in since upgrade*, until its next sign-in
-   - **Email Attribute** and **Display Name Attribute** (e.g., `mail`, `displayName`)
+   - **Search base DN** — search base (e.g., `dc=example,dc=com`)
+   - **User filter** — filter template, where `{{username}}` is what the user typed at sign-in: an address, or an account name such as a `sAMAccountName` or `uid` when the filter matches on one, as the Active Directory preset's `(|(sAMAccountName={{username}})(userPrincipalName={{username}})(mail={{username}}))` does. A sync searches each account with the name it last signed in with, and accepts the entry it finds only when the entry's address is the account's: a name the directory has since given to someone else counts as missing (an entry with no address leaves the account as it is). An account that has not signed in since this release is searched by its stored address only when the filter matches the **Email attribute** against `{{username}}` (such as `(mail={{username}})`); with any other filter it is left as it is, counted as *not signed in since upgrade*, until its next sign-in
+   - **Email attribute** and **Display name attribute** (e.g., `mail`, `displayName`)
 5. Configure group mapping (optional):
-   - **Group Search Base DN** — where to search for groups; left empty, no groups are read
-   - **Group Filter** — filter for group membership (e.g., `(member={{userDN}})`)
-   - **Group-to-Role Mapping** — map a group's **full DN**, as the directory returns it, to a Nexara role
-   - **Default Role (no group match)** — what a user gets when no group matches. Left at no default, a new user has no permissions at all. A role that an LDAP or OIDC config names as its default cannot be deleted until the config names another; a mapping whose role was deleted assigns nothing (the log says so), so its users get the default role
+   - **Group search base DN** — where to search for groups; left empty, no groups are read
+   - **Group filter** — filter for group membership (e.g., `(member={{userDN}})`)
+   - **Group-to-role mapping** — map a group's **full DN**, as the directory returns it, to a Nexara role
+   - **Default role** — what a user gets when no group matches. Left at no default, a new user has no permissions at all. A role that an LDAP or OIDC config names as its default cannot be deleted until the config names another; a mapping whose role was deleted assigns nothing (the log says so), so its users get the default role
 6. Click **Create**
 
-The **Test Connection** panel appears only once the config is saved, and tests the saved values: **Test** and **Sync Now**.
+**Test**, in the **Test connection** section, and **Sync now**, in the **Sync** section, appear only once the config is saved, and use the saved values.
 
-> **StartTLS and `ldaps://` both check the certificate** against the host in the Server URL, unless **Skip TLS Verify** is on. Use the name the certificate was issued for, not an IP address it does not list.
+> **StartTLS and `ldaps://` both check the certificate** against the host in the Server URL, unless **Skip TLS verify** is on. Use the name the certificate was issued for, not an IP address it does not list.
 >
-> **Sync.** The config sign-in uses (the oldest enabled one) is synced every **Sync interval** minutes, 60 by default; 0 turns the scheduled sync off. **Sync Now** syncs any saved config at once. One sync of a config runs at a time: Sync Now answers that one is already running, and a scheduled sync waits for the next minute. A sync disables a user only when the directory answered the search and did not return them, and ends their sessions — but when every account whose search answered is missing, or more than half of them and at least three, it changes nothing at all. A mass miss is a wrong user filter, search base DN or bind account read access far more often than people leaving, so the sync is recorded as failed (`too_many_missing`, with the counts) and **Sync Now** says what to check. When the people really have left, **Sync Now** offers to deactivate them anyway: confirm the prompt that names how many accounts, and the sync runs again and deactivates them, so they can no longer sign in (if a different number is missing by then, it stops and asks again with the new count). The audit row of that sync records `mass_miss_acknowledged` and the count you confirmed. No sync ever deactivates the account of the administrator running it, or the last active account that holds `manage:user` globally: those stay active, are counted as *kept active* (and skipped) in the result and as `kept_active` in the audit row, and are yours to deactivate by hand. The scheduled sync never deactivates past the rule; a search that fails leaves the user as they are (counted as skipped), and a directory that cannot be reached or bound to stops the sync with nobody disabled. A later sync re-enables a user a sync disabled once the directory has them again, but never someone you deactivated by hand, which includes every LDAP user that was inactive before the upgrade to this release. Scheduled syncs are audited as `ldap_sync` by the system account.
+> **Sync.** The config sign-in uses (the oldest enabled one) is synced every **Sync interval** minutes, 60 by default; 0 turns the scheduled sync off. **Sync now** syncs any saved config at once. One sync of a config runs at a time: Sync now answers that one is already running, and a scheduled sync waits for the next minute. A sync disables a user only when the directory answered the search and did not return them, and ends their sessions — but when every account whose search answered is missing, or more than half of them and at least three, it changes nothing at all. A mass miss is a wrong user filter, search base DN or bind account read access far more often than people leaving, so the sync is recorded as failed (`too_many_missing`, with the counts) and **Sync now** says what to check. When the people really have left, **Sync now** offers to deactivate them anyway: confirm the prompt that names how many accounts, and the sync runs again and deactivates them, so they can no longer sign in (if a different number is missing by then, it stops and asks again with the new count). The audit row of that sync records `mass_miss_acknowledged` and the count you confirmed. No sync ever deactivates the account of the administrator running it, or the last active account that holds `manage:user` globally: those stay active, are counted as *kept active* (and skipped) in the result and as `kept_active` in the audit row, and are yours to deactivate by hand. The scheduled sync never deactivates past the rule; a search that fails leaves the user as they are (counted as skipped), and a directory that cannot be reached or bound to stops the sync with nobody disabled. A later sync re-enables a user a sync disabled once the directory has them again, but never someone you deactivated by hand, which includes every LDAP user that was inactive before the upgrade to this release. Scheduled syncs are audited as `ldap_sync` by the system account.
 >
 > **Test** with a test username also says whether the directory gives entries a stable identifier (`entryUUID` on OpenLDAP and 389, `objectGUID` on Active Directory). A directory that has neither works as before, by sign-in name and address only.
 
@@ -740,26 +742,26 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 
 #### Setup
 
-1. Click **Add Config**
-2. Choose a **Provider Preset** (Keycloak, Authentik, Azure AD, Google, Okta or Custom), name it, and tick **Enabled** (off by default). The name is what the sign-in button says
-3. Configure provider:
+1. Click **Add configuration**
+2. Choose a **Provider preset** (Keycloak, Authentik, Azure AD, Google, Okta or Custom), name it, and turn on **Enabled** (off by default). The name is what the sign-in button says
+3. Configure the client:
    - **Issuer URL** — OIDC issuer (e.g., `https://accounts.google.com`). It must be `https`. An issuer that resolves to a private address (RFC 1918, IPv6 unique-local or carrier-grade NAT), as a provider on your LAN does, is saved only once you confirm it: the form says which address it found and offers **Continue with private address**. The confirmation is stored with the configuration and recorded in the audit log (`allow_private_address`), kept while the issuer stays the same, and asked again for a new one. Every contact with the provider checks the address again. A loopback, link-local (the cloud metadata address included), unspecified or zoned address is refused, confirmed or not
    - **Client ID** — from your identity provider
-   - **Client Secret** — from your identity provider (encrypted at rest)
+   - **Client secret** — from your identity provider (encrypted at rest)
    - **Redirect URI** — `https://your-nexara-domain/api/v1/auth/oidc/callback`. Users must open Nexara at this
      same address to sign in with SSO: the sign-in is bound to the browser that starts it, and one finished at
      another address is refused — on the sign-in page at this address, where starting again works
 4. Configure claims mapping, all read from the ID token:
-   - **Email Claim**, **Display Name Claim** and **Groups Claim**
+   - **Email claim**, **Display name claim** and **Groups claim**
    - **Scopes** — comma-separated
 5. Configure who gets in:
-   - **Auto-Provision Users** — create an account on first sign-in (on by default in the form, off through the API)
-   - **Allowed Email Domains** — comma-separated; empty allows all
-   - **Group-to-Role Mapping** — exact group names to Nexara roles
-   - **Default Role (no group match)**
+   - **Auto-provision users** — create an account on first sign-in (on by default in the form, off through the API)
+   - **Allowed email domains** — comma-separated; empty allows all
+   - **Group-to-role mapping** — exact group names to Nexara roles
+   - **Default role**
 6. Click **Create**
 
-**Test Discovery Endpoint** appears once the config is saved, and tests the saved values. An issuer that has come to resolve to a private address the configuration was not confirmed for is reported as such; save the configuration to confirm it. The test fails when the discovery document cannot be read, or when its authorization endpoint is not an http or https URL (a sign-in would refuse it). On a pass it says whether the provider lists `auth_time` among its supported claims: "the provider says it sends auth_time" means the strict 2FA confirmation (below) can work, though only a sign-in proves it; "does not say" means it may not, and you may need the relaxed confirmation.
+**Test discovery endpoint**, in the **Test connection** section, appears once the config is saved, and tests the saved values. An issuer that has come to resolve to a private address the configuration was not confirmed for is reported as such; save the configuration to confirm it. The test fails when the discovery document cannot be read, or when its authorization endpoint is not an http or https URL (a sign-in would refuse it). On a pass it says whether the provider lists `auth_time` among its supported claims: "the provider says it sends auth_time" means the strict 2FA confirmation (below) can work, though only a sign-in proves it; "does not say" means it may not, and you may need the relaxed confirmation.
 
 #### How OIDC Login Works
 
@@ -767,7 +769,7 @@ Navigate to **Admin > OIDC / SSO** to configure single sign-on. Only one enabled
 2. Browser redirects to the identity provider with PKCE challenge
 3. After authentication, the provider redirects back with an authorization code
 4. Nexara exchanges the code for tokens, verifies the ID token (signature, nonce, audience). An ID token whose `email_verified` claim is false (the boolean, the number `0`, or the string `"false"`, `"0"` or `"no"`) is refused, for a new account and an existing one alike: the sign-in page asks the user to verify the address with their provider, and the audit log records `login_failed` with reason `email_not_verified` under the account, or, when no SSO account has that address, `login_failed_unknown_account` with no address, at most one a minute per client address, as for password sign-ins. A token without the claim is accepted
-5. Nexara finds the account by who the person is at the provider, not by the address alone (see **Which account a sign-in reaches** below). With **Auto-Provision Users** on, an identity with no account gets a new one (JIT provisioning) with `auth_source=oidc`. A local or LDAP account with the same email is not taken over: the sign-in fails with *User provisioning failed*
+5. Nexara finds the account by who the person is at the provider, not by the address alone (see **Which account a sign-in reaches** below). With **Auto-provision users** on, an identity with no account gets a new one (JIT provisioning) with `auth_source=oidc`. A local or LDAP account with the same email is not taken over: the sign-in fails with *User provisioning failed*
 6. Group claims are mapped to Nexara roles, and as with LDAP this replaces the user's roles at every sign-in
 
 A refused sign-in is shown on the sign-in page in Nexara's own words, chosen from a fixed set of reasons. When the provider itself refuses or cancels it, the page says only that the provider did not complete the sign-in; the provider's `error` and `error_description` are in Nexara's log (`oidc callback: the identity provider came back without a code`).
@@ -778,7 +780,7 @@ An SSO account is bound to one identity at the provider: the ID token's issuer (
 
 - the account bound to this issuer and subject is the account, whatever address the token carries now. Its address is not rewritten from the token. Its roles and name are synced from the provider at the callback, before any second-factor code;
 - otherwise, the SSO account whose address the token carries (exact spelling first, else the one account that differs only by case) is linked to this identity, if it has no link yet, and signed in. An account with two-factor authentication is linked, and has its roles and name updated from the provider, only once its second-factor code passes; if by then another identity has taken the account, the sign-in is refused and nothing is issued. A deactivated account is not linked. Writing a link is recorded in the audit log as `oidc_identity_linked` under the account, without the subject or issuer. The configuration must be unchanged while the code is typed: an edit to it in between refuses the sign-in, which is started again;
-- otherwise, with **Auto-Provision Users** on, a new account is created, bound to this identity;
+- otherwise, with **Auto-provision users** on, a new account is created, bound to this identity;
 - an SSO account with that address that is already bound to **another** identity — another subject, or another issuer — is refused. Nothing is created or linked; the sign-in page says *This sign-in does not match the single sign-on identity your account is linked to. Contact an administrator.*, and the audit log records `login_failed` under that account with reason `identity_mismatch`. The record carries the account's own address, never the subject, issuer or address the provider sent.
 
 For an account with two-factor authentication, bound or not, the sign-in's audit entry (`oidc_login` and `oidc_callback`) appears only once the code has passed and the session exists; a sign-in that stops at the code prompt leaves none.
@@ -787,7 +789,7 @@ The unverified-address and allowed-domain refusals above happen before any of th
 
 **After the upgrade that added links**, every existing SSO account has no link and links itself at its next sign-in, by its address, as sign-in worked before. Until then the account is exactly as exposed as before the upgrade: whoever first signs in with an identity that presents its address takes the link. Where your provider lets users set an unverified address (Microsoft Entra ID, for one, sends no `email_verified`), sign in once with each SSO account you rely on, or check the **Not linked yet** marks on **Admin > Users**.
 
-**Resetting a link.** On **Admin > Users**, **More > Reset SSO link** (offered for a linked SSO account) clears the account's link after a confirmation: its next SSO sign-in links again by address. It ends every session of the account, since the identity behind them is in question, and is recorded in the audit log as `user_sso_link_reset`. You cannot reset your own. Before resetting, make sure the account's address in Nexara is the one the provider sends now: after a reset the account is found only by that address, and if it differs the next sign-in finds no account, and with **Auto-Provision Users** on creates a second one. Use it when a person's account at the provider was replaced, or when a link may have been taken by the wrong identity.
+**Resetting a link.** On **Admin > Users**, **More > Reset SSO link** (offered for a linked SSO account) clears the account's link after a confirmation: its next SSO sign-in links again by address. It ends every session of the account, since the identity behind them is in question, and is recorded in the audit log as `user_sso_link_reset`. You cannot reset your own. Before resetting, make sure the account's address in Nexara is the one the provider sends now: after a reset the account is found only by that address, and if it differs the next sign-in finds no account, and with **Auto-provision users** on creates a second one. Use it when a person's account at the provider was replaced, or when a link may have been taken by the wrong identity.
 
 **Changing the issuer.** Accounts stay bound to the issuer they linked under, so after the issuer of a configuration changes, every one of them is refused at sign-in. That is the safe default: a new issuer's subjects are not the old one's. Saving a new **Issuer URL** while accounts are linked to the current one warns first and asks you to confirm. Afterwards, **Reset all SSO links** in the configuration's **Accounts** section clears every SSO account's link at once, after a confirmation, and ends every SSO session (yours too, if you signed in with SSO). Each account then links again by its address at its next sign-in, with the same first-sign-in exposure as after the upgrade, and the same caution about addresses as a single reset. It is recorded as `oidc_links_reset` with the number of accounts.
 
@@ -815,7 +817,7 @@ the provider must support:
 
 A provider that sends no `auth_time` (Dex, for one, which also ignores `prompt=login`), or that refuses `prompt=login`,
 cannot give the strict confirmation, and its users cannot turn 2FA on. For such a provider you can choose the
-relaxed confirmation, per configuration, with **Allow relaxed 2FA confirmation** in the configuration's **Accounts** section (`relaxed_step_up`; off for every existing and new
+relaxed confirmation, per configuration, with **Allow relaxed 2FA confirmation for a provider that cannot report a fresh sign-in** in the configuration's **Accounts** section (`relaxed_step_up`; off for every existing and new
 one; audited when it changes). Nexara then asks for neither `prompt` nor `max_age`, and accepts the completed round
 trip through the provider as the confirmation, still bound to the same browser, the same Nexara sign-in and the same
 account. It keeps out someone who has only a stolen Nexara session token. It does not keep out someone at the
@@ -829,7 +831,7 @@ typing anything. It is your choice; the audit log records which rule each confir
 
 1. Open **Security** from the user menu (your name, top right)
 2. Click **Enable 2FA**
-3. Enter your current password. Five wrong passwords within an hour, here and at **Change Password** together, lock
+3. Enter your current password. Five wrong passwords within an hour, here and at **Change password** together, lock
    both for 30 minutes on that sign-in. An LDAP account enters its **Directory password** instead: Nexara checks it with the
    directory, and wrong ones count toward the account's sign-in lockout, so ten of them lock signing in for 15 minutes.
    An account that signs in through single sign-on has no password to enter: click **Confirm with your identity
@@ -839,7 +841,7 @@ typing anything. It is your choice; the audit log records which rule each confir
    not linked yet (signed in before the upgrade that added links) is asked to sign out and sign in again once
 4. Scan the QR code with an authenticator app (Google Authenticator, Authy, etc.)
 5. Enter the 6-digit code to verify
-6. Save the recovery codes in a secure location: 10 single-use `XXXX-XXXX` codes, shown once. **Regenerate Recovery Codes** needs a code from your authenticator
+6. Save the recovery codes in a secure location: 10 single-use `XXXX-XXXX` codes, shown once. **Regenerate recovery codes** needs a code from your authenticator
 
 #### Admin Management
 
@@ -852,9 +854,9 @@ typing anything. It is your choice; the audit log records which rule each confir
 When 2FA is enabled, login becomes a two-step process:
 1. Enter email and password (for LDAP too, since the sign-in page asks for an email address), or complete SSO
 2. Enter the 6-digit TOTP code from your authenticator app
-3. If you lose your device, use a recovery code instead. It signs you in, but **Disable** and **Regenerate** in the UI take only an authenticator code, so you then need an admin's **Reset 2FA** (or `DELETE /api/v1/auth/totp` with `recovery_code`)
+3. If you lose your device, use a recovery code instead. It signs you in, but **Disable 2FA** and **Regenerate** in the UI take only an authenticator code, so you then need an admin's **Reset 2FA** (or `DELETE /api/v1/auth/totp` with `recovery_code`)
 
-Five wrong codes in 10 minutes block further tries for 5 minutes: at sign-in for the account, and at **Disable** and **Regenerate** together for that sign-in only, so codes sent from one session never block signing in. At sign-in, recovery codes are counted apart, by the same rule: wrong authenticator codes no longer block recovery codes, and wrong recovery codes no longer block authenticator codes. This does not stop someone who has the password and keeps trying both from keeping both blocked; the remedy is still an admin's **Reset 2FA**. When Nexara cannot reach Redis to count a code, it does not check it: the request fails and can be retried.
+Five wrong codes in 10 minutes block further tries for 5 minutes: at sign-in for the account, and at **Disable 2FA** and **Regenerate** together for that sign-in only, so codes sent from one session never block signing in. At sign-in, recovery codes are counted apart, by the same rule: wrong authenticator codes no longer block recovery codes, and wrong recovery codes no longer block authenticator codes. This does not stop someone who has the password and keeps trying both from keeping both blocked; the remedy is still an admin's **Reset 2FA**. When Nexara cannot reach Redis to count a code, it does not check it: the request fails and can be retried.
 
 ---
 
@@ -867,13 +869,13 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
 1. Navigate to a cluster's detail page
 2. Open **Configure** → **DRS**
 3. Choose a **Mode**:
-   - **Advisory — recommend only** — DRS generates migration recommendations for you to review; carry out the ones you agree with using **Migrate**
-   - **Automatic — migrate VMs** — DRS executes the migrations itself
-   - **Disabled — do nothing** — turns evaluation off
+   - **Advisory: recommend only** — DRS generates migration recommendations for you to review; carry out the ones you agree with using **Migrate**
+   - **Automatic: migrate VMs** — DRS executes the migrations itself
+   - **Disabled: do nothing** — turns evaluation off
 4. Configure:
-   - **Resource Weights** — how heavily CPU vs. memory pressure counts toward a node's load score. Through the API each weight must be a number from 0 to 100; anything else is refused with a 400 that names the weight
-   - **Imbalance Threshold** — the cluster imbalance percentage that triggers migration planning (5–100%, in 5% steps)
-   - **Evaluation Interval** — how often DRS evaluates balance, in seconds, at least 60
+   - **CPU weight** and **Memory weight** — how heavily CPU vs. memory pressure counts toward a node's load score. Through the API each weight must be a number from 0 to 100; anything else is refused with a 400 that names the weight
+   - **Imbalance threshold** — the cluster imbalance percentage that triggers migration planning (5–100%, in 5% steps)
+   - **Evaluation interval** — how often DRS evaluates balance, in seconds, at least 60
    - **Hold-off after a node boots** — for this many minutes after a node boots, DRS moves no guest onto it or off it (10 by default, up to 1440; 0 turns it off). See [Guests DRS Leaves in Place](#guests-drs-leaves-in-place)
    - **Include containers in balancing** — balance CTs alongside VMs
 5. Click **Save Configuration**
@@ -883,18 +885,18 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
 On the **Rules** sub-tab, **Add Rule** controls VM placement:
 
 - **Affinity** — keep guests together on the same node; needs at least two
-- **Anti-affinity** — keep guests on different nodes (e.g., HA pairs); needs at least two
+- **Anti-Affinity** — keep guests on different nodes (e.g., HA pairs); needs at least two
 - **Pin** — lock a guest to one or more nodes
 
 Its **Target** is **Nexara Only**, which only DRS honours, or **Proxmox HA**, which writes a rule to Proxmox under the **Rule Name** you give it. Clearing **Enabled** creates the rule disabled, for either target. A Proxmox HA rule needs Proxmox VE 9 or later, which introduced HA rules: on an older cluster, or one whose version Nexara has not read yet, the dialog has no **Target** and creates a Nexara rule.
 
 ### Manual Evaluation
 
-Click **Run Evaluation** to trigger an immediate DRS evaluation. In Advisory mode, this lists migration recommendations for you to review; they cannot be applied from the list. With **Mode** on Disabled, or a configuration that was never saved, it reports **Cluster Balanced** at 0.0%: nothing was evaluated.
+Click **Run Evaluation** to trigger an immediate DRS evaluation. In Advisory mode, this lists migration recommendations for you to review; they cannot be applied from the list. With **Mode** on Disabled, or a configuration that was never saved, it reports **Cluster balanced** at 0.0%: nothing was evaluated.
 
 ### DRS Migrations and History
 
-The **Migrations** tab within DRS shows the moves DRS proposed or carried out. An evaluation that found the cluster balanced leaves no row. Its **History** tab is the audit trail: who changed the DRS configuration, triggered an evaluation, created or deleted a rule, and what was done to Proxmox's HA rules from this page.
+The **Migrations** sub-tab of DRS shows the moves DRS proposed or carried out. An evaluation that found the cluster balanced leaves no row. Its **History** sub-tab is the audit trail: who changed the DRS configuration, triggered an evaluation, created or deleted a rule, and what was done to Proxmox's HA rules from this page.
 
 ### Guests DRS Leaves in Place
 
@@ -912,7 +914,7 @@ If Nexara shuts down while following a migration, the attempt is recorded as `in
 
 ### Native CRS Coexistence (Proxmox VE 9.2+)
 
-Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on **Configure** → **DRS** explains the state. You can manage the native CRS options from the cluster's **Configure** → **Options**, under **General** → **Cluster Resource Scheduling (CRS)**: choose the scheduler **Dynamic — live load balancing**, turn on **Automatic Rebalancing**, and set the threshold, hold rounds, margin and method.
+Proxmox VE 9.2 added a native dynamic load balancer to its Cluster Resource Scheduler (CRS). When a cluster has it enabled (`crs: ha=dynamic, ha-auto-rebalance=1` in the datacenter options), Nexara detects it and **disables its own automatic migrations** so the two balancers don't fight — Advisory mode still works as a read-only second opinion, and a banner on **Configure** → **DRS** explains the state. You can manage the native CRS options from the cluster's **Configure** → **Options**, under **General** → **Resource scheduling (CRS)**: choose the scheduler **Dynamic: live load balancing**, turn on **Automatic rebalancing**, and set the threshold, hold rounds, margin and method.
 
 ---
 
@@ -924,7 +926,7 @@ On its **Resources** sub-tab, a resource's **State** sets the HA request state. 
 
 ### HA Rules
 
-On Proxmox VE 9 and later, create rules from the **Groups / Rules** sub-tab of **High availability**: **HA Rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
+On Proxmox VE 9 and later, create rules from the **Groups / Rules** sub-tab of **High availability**: **HA rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
 
 While picking resources for a rule, the search also lists guests that are not yet HA-managed. When you select one, the form offers to add it to HA management with the settings below, ticked by default, and Nexara enrolls it as part of creating the rule — no need to leave the form and add the resource separately.
 
@@ -933,16 +935,16 @@ While picking resources for a rule, the search also lists guests that are not ye
 To service a node without fighting HA (without the cluster's [SSH credentials](#prerequisites) a disabled **Maintenance** button says so, and you also need `manage:node`. The page asks only whether the cluster has them, which `manage:node` is enough for, so a built-in Operator sees it too):
 
 1. Open the node's detail page
-2. Click **Enter Maintenance** — HA-managed guests are migrated away, and the node shows a maintenance indicator in the tree and node views
-3. When you're done, click **Exit Maintenance**
+2. Click **Enter maintenance** — HA-managed guests are migrated away, and the node shows a maintenance indicator in the tree and node views
+3. When you're done, click **Exit maintenance**
 
 ### Cluster-Wide HA Arm/Disarm (PVE 9.2+)
 
-On Proxmox VE 9.2+, the **HA Maintenance** card on the **Status** sub-tab of **High availability** (`manage:ha`) can take HA offline cluster-wide for major maintenance:
+On Proxmox VE 9.2+, the **Maintenance** panel on the **Status** sub-tab of **High availability** (`manage:ha`) can take HA offline cluster-wide for major maintenance:
 
 - **Disarm HA…** — choose what happens to HA resources while disarmed:
-  - **Freeze — lock services in place**
-  - **Ignore — suspend HA tracking (manage manually)**
+  - **Freeze: lock services in place**
+  - **Ignore: suspend HA tracking (manage manually)**
 - **Re-arm HA** — restore normal HA operation when maintenance is finished
 
 ---
@@ -950,24 +952,26 @@ On Proxmox VE 9.2+, the **HA Maintenance** card on the **Status** sub-tab of **H
 ## Storage Management
 
 Open a cluster's **Storage** tab, switch the inventory tree to its **Storage** view
-and click a cluster, or search for "Storage" with Ctrl+K. The pool list shows each
+and click a cluster, or search for "Storage" with Ctrl+K. The **Storage** page lists
+every cluster's stores under one capacity strip, a panel per cluster; pick a
+cluster in its header, or click one in the tree, to see it alone. The list shows each
 storage once, as Proxmox's Datacenter > Storage does, shared storage first. A local
 store on several nodes, such as `local`, stands for its fullest node and the worst
 state of its nodes, and opens to a row per node, each leading to that node's store.
 
 ### Adding Storage
 
-**Add Storage** on the pool list or a cluster's Storage tab, or right-click a
+**Add storage** on the Storage page or a cluster's Storage tab, or right-click a
 cluster in the Storage view (`manage:storage`). Give it an **ID** (letters, digits, `.`, `-` and `_`), a **Type**,
-that type's fields, its **Content Types**, optionally the **Nodes** it is on, and
+that type's fields, its **Content types**, optionally the **Nodes** it is on, and
 **Enable** it. The types are Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin,
 ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.
 
-- **iSCSI and iSCSI Direct.** Shortly after you type the **Portal (IP/Host)** a node
+- **iSCSI and iSCSI Direct.** Shortly after you type the **Portal (IP or host)** a node
   scans it and preselects the first target. **Rescan portal** repeats that, and you can
   type an IQN yourself; a failed scan warns and does not block the form.
-- **RBD and CephFS.** Filling **Monitor Hosts** makes the storage external, so
-  **Keyring** or **Secret Key** becomes required.
+- **RBD and CephFS.** Filling **Monitor hosts** makes the storage external, so
+  **Keyring** or **Secret key** becomes required.
 - **Proxmox Backup Server.** A generated encryption key is shown once and Nexara keeps
   no copy. **PBS server** offers the servers registered under [Backup](#pbs-server-setup)
   that you can see (`view:pbs`): pick one and Proxmox connects to its address, port and
@@ -986,46 +990,49 @@ ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.
   written to a **Namespace** do not show in Backup, coverage or restore. Until you type
   an ID, it follows the datastore: coverage ties a PBS storage to its datastore by ID.
 
-**Edit** cannot change the ID, the Type or an iSCSI portal or target. It sends only
+**Edit**, on a store's page, cannot change the ID, the Type or an iSCSI portal or target. It sends only
 fields you changed to a non-empty value, so blanking a text field does nothing, and
 Proxmox refuses changes to some backend fields such as an NFS export.
 
-**Delete** (`delete:storage`) asks you to type the name. It removes the definition for
+**Delete**, under **More actions** (**⋯**) on the store's page (`delete:storage`), asks you to type the name. It removes the definition for
 every node; the data stays where it is.
 
 ### Content
 
-On a pool's **Files** tab (`manage:storage` to add anything, `delete:storage` to delete a volume):
+On a store's **Content** tab (`manage:storage` to add anything, `delete:storage` to delete a volume), in the title row of its list, the last two under the list's **⋯** menu:
 
 - **Upload** — an ISO (`.iso`, `.img`) or a container template (`.tar.gz`, `.tar.xz`,
   `.tar.zst`). Nexara streams it to Proxmox and sets no size limit of its own, so the
   limit that matters is a [reverse proxy's](../README.md#reverse-proxy)
 - **Download from URL** — `http(s)`, with a filename, an optional checksum, decompression
   and **Verify TLS certificates**. The node does the fetching
-- **Pull OCI** — a container image as a template: Proxmox VE 9.1 or later, with `skopeo` on
+- **Pull OCI image** — a container image as a template: Proxmox VE 9.1 or later, with `skopeo` on
   the node. Proxmox calls this a technology preview
-- **Browse Appliances** — Proxmox's own appliance list; reading it needs `view:storage`
+- **Browse appliances** — Proxmox's own appliance list; reading it needs `view:storage`
 
 ### Pool Detail
 
-Click a pool to open its detail page. Its tabs are **Summary**, **Files**
-(the default), **VMs/CTs** and **History**:
+Click a store to open its page. There is no Summary tab: the header gives its state,
+type, node (or shared) and what it holds, with **Edit** and a **More actions** (**⋯**) menu, and a
+strip below shows used, free and total space and its item count. Its tabs are
+**Content** (the default), **Guests** and **History**:
 
-- **Files** — the pool's volumes, with a sub-tab per Proxmox content type (**iso**,
-  **vztmpl**, **snippets**, **backup**, and **All**) when it holds more than one.
-- **VMs/CTs** — guest-grouped view of every VM disk (`images`) and
-  container volume (`rootdir`) currently consuming this pool.
+- **Content** — the store's volumes. A store that holds more than one kind has a
+  filter in the list's title row: **All**, then one per kind, such as **ISO images**,
+  **CT templates** or **Backups**.
+- **Guests** — on a store that holds `images` or `rootdir`: a guest-grouped view of
+  every VM disk (`images`) and container volume (`rootdir`) currently consuming this pool.
 
 ### Migrating Guests Off a Pool
 
-The **VMs/CTs** tab shows one row per guest with name, VMID, kind, disk
+The **Guests** tab shows one row per guest with name, VMID, kind, disk
 count, and total bytes consumed. Two ways to move:
 
 - **Per-guest migrate** — click the migrate icon at the end of a row
   (or right-click and pick *Migrate <N> disks*). The dialog walks every
   disk that guest owns on this pool and dispatches them sequentially to
-  the chosen target storage. A tick beside a volume means Proxmox accepted
-  the move, not that it finished, so follow the moves in the task list. Most
+  the chosen target storage. A tick beside a volume means its move finished,
+  and the next move starts only then. Most
   users want this — they don't need to know whether the volume key is
   `scsi0` or `mp0`; Nexara resolves it from the guest config.
 - **Bulk migrate** — tick the checkbox on multiple guests, then use
@@ -1043,7 +1050,7 @@ if you want to keep both copies for a rollback window.
 > the Hardware tab's per-disk **Move** dialog and the guest **Migrate**
 > dialog both add **Format** (*QEMU image format (qcow2)*, *Raw disk image
 > (raw)*, *VMware image format (vmdk)*, or *Storage default*) and
-> **Bandwidth Limit (KiB/s)**, blank meaning unlimited. Format is offered
+> **Bandwidth limit (KiB/s)**, blank meaning unlimited. Format is offered
 > only where Proxmox accepts a choice — a QEMU guest landing on file-based
 > storage (directory, NFS, CIFS, GlusterFS). Block-backed targets read *Set
 > by target storage*, because they store images as raw only, and containers
@@ -1051,7 +1058,7 @@ if you want to keep both copies for a rollback window.
 
 ### Bulk Delete
 
-Multi-select with the checkbox column works on the **Files** sub-tabs. Once
+Multi-select with the checkbox column works on the **Content** tab, under any kind filter. Once
 anything is selected, a toolbar appears with **Delete selected**.
 Useful for ISO / template cleanup. Each delete is a separate Proxmox
 task; failures are reported individually so a single broken volume
@@ -1059,12 +1066,13 @@ doesn't block the rest of the batch.
 
 ### Evacuating a Pool Entirely
 
-The **Evacuate** button at the top of a pool detail page kicks off a
+**Evacuate**, under **More actions** (**⋯**) at the top of a store's page, kicks off a
 bulk move of every VM disk on the pool to a target storage —
-equivalent to selecting all guests in the VMs/CTs tab and migrating,
+equivalent to selecting all guests in the **Guests** tab and migrating,
 but with a dedicated dialog tuned for "I'm decommissioning this
-pool" workflows. It covers `scsi`, `ide`, `sata` and `virtio` disks: EFI, TPM
-and unused volumes fail with *Could not resolve disk key*. Container volumes
+pool" workflows. It covers every disk of a VM, its EFI disk, TPM state and unused
+volumes too; only the TPM state of a running VM fails, with *TPM state cannot
+move while the VM runs: shut it down first*. Container volumes
 are not yet covered by Evacuate; use the per-guest migrate or bulk-migrate flow
 for those.
 
@@ -1072,11 +1080,11 @@ for those.
 
 ## Ceph
 
-A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change anything. A cluster without Ceph reads **Ceph Not Available**. Above the tabs are health, capacity, IOPS and throughput cards; the placement-group count reads *All active+clean*, or else each PG state with its count, the states that stop I/O first. Below them:
+A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change anything. A cluster that says it has no Ceph has no **Ceph** tab, and one whose Ceph status cannot be read shows **Ceph is not available**. Above the tab's views is a strip of health, capacity used, OSDs up, monitors and placement groups, with any health checks raised under it; the placement-group count reads *All active+clean*, or else each PG state with its count, the states that stop I/O first. Its views:
 
-- **Overview** — charts from an hour to 7 days, and the CRUSH topology
-- **OSDs** — each OSD's menu has **Mark Out** / **Mark In**, which take effect immediately, and **Stop** / **Start** / **Restart Daemon**, which run as a task on the OSD's host
-- **Pools** — **Create Pool** takes a **Pool Name**, **Replication Size** (3) and **PG Number** (128), with a **PG Calculator**. `min_size`, the CRUSH rule and autoscaling can be set only through the API. It creates no Proxmox storage: [add one](#adding-storage) of type RBD. **Delete** asks once, with no typed name, and Proxmox refuses while a storage that references the pool holds disks
+- **Overview** — IOPS, throughput, capacity and OSD charts from an hour to 7 days, and the CRUSH topology
+- **OSDs** — each OSD's menu has **Mark out** / **Mark in**, which take effect immediately, and **Stop daemon** / **Start daemon** / **Restart daemon**, which run as a task on the OSD's host
+- **Pools** — **Create pool** takes a **Pool name**, **Replicas** (3) and **Placement groups** (128), with a **Placement group calculator**. `min_size`, the CRUSH rule and autoscaling can be set only through the API. It creates no Proxmox storage: [add one](#adding-storage) of type RBD. **Delete pool** asks once, with no typed name, and Proxmox refuses while a storage that references the pool holds disks
 - **Monitors**, and **CephFS** when there is one — read-only
 - **History**
 
@@ -1092,23 +1100,23 @@ Creating or destroying an OSD and creating a CephFS are not offered.
 
 ### Network Interfaces
 
-A cluster's **Configure** → **Networks** → **Interfaces**, after picking a node in **Filter by node:**, or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
+A cluster's **Configure** → **Networks** → **Interfaces**, after picking a node in the panel's node filter (it starts at **All nodes**), or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
 
 **Apply Config** makes every pending edit live and reloads the node's network, and **Revert** discards every pending edit. Both act on edits made outside Nexara too, and both ask first. A bad configuration can cut the node off from Nexara, and then needs fixing from its console. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
 
 ### Cluster Firewall
 
-A cluster's **Configure** → **Firewall** has **Cluster Rules**, **Templates**, **Aliases**, **IP Sets**, **Security Groups**, **Log**, **Options** and **History**.
+A cluster's **Configure** → **Firewall** has **Rules**, **Templates**, **Aliases**, **IP sets**, **Security groups**, **Log**, **Options** and **History**.
 
 - **Add Rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
-- **Options** — **Disable Firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable Firewall** and **Inbound/Outbound Policy** take effect immediately, without asking
-- **IP Sets** must be empty to delete. **Security Groups** can be created and deleted, but a group's rules have no page
+- **Options** — **Disable Firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable Firewall**, **Inbound policy** and **Outbound policy** take effect immediately, without asking
+- **IP sets** must be empty to delete. **Security groups** can be created and deleted, but a group's rules have no page
 
 ### Node Firewall
 
-A node's **Firewall** tab has **+ Accept Rule** and **+ Drop Rule**, the log, and delete (`manage:network`). Each button asks first, then adds an enabled, match-everything inbound rule at the top of the node's list, with no form.
+A node's **Firewall** tab has **Add accept rule** and **Add drop rule**, the log (**Show log**), and delete (`manage:network`). Each button asks first, then adds an enabled, match-everything inbound rule at the top of the node's list, with no form.
 
-> **Both rules match everything.** On a node whose firewall is on, **+ Drop Rule** can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it. **+ Accept Rule** lets every inbound connection through, whatever the rules below it say.
+> **Both rules match everything.** On a node whose firewall is on, **Add drop rule** can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it. **Add accept rule** lets every inbound connection through, whatever the rules below it say.
 
 A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, where the id is the VMID).
 
@@ -1120,7 +1128,7 @@ A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, wher
 
 ### SDN
 
-A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add Subnet**, with **Enable SNAT** and a **DHCP Range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply Changes**, which asks first.
+A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add Subnet**, with **Enable SNAT** and a **DHCP range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply Changes**, which asks first.
 
 ---
 
@@ -1129,8 +1137,8 @@ A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VL
 A cluster's **Configure** → **Certificates** reads with `view:certificate` and changes with `manage:certificate`, which among the built-in roles only Admin holds.
 
 - **Accounts** are read-only here: create one in the Proxmox web UI. The API has routes for them
-- **Plugins** — **Add Plugin** takes Standalone (HTTP) or DNS with its **Validation Delay (seconds)** (30 by default). A plugin can be deleted but not edited
-- **Node Certificates** — pick a node. **Add Domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order Certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal, and Proxmox then revokes the old certificate. Both ask first. If Nexara pinned the certificate of the node it connects through, a new one there breaks the pin: see [When a Node's Certificate Changes](#when-a-nodes-certificate-changes). A certificate with under 30 days left reads **Expiring**. Revoking is API only
+- **Plugins** — **Add Plugin** takes Standalone (HTTP) or DNS with its **Validation delay (seconds)** (30 by default). A plugin can be deleted but not edited
+- **Node certificates** — pick a node. **Add Domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order Certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal, and Proxmox then revokes the old certificate. Both ask first. If Nexara pinned the certificate of the node it connects through, a new one there breaks the pin: see [When a Node's Certificate Changes](#when-a-nodes-certificate-changes). A certificate with under 30 days left reads **Expiring**. Revoking is API only
 
 ---
 
@@ -1140,7 +1148,7 @@ Proxmox lets only the `root@pam` user pass a host device straight through to a V
 
 ### USB Devices
 
-In a VM's **Hardware** tab, **Add Device → USB Device** offers:
+In a VM's **Hardware** tab, **Add device → USB device** offers:
 
 - **Mapped device** — a mapping that already exists. Each one shows what Proxmox reports for the VM's node: a warning when the mapping has no entry for that node, an error when its entry names hardware the node does not have. Such a mapping can still be picked, but Proxmox will not start the VM on that node with it.
 - **Host device** — this device, on whichever port it is plugged into.
@@ -1158,7 +1166,7 @@ A USB device passed through directly in Proxmox (`host=…`) is listed in the Ha
 
 ### PCI Devices
 
-**Add Device → PCI Device** offers:
+**Add device → PCI device** offers:
 
 - **Mapped device** — a PCI mapping that already exists, with what Proxmox reports for the VM's node: a warning when the mapping has no entry for that node, an error when an entry names a device the node does not have or that no longer matches it. A PCI mapping may have several entries for one node; the VM then gets the first of those devices that is not in use when it starts.
 - **Host device** — a PCI device of the VM's node, listed by IOMMU group. Tick **All functions** to pass the whole device through, every function as one — a graphics card with its audio function, for example.
@@ -1175,9 +1183,9 @@ As for USB, a mapping Nexara creates has an entry for the VM's current node only
 
 ### Managing mappings
 
-A cluster's **Configure** → **Resource mappings** lists its USB mappings and its PCI mappings, each on a card of its own. The USB card lists each mapping with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
+A cluster's **Configure** → **Resource mappings** lists its USB mappings and its PCI mappings, each in a panel of its own, **USB devices** and **PCI devices**. The USB panel lists each mapping with each node entry: the node, the device's vendor:product ID, and the port, or *Any port* for a mapping that follows the device. Every entry shows what Proxmox reports when it checks the mapping **on that node**: *OK*, the problem (the device is missing, or a different device is on the port), or *Not checked* with the reason — the node is offline or not a node of this cluster, it did not answer in time, the mappings changed while they were being checked, or Nexara could not read the cluster's node list (it then checks no node rather than guess which names are real). A node that was not checked is never shown as OK. Proxmox lists only the mappings the cluster's API token may see.
 
-With `manage:cluster` (and `Mapping.Modify` on the cluster's token, as for creating one), the USB card offers:
+With `manage:cluster` (and `Mapping.Modify` on the cluster's token, as for creating one), the USB panel offers:
 
 - **New mapping** — a name, a description, and a first entry: a node and a device on it, by ID or by port.
 - **Add node** — an entry for a node that has none, so a VM using the mapping can start there. When the node has the same device as the mapping's other entries, it is picked for you.
@@ -1187,14 +1195,14 @@ With `manage:cluster` (and `Mapping.Modify` on the cluster's token, as for creat
 
 A USB mapping has at most one entry per node. Proxmox itself would store two, but it then refuses to start any VM using the mapping on that node, so the tab flags such a mapping, and until the extra entry is removed Nexara saves no other change to it. Nexara also writes device IDs in lowercase, which is how Proxmox compares them when a VM starts: a mapping made elsewhere with an uppercase ID is repaired the next time Nexara saves it — any change will do, or **Replace device** with the same device.
 
-**PCI mappings.** The PCI card lists each mapping with its entries grouped by node — the device's address, its vendor:device ID (and its subsystem ID), and its IOMMU group — and shows when the mapping is set to use mediated devices or to allow live migration. A node may have several entries: they are alternatives, and a VM starting there takes the first of those devices that is not in use. Proxmox checks a node's entries together, and refuses to start a VM using the mapping on that node when any one of them fails, so the card shows the check once for each node. With `manage:cluster` it offers:
+**PCI mappings.** The PCI panel lists each mapping with its entries grouped by node — the device's address, its vendor:device ID (and its subsystem ID), and its IOMMU group — and shows when the mapping is set to use mediated devices or to allow live migration. A node may have several entries: they are alternatives, and a VM starting there takes the first of those devices that is not in use. Proxmox checks a node's entries together, and refuses to start a VM using the mapping on that node when any one of them fails, so the panel shows the check once for each node. With `manage:cluster` it offers:
 
 - **Add device** — a device of any node, including one that already has entries: the node gets one more alternative. The devices its entries already name, as a whole or as one of their functions, are not offered.
 - **Replace device** — point an entry at different hardware on the same node, in the same place among the node's entries. Picking the device it already names brings the entry's IDs and IOMMU group up to date with what the node now reports.
 - **Remove** — drop one entry. The node keeps its other entries; when it was the node's last, VMs using the mapping will not start there until it has one again, and removing the mapping's last entry deletes the mapping.
 - **Edit description**, and **Delete**.
 
-Nexara builds every entry it adds from what the node itself reports for the device, as **Add PCI Device** does, and writes back the mapping's other entries saying what they said: nothing typed ever becomes an entry. It does write every entry the same way — device IDs in lowercase and the IOMMU group as a plain number — so, as for USB, an entry Proxmox refuses for an uppercase ID or a group written as `07` is repaired by any save of the mapping, or by **Replace device** with the same device. The dialog asks before adding a device the node may need, as **Add PCI Device** does. The mapping's *mediated devices* flag must match every entry's device: while the mapping has other entries, the dialog refuses a device that does not match it — change the flag in Proxmox first — and a device replacing a mapping's only entry sets the flag to match, which the dialog says before you save. An entry that Nexara cannot read the way Proxmox does — one written by hand, say — is shown with the reason and can only be removed, since Nexara cannot save the mapping while it is there; removing it removes every such entry of the mapping at once. A mapping with no entries at all can only be deleted. The flags and the order of a node's entries are changed in Proxmox, and new mappings are created by **Add PCI Device**.
+Nexara builds every entry it adds from what the node itself reports for the device, as **Add PCI device** does, and writes back the mapping's other entries saying what they said: nothing typed ever becomes an entry. It does write every entry the same way — device IDs in lowercase and the IOMMU group as a plain number — so, as for USB, an entry Proxmox refuses for an uppercase ID or a group written as `07` is repaired by any save of the mapping, or by **Replace device** with the same device. The dialog asks before adding a device the node may need, as **Add PCI device** does. The mapping's *mediated devices* flag must match every entry's device: while the mapping has other entries, the dialog refuses a device that does not match it — change the flag in Proxmox first — and a device replacing a mapping's only entry sets the flag to match, which the dialog says before you save. An entry that Nexara cannot read the way Proxmox does — one written by hand, say — is shown with the reason and can only be removed, since Nexara cannot save the mapping while it is there; removing it removes every such entry of the mapping at once. A mapping with no entries at all can only be deleted. The flags and the order of a node's entries are changed in Proxmox, and new mappings are created by **Add PCI device**.
 
 **Delete checks which VMs use the mapping first.** Proxmox deletes a mapping without looking, and a VM that still uses it will not start until a mapping of that name exists again. So the delete confirmation lists the VMs whose configuration names the mapping (a `usbN` or `hostpciN` of `mapping=<name>`), read live from each VM, and any VM it could not read — on a node that is offline, or that did not answer in time — which may use it too. The check needs `view:vm`, and it has limits worth knowing: it reads each VM's current configuration (pending changes included) but not its snapshots, so rolling a VM back to a snapshot taken while it used the mapping brings back its reference to the mapping; and it sees only the VMs the cluster's API token can see. The delete is on offer once the check has answered, and still is when it could not be done, with a warning. Each check reads every VM in the cluster, so it is limited to 10 a minute per user, one running at once per user and two per cluster, USB and PCI checks counted together; a check over a limit fails and says so. A user's newer check replaces their older one, so two windows — or a script — signed in as the same Nexara user can cancel each other's checks.
 
@@ -1206,11 +1214,11 @@ Nexara builds every entry it adds from what the node itself reports for the devi
 
 ## VM Imports
 
-Navigate to **Imports** from the sidebar to see imports and register sources for bringing existing VMs into Proxmox from ESXi/vCenter hosts or OVA/OVF appliances. Imports run as Proxmox tasks, so they show up in the task history and audit log like any other operation.
+Open **Imports** in the navigation rail to see imports and register sources for bringing existing VMs into Proxmox from ESXi/vCenter hosts or OVA/OVF appliances. Imports run as Proxmox tasks, so they show up in the task history and audit log like any other operation.
 
 ### Registering an ESXi / vCenter Source
 
-1. On the **VM Imports** page, click **Add ESXi source**
+1. On the **Imports** page, click **Add ESXi source** in the **Import sources** panel
 2. Fill in:
    - **Storage ID** — the name Proxmox will use for this source (must start with a letter; letters, digits, `-_.` only)
    - **Server** — the ESXi or vCenter address
@@ -1222,7 +1230,7 @@ The source is registered as a special storage on the cluster, and the VMs it exp
 
 ### Importing a VM
 
-1. Click **Create** → **Import VM** in the top bar, right-click a cluster in the tree, or use the Ctrl+K command palette. The wizard's steps are Source, Inspect, Target, Customize and Review
+1. Click **Import VM** on the Imports page or **Create** → **Import VM** in the top bar, right-click a cluster in the inventory tree, or use the Ctrl+K command palette. The wizard's steps are Source, Inspect, Target, Customize and Review
 2. Pick where the guest comes from:
    - **From import storage** — a VM on a registered ESXi source, or an appliance on import-enabled storage
    - **Download OVA from URL** — paste a link and click **Check URL** to probe it; optionally override the filename, pick the storage, click **Download to storage** and wait, then choose it under **Source guest / image**
@@ -1246,14 +1254,14 @@ Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Thr
 
 ### PBS Server Setup
 
-1. Navigate to **Backup** from the sidebar
-2. Click **Add PBS Server**
+1. Open **Backup** in the navigation rail
+2. Click **Add PBS server**
 3. Enter:
-   - **Server Name** — display name
+   - **Server name** — display name
    - **API URL** — PBS API endpoint (e.g., `https://pbs.example.com:8007`)
-   - **API Token ID** — e.g. `root@pam!nexara`
-   - **API Token Secret**
-   - **Associated Cluster** (optional) — decides who may see the server: bound to a cluster, that cluster's grants apply; standalone, instance-wide ones. It is also the one cluster whose storage may be given this server's own token (see [Adding Storage](#adding-storage)). Coverage does not read it
+   - **API token ID** — e.g. `root@pam!nexara`
+   - **API token secret**
+   - **Associated cluster** (optional) — decides who may see the server: bound to a cluster, that cluster's grants apply; standalone, instance-wide ones. It is also the one cluster whose storage may be given this server's own token (see [Adding Storage](#adding-storage)). Coverage does not read it
 4. Click **Connect**, accept the certificate the same way as for a cluster, and confirm
 
 Registering a server lets Nexara read it; it adds no storage to any cluster. To back
@@ -1281,15 +1289,15 @@ The Backup page's top tabs are **Proxmox Backup Server**, **Veeam** and **Covera
 - **Replication** — the PBS server's sync jobs (pulling datastores from a remote PBS). List them, and run one on demand
 - **Verification** — the PBS server's verify jobs, which re-check stored chunks for corruption. Same list-and-run treatment
 - **Tasks** — the PBS server's own task log, so a stuck garbage collection or verify is visible without leaving Nexara
-- **Coverage**, at the top level — the one that matters at review time. Four cards count **Backup targets**, **Protected (<24h)**, **Stale (>24h)** and **No Backup**, over a searchable per-guest table showing how long ago each guest was last backed up. A guest that has never been backed up reads "Never"
+- **Coverage**, at the top level — the one that matters at review time. A strip of four figures counts **Backup targets**, **Protected** (backed up in the last 24 hours), **Stale** (longer ago) and **No backup**, over a searchable per-guest table showing how long ago each guest was last backed up; click a figure to list only those guests, and click it again to list them all. A guest that has never been backed up reads "Never"
 
-  Coverage spans **both providers**: freshness is taken from the newest restore point either PBS or Veeam holds, so a guest protected only by Veeam is no longer reported as unprotected. PBS counts only through a `pbs` storage in the cluster **whose ID is the same as the datastore's name**; a storage with another ID leaves its guests reading **No Backup**. Each row also carries an **eligibility** verdict — Veeam's own worker appliances and the VBR server are not backup targets, and counting them as unprotected is how a coverage view teaches operators to ignore it. LXC containers are reported as backup targets but not Veeam-capable, since Veeam cannot back them up and PBS can.
+  Coverage spans **both providers**: freshness is taken from the newest restore point either PBS or Veeam holds, so a guest protected only by Veeam is no longer reported as unprotected. PBS counts only through a `pbs` storage in the cluster **whose ID is the same as the datastore's name**; a storage with another ID leaves its guests reading **No backup**. Each row also carries an **eligibility** verdict — Veeam's own worker appliances and the VBR server are not backup targets, and counting them as unprotected is how a coverage view teaches operators to ignore it. LXC containers are reported as backup targets but not Veeam-capable, since Veeam cannot back them up and PBS can.
 
   A viewer holding `view:backup` but not `view:veeam` sees exactly the report that existed before Veeam support: no restore-point data and no eligibility refinement, rather than a partial answer
 
 ### Backup Jobs
 
-1. Open the cluster's **Backup** tab. The jobs are Proxmox's own vzdump jobs, per cluster, and write to any storage that holds backups, so no PBS server is needed. The same list is under **Backup** in the sidebar, on a registered PBS server's **Schedules** tab (pick the cluster if you have more than one)
+1. Open the cluster's **Backup** tab. The jobs are Proxmox's own vzdump jobs, per cluster, and write to any storage that holds backups, so no PBS server is needed. The same list is under **Backup** in the navigation rail, on a registered PBS server's **Schedules** tab (pick the cluster if you have more than one)
 2. Click **Add schedule** (`manage:backup`)
 3. Configure:
    - **Schedule** — pick **Hourly**, **Daily**, **Weekly** or **Monthly** and the time; the builder writes the Proxmox calendar event for you and shows it in plain English. Switch to **Custom** to type a calendar event directly (e.g. `mon..fri 02:00`). Note that these are systemd calendar events, *not* cron — `0 2 * * *` is not valid here
@@ -1303,7 +1311,7 @@ The Backup page's top tabs are **Proxmox Backup Server**, **Veeam** and **Covera
    - **Mode** — snapshot, suspend, or stop
    - **Compression** — zstd (recommended), lzo, gzip, or none
    - **Comment** and **Enabled**
-4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next Run** column shows when it would fire on its own. Run Now asks first, as Proxmox's own **Run now** does, then starts the job with its own settings on the node it names — or, when it names none, on every online node — and each backup task it starts appears in the task list. A node that is offline or refuses is reported beside the tasks that did start, and a node whose answer does not confirm a start is reported separately: a backup may be running there, so check the task list before running the job again. A job pinned to a node that is offline is refused outright. Each run writes an audit row per backup task it starts and, whenever it asked Proxmox anything, one more recording each node's outcome.
+4. Save. Use the **Run Now** (▶) button on the job's row to fire it outside its schedule; the **Next run** column shows when it would fire on its own. Run Now asks first, as Proxmox's own **Run now** does, then starts the job with its own settings on the node it names — or, when it names none, on every online node — and each backup task it starts appears in the task list. A node that is offline or refuses is reported beside the tasks that did start, and a node whose answer does not confirm a start is reported separately: a backup may be running there, so check the task list before running the job again. A job pinned to a node that is offline is refused outright. Each run writes an audit row per backup task it starts and, whenever it asked Proxmox anything, one more recording each node's outcome.
 
 > A job carries exactly **one** selection. Switching an existing job from, say, a VMID list to a pool clears the old selection rather than layering the two — that is deliberate, and it matches what vzdump accepts.
 
@@ -1313,11 +1321,11 @@ The jobs table shows the schedule in plain English with the raw calendar event u
 
 ### Restoring from Backup
 
-1. Find the snapshot in the **Backup** dashboard
+1. Find the snapshot on the **Backup** page, on its PBS server's **Snapshots** tab
 2. Click **Restore**
 3. Select the target cluster and node
-4. Choose the target storage
-5. Optionally change the VMID
+4. Optionally change the VMID
+5. Optionally choose the target storage
 6. Click **Restore**
 
 The restore reads the snapshot through the Proxmox storage on the target cluster that is set up for the snapshot's PBS server and datastore (the cluster's **Storage** tab, or Datacenter > Storage > Proxmox Backup Server in Proxmox). The storage must be enabled, available on the node the guest is restored onto, have no namespace, and name the snapshot's datastore. Nexara ties it to the PBS server by the certificate fingerprint when both carry one (two different fingerprints rule a storage out), and otherwise by address and port, the storage's being 8007 where none is set. When the server's API URL names a port, the storage's must be that port; when it names none, a storage on 8007 (or with no port, as one made from that server is) or on 443, where Nexara reaches an `https` URL, is the same server. The same host on any other port is another server. A PBS that Nexara reaches by an IP address and Proxmox by a name, with no fingerprint to say so, is used when its storage is the only candidate left and no other PBS server Nexara knows is tied to it; the restore's audit entry then records `matched_by: only_candidate`. If two storages are tied to the server the restore is refused, and so is one for which no storage can be used; either way the answer names the PBS storages it found, rather than reading from a PBS nobody picked. **Overwrite existing VM** stops the guest first, once that storage is found, and the stop is a task of its own in the guest's History. A restore needs permission to manage backups on the target cluster and to view backups on the PBS server (on the cluster it is attached to, or instance-wide when it is standalone); a server you may not view is reported as not found. **Overwrite existing VM** also needs `delete:vm` (`delete:container` for a container backup) on the target cluster, because it replaces the guest as deleting it would; without it the tick is disabled and the dialog names the permission. **Start after restore** needs `execute:vm` (`execute:container`), and so does overwriting a guest that is running, since it is stopped first.
@@ -1336,20 +1344,20 @@ API port (9419 by default).
 
 ### Connecting a Server
 
-1. Navigate to **Backup** from the sidebar and open the **Veeam** tab
-2. Click **Add Veeam Server**
+1. Open **Backup** in the navigation rail, then its **Veeam** tab
+2. Click **Add Veeam server**
 3. Enter:
-   - **Server Name** — display name
+   - **Server name** — display name
    - **REST API URL** — `https://host:9419`. This is the **REST API root, not the console URL** — getting it wrong is the most common first-time failure
    - **Username** — a VBR admin account, often `DOMAIN\user`. The backslash is significant
    - **Password** — encrypted at rest with AES-256-GCM, like every other stored credential
-4. Click **Continue** to fetch the certificate, accept the fingerprint the same way as for a cluster, then click **Add Server**
+4. Click **Continue** to fetch the certificate, accept the fingerprint the same way as for a cluster, then click **Add server**
 
 Nexara performs a real logon before saving, so **a failed connection is a failed create**. The product version, API revision and licence edition it negotiates are recorded on the server row and shown in the UI.
 
-The **Test** action on an already-registered server re-runs that logon and reports the same figures, but deliberately **persists nothing** — diagnosing a broken server should not rewrite its row. It needs `manage:veeam`, not just `view`, because it makes an outbound authenticated connection with stored admin credentials.
+The **Test connection** action on an already-registered server, on the **Servers** tab, re-runs that logon and reports the same figures, but deliberately **persists nothing** — diagnosing a broken server should not rewrite its row. It needs `manage:veeam`, not just `view`, because it makes an outbound authenticated connection with stored admin credentials.
 
-Registration schedules the first inventory sync rather than blocking on one. Until it finishes the server shows as **syncing** rather than reporting an empty inventory as though it were a finished one.
+Registration schedules the first inventory sync rather than blocking on one. Until it finishes the server shows as **Syncing** rather than reporting an empty inventory as though it were a finished one.
 
 Changing a server's base URL later requires re-entering the password, for the same reason it does on a cluster. So does pinning a different certificate, or turning certificate checks off, through the API: the stored password is only ever sent as protected as when it was saved.
 
@@ -1378,7 +1386,7 @@ Backup objects are correlated to guests on the **SMBIOS UUID**, which Veeam happ
 
 Job control needs **`execute:veeam`**, which is separate from `manage:veeam`. The built-in **Admin and Operator** roles both hold it, and on upgrade it was mirrored onto every custom role that already held `manage:backup`. Add it to any other custom role that should be able to run backups.
 
-The server's tabs are **Jobs**, **Runs**, **Repositories**, **Clusters** and **Orphaned**.
+The server's tabs are **Jobs**, **Runs**, **Repositories**, **Clusters**, **Orphaned** and **Servers**.
 
 From **Jobs** you can **start** and **stop** a run, and **enable** or **disable** a job's schedule. **Runs** lists the sessions; open one to see its per-guest **tasks**, which is what names *which* guest in a job failed rather than showing the job as a single red row. Session logs are read live from Veeam on demand rather than stored, so an empty log is the normal result for a run that was killed.
 
@@ -1390,7 +1398,7 @@ A job Nexara itself stopped is excluded from the `veeam_job_failed` alert metric
 
 A Veeam deployment puts machines on the cluster it protects — worker appliances it powers on for a job and off again afterwards, and often the VBR server itself. Nexara identifies them and shows them alongside the mapping on the **Clusters** tab, so coverage does not count them as unprotected guests. The coverage report reports them as *excluded (Veeam infrastructure)* rather than unprotected.
 
-**DRS keeps off them by default** — the cluster's DRS settings carry a **Never migrate Veeam's own guests** checkbox (the `exclude_veeam_workers` field in the API), on by default including for existing installs. DRS treating a worker as ordinary load migrates it mid-backup and the job running on it fails. They are still *scored* — their load is real — but never selected for migration.
+**DRS keeps off them by default** — the cluster's DRS settings carry a **Never migrate Veeam's own guests** switch (the `exclude_veeam_workers` field in the API), on by default including for existing installs. DRS treating a worker as ordinary load migrates it mid-backup and the job running on it fails. They are still *scored* — their load is real — but never selected for migration.
 
 Note the limit: this pins the guests Veeam **owns**. It does not stop DRS moving a *protected* guest away from the node its worker happens to be on, which silently downgrades that guest's transport from hot-add to network mode — no error, just a slower backup. Covering that would mean pinning half the estate to wherever Veeam last placed a worker, and Veeam re-places them per job run.
 
@@ -1419,20 +1427,20 @@ Nexara collects every Proxmox task into its task history, including the terminal
 Three things to know before creating one:
 
 - **Duration is the window being counted**, not "how long the condition must persist" as it is for the percentage metrics. The form defaults it to 24 hours for these two. Leaving it at 300 seconds creates a rule that counts only the last five minutes — a nightly backup that failed at 02:00 has aged out long before anyone reads the alert, so the rule evaluates false every tick and can never fire. These two metrics accept up to **30 days** (2592000), where every other metric is capped at 24 hours: a weekly backup needs a window longer than a week to be seen at all.
-- **A task that completed with warnings is not a failure.** Proxmox reports `WARNINGS: N` for a run that finished with non-fatal warnings, and `vzdump` emits it routinely; a backup that warned still produced a backup. Nexara uses one success rule everywhere, so this agrees with what the Tasks page shows for the same task.
+- **A task that completed with warnings is not a failure.** Proxmox reports `WARNINGS: N` for a run that finished with non-fatal warnings, and `vzdump` emits it routinely; a backup that warned still produced a backup. Nexara uses one success rule everywhere, so this agrees with what the **Tasks** tab of the **Events** page shows for the same task.
 - **A cancelled task is indistinguishable from a broken one.** Proxmox records an operator who stops a migration exactly as it records one that failed, so `pve_task_failed` will count both — which is why the alert text says "failed or cancelled". Prefer `pve_backup_failed` unless you want that noise: nobody cancels backups by hand.
 
-Both are cluster-scoped because a task's node is stored by name while an alert rule targets a node by ID. The alert names the failed tasks, so the node is one click away in the Tasks page.
+Both are cluster-scoped because a task's node is stored by name while an alert rule targets a node by ID. The alert names the failed tasks, so the node is one click away on the **Tasks** tab of the **Events** page.
 
 ---
 
 ## Snapshots
 
-Navigate to **Snapshots** from the sidebar for every guest snapshot across every cluster in one table — the page exists to find the ones somebody took "just for a minute" eight months ago.
+Open **Snapshots** in the navigation rail for every guest snapshot across every cluster in one table — the page exists to find the ones somebody took "just for a minute" eight months ago.
 
 ### The Inventory
 
-Four cards summarise the fleet: **Total Snapshots**, **Guests with Snapshots**, **Older than 7 days** (amber) and **Older than 30 days** (red). Below them, one row per snapshot with **Age**, **Name**, **Guest**, **Cluster**, **Node** and **Created**. A **RAM** badge marks snapshots that captured guest memory. Expand a row for its description, parent snapshot, VMID, last-seen time and current guest status.
+A strip of four figures summarises the fleet: **Snapshots**, **Guests with snapshots**, **Older than 7 days** (amber) and **Older than 30 days** (red). Below it, in **All snapshots**, one row per snapshot with **Age**, **Name**, **Guest**, **Cluster**, **Node** and **Created**. A **RAM** badge marks snapshots that captured guest memory. Expand a row for its description, parent snapshot, VMID, last-seen time and current guest status.
 
 Filter by cluster, guest type (VMs / containers), age bucket (older than 7 days, older than 30 days, unknown age), or free-text search across snapshot name, guest name, VMID, description, node and cluster.
 
@@ -1446,13 +1454,13 @@ Filter by cluster, guest type (VMs / containers), age bucket (older than 7 days,
 
 Proxmox has no bulk snapshot endpoint, so the collector walks one listing per guest on its own cadence — every **5 minutes** by default, tuned with `SNAPSHOT_SYNC_INTERVAL`. That pass is deliberately conservative about deleting rows: a guest on an offline node, a guest whose listing errored, or a listing that came back empty (which Proxmox never legitimately returns) leaves that guest's rows untouched, so a transient blip can never look like "all your snapshots vanished". Rows are only removed when the guest itself has left the inventory, or when a successful listing says the snapshot is gone.
 
-> Snapshot age is also an alertable metric — see the `snapshot_age_days` metric under [Alert Configuration](#alert-configuration) — and **Snapshot Inventory** is one of the [report](#reports) types.
+> Snapshot age is also an alertable metric — see the `snapshot_age_days` metric under [Alert Configuration](#alert-configuration) — and **Snapshot inventory** is one of the [report](#reports) types.
 
 ---
 
 ## Power (UPS monitoring)
 
-Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools (NUT) servers report: whether each one is on mains or on battery, how much charge and runtime it has left, its load, and a history of power events. Nexara reads upsd over its network protocol. It sends a UPS command or changes a setting only when someone runs one from a UPS's page, through an account you give it (see [UPS Commands and Settings](#ups-commands-and-settings)). It never logs in as a monitor (NUT's `LOGIN`) and never asks for a forced shutdown (`FSD`), so reading cannot change what your existing `upsmon` setup does. A setting changed from Nexara can: the battery-low point is when `upsmon` shuts machines down.
+Open **Power** in the navigation rail to watch the UPSes your Network UPS Tools (NUT) servers report: whether each one is on mains or on battery, how much charge and runtime it has left, its load, and a history of power events. Nexara reads upsd over its network protocol. It sends a UPS command or changes a setting only when someone runs one from a UPS's page, through an account you give it (see [UPS Commands and Settings](#ups-commands-and-settings)). It never logs in as a monitor (NUT's `LOGIN`) and never asks for a forced shutdown (`FSD`), so reading cannot change what your existing `upsmon` setup does. A setting changed from Nexara can: the battery-low point is when `upsmon` shuts machines down.
 
 ### Before You Add a Server
 
@@ -1467,7 +1475,7 @@ Navigate to **Power** from the sidebar to watch the UPSes your Network UPS Tools
 - **Plain TCP** — the usual case for upsd on a LAN.
 - **STARTTLS (required)** — the connection is upgraded before anything else is sent. A server that does not offer STARTTLS is an error, never a silent fall-back to plain text. Verify its certificate against the system CA pool, or pin its SHA-256 fingerprint.
 
-**Test** connects before you save and lists the UPSes the server reports; saving tests again, so a typo in the address is a failed save rather than a server that never reads. Three things ask for confirmation instead of refusing:
+**Test connection** connects before you save and lists the UPSes the server reports; saving tests again, so a typo in the address is a failed save rather than a server that never reads. Three things ask for confirmation instead of refusing:
 
 - a private address (a NUT server on your LAN is the usual case);
 - a password that would cross the network in plain text;
@@ -1477,11 +1485,13 @@ Changing the host or port of a saved server requires re-entering its password: a
 
 ### What the Power Page Shows
 
-- **Devices** — a card per UPS with its status, charge, runtime, load, power and input voltage. A power figure marked **≈** is estimated from load × the UPS's rated power, for a UPS that does not measure it. While any UPS is on battery, a banner names it and the shortest runtime left.
-- **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test** button that checks a saved server's connection. **Connected** means the last poll succeeded within three poll intervals (and at least two minutes); a server whose last success is older reads **Not polled lately**.
+A strip above the tabs gives the number of UPSes on battery, the shortest runtime, the total load, and **Nodes protected**, which names each node that is not (see Shutdown Protection). While any UPS is on battery, a banner above the strip names it and the shortest runtime left.
+
+- **Devices** — a row per UPS with its status, charge, runtime, load, power and input voltage. A power figure marked **≈** is estimated from load × the UPS's rated power, for a UPS that does not measure it.
+- **NUT servers** — each server's upsd and protocol versions, when it was last read, and the last error, with a **Test connection** button that checks a saved server's connection. **Connected** means the last poll succeeded within three poll intervals (and at least two minutes); a server whose last success is older reads **Not polled lately**.
 - **Power events** — outages, low battery, overloads, bypass, voltage correction, a battery that needs replacing, lost contact, stale driver data, and self-test results. Expand a row for the lowest charge and runtime and the peak load seen during it.
 
-Click a UPS for its detail page: charts of charge, runtime, load and input voltage over 1 hour to 7 days (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), every variable upsd reports with its description, the UPS's own events, its maintenance windows, and its **History** (see A UPS's History). The search palette (Ctrl+K) finds a UPS by its name, description, model or NUT server, and the Power page by "power", "ups" or "nut", for a holder of a global `view:ups`.
+Click a UPS for its detail page. Its **Overview** has a strip of the latest readings and, below it, a chart over 1 hour to 7 days of the reading you pick in the strip: charge, runtime, load, or input and output voltage (the input's lowest and highest reading in each bucket show sags and surges, and shaded spans mark time on battery), then its maintenance windows. Its other tabs are **Powers**, **Variables** (every variable upsd reports, with its description), **Commands**, **Power events** (the UPS's own events) and **History** (see A UPS's History). The search palette (Ctrl+K) finds a UPS by its name, description, model or NUT server, and the Power page by "power", "ups" or "nut", for a holder of a global `view:ups`.
 
 **A UPS Nexara cannot read shows that, never its last state.** **Unreachable** means upsd did not answer (**Rolling update** instead, when its NUT server runs on a node a rolling update is upgrading or rebooting and you may see that node; see UPS Alerts), **Driver down** that upsd answered but its driver for that UPS is not connected, and **Data stale** that the driver stopped updating. A reading older than three poll intervals (and at least two minutes), while upsd last answered, shows **No recent reading**: the poller stopped reading it. A server whose polling is turned off (**Poll this server**, in its Edit dialog) shows **Polling off**, keeps its history, and is left out of the alerts.
 
@@ -1509,9 +1519,9 @@ Each node a UPS powers gets a verdict on whether it would shut down before the b
 
 - A node that was logged in reads **Not protected** only after it is missing from two listings in a row, so a `upsmon` restart does not raise it.
 - **Logins are listed only on mains.** Nodes log out on purpose as they shut down, so during an outage the logins hold where they were until the UPS is back on mains; a node that has shut down still reads **Node offline**.
-- **Not protected** shows on the health pill, naming the node and its cluster, on the Power page's **Shutdown protection** card and its outage banner, on the UPS's Powers tab, on the node's **Power** card, and on the [topology map](#topology-map)'s Power overlay. The outage banner leaves out a node that another UPS, still on mains, also powers.
+- **Not protected** shows on the health pill, naming the node and its cluster, on the Power page's **Nodes protected** figure and its outage banner, on the UPS's Powers tab, on the node's **Power** panel, and on the [topology map](#topology-map)'s Power overlay. The outage banner leaves out a node that another UPS, still on mains, also powers.
 
-**Fixing a node that is not protected.** The node's page has a **Power** card, for `view:ups` holders, with the UPSes that power it, their charge, runtime and load, and the verdict. For a node that is not protected it gives the two lines to add on the node:
+**Fixing a node that is not protected.** The node's **Summary** tab has a **Power** panel, for `view:ups` holders, with the UPSes that power it, their charge, runtime and load, and the verdict. For a node that is not protected it gives the two lines to add on the node:
 
 ```
 # /etc/nut/nut.conf
@@ -1521,11 +1531,11 @@ MODE=netclient
 MONITOR ups01@192.0.2.40 1 <user> <password> secondary
 ```
 
-Install NUT's client on the node (`apt install nut-client`), take an account from the NUT server's `upsd.users` that has an `upsmon secondary` line, and restart `nut-monitor`. NUT before 2.8 spells `secondary` as `slave`. Use the address the node reaches upsd at, which is not always the one Nexara uses: when Nexara reaches upsd over loopback, the card leaves the address for you to fill in. Within a minute of the login the node reads **Protected**.
+Install NUT's client on the node (`apt install nut-client`), take an account from the NUT server's `upsd.users` that has an `upsmon secondary` line, and restart `nut-monitor`. NUT before 2.8 spells `secondary` as `slave`. Use the address the node reaches upsd at, which is not always the one Nexara uses: when Nexara reaches upsd over loopback, the panel leaves the address for you to fill in. Within a minute of the login the node reads **Protected**.
 
-During an outage, a node that is not protected and that no UPS still on mains powers gets **Shut down … now** on its Power card, for `manage:node` holders. It is the node's own Shutdown, behind the same confirmation.
+During an outage, a node that is not protected and that no UPS still on mains powers gets **Shut down … now** on its Power panel, for `manage:node` holders. It is the node's own Shutdown, behind the same confirmation.
 
-**upsd behind NAT, a proxy or an ingress.** upsd then sees every login from one address, the proxy's, so Nexara cannot tell which node a login came from: nothing is found, and nodes added by hand read **Not protected** even with `upsmon` running. Let upsd see the nodes' own addresses (for a Docker Swarm service, publish its port with `mode: host` rather than through the ingress), or switch on **Protected another way** for each node, on the Powers tab or the node's Power card. The same switch covers a node shut down by other software, such as a UPS vendor's own agent. It needs `manage:ups`.
+**upsd behind NAT, a proxy or an ingress.** upsd then sees every login from one address, the proxy's, so Nexara cannot tell which node a login came from: nothing is found, and nodes added by hand read **Not protected** even with `upsmon` running. Let upsd see the nodes' own addresses (for a Docker Swarm service, publish its port with `mode: host` rather than through the ingress), or switch on **Protected another way** for each node, on the Powers tab or the node's Power panel. The same switch covers a node shut down by other software, such as a UPS vendor's own agent. It needs `manage:ups`.
 
 **upsmon over IPv6.** Interfaces are matched by their IPv4 addresses, so a login over IPv6 is found only when it comes from the node's cluster address. Point the node's `MONITOR` line at upsd's IPv4 address, or switch on **Protected another way** for it.
 
@@ -1570,12 +1580,12 @@ Every enabled server is read every **10 seconds**, tuned with `NUT_POLL_INTERVAL
 
 | Permission | Allows | Granted to |
 |------------|--------|------------|
-| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power card, the topology's Power overlay, UPS search results; with `view:alert`, the UPS alerts; with `manage:alert`, the UPS alert rules | Viewer, Operator, Admin |
+| `view:ups` | The Power page, UPS issues in the health pill, the UPS dashboard widget, a node's Power panel, the topology's Power overlay, UPS search results; with `view:alert`, the UPS alerts; with `manage:alert`, the UPS alert rules | Viewer, Operator, Admin |
 | `manage:ups` | Adding, editing and testing NUT servers; adding and removing what a UPS powers, and marking a node protected another way (with `view:node` on the node's cluster); setting the node a NUT server runs on (with a global `view:node`); setting a UPS's variables (with `execute:ups` and `manage:node` too for one that can change its power) | Operator, Admin |
 | `execute:ups` | Running a UPS's instant commands (with `manage:node` too for one that cuts its power) | Operator, Admin |
 | `delete:ups` | Removing a NUT server and the UPS history collected from it | Operator, Admin |
 
-All four must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its sidebar link appear only with a global `view:ups`. Custom roles were given the same `view`, `manage` and `delete` actions on `ups` as they hold on `pbs` when UPS monitoring arrived, and no `execute:ups`. Built-in roles cannot be edited, so every Operator can run every UPS command; to keep someone from that, give them a custom role.
+All four must be held install-wide: the UPS routes refuse a grant held on one cluster, so the Power page and its entry in the navigation rail appear only with a global `view:ups`. Custom roles were given the same `view`, `manage` and `delete` actions on `ups` as they hold on `pbs` when UPS monitoring arrived, and no `execute:ups`. Built-in roles cannot be edited, so every Operator can run every UPS command; to keep someone from that, give them a custom role.
 
 ### UPS Alerts
 
@@ -1634,15 +1644,15 @@ Per guest, on its **Guest Tools** tab, you can set **Exclude from automatic upda
 
 ### The Fleet View
 
-The guest list shows each Windows guest's installed guest-tools version alongside the target, and a badge: **Staging**, **Staged for next boot**, **Installing**, **Failed**, **Updated - reboot to finish**, **Update available**, **Up to date**, **Unknown** or **Excluded**. The QEMU guest agent's own version and whether its service is running are on the guest's **Guest Tools** card, not the fleet table.
+The guest list shows each Windows guest's installed guest-tools version alongside the target, and a badge: **Staging**, **Staged for next boot**, **Installing**, **Failed**, **Updated - reboot to finish**, **Update available**, **Up to date**, **Unknown** or **Excluded**. The QEMU guest agent's own version and whether its service is running are on the guest's **Guest Tools** tab, not the fleet table.
 
-The fleet table's actions are icon buttons. On the guest's **Guest Tools** tab they are **Re-check**, which re-reads the guest now; **Stage update at next boot**; **Update now**; and **Cancel staged update**, which removes a staged task that has not fired yet. Detection is a read (`view:guest_tools`); changing policy needs `manage:guest_tools`; staging or cancelling needs `execute:guest_tools`.
+The fleet table's actions are icon buttons, apart from **Exclude** (**Include** once a guest is excluded). On the guest's **Guest Tools** tab they are **Re-check**, which re-reads the guest now; **Stage update at next boot**; **Update now**; and **Cancel staged update**, which removes a staged task that has not fired yet. Detection is a read (`view:guest_tools`); changing policy needs `manage:guest_tools`; staging or cancelling needs `execute:guest_tools`.
 
 > Two version spellings are unavoidably in play: upstream's directory version (`0.1.302-1`) and the installer's `DisplayVersion` as Windows reports it (`0.1.302`), which matches the ISO filename. Nexara stores what the guest said and normalises to the suffix-less form when comparing.
 
 ### virtio-win ISOs
 
-An update needs an ISO to install from, and Nexara can keep one in Proxmox storage for you. The cluster's **Configure** → **Guest tools** stacks everything on one page: the virtio-win storage config at the top, then the cluster's guest-tools policy, the fleet table, and the ISO download history at the bottom.
+An update needs an ISO to install from, and Nexara can keep one in Proxmox storage for you. The cluster's **Configure** → **Guest tools** stacks everything on one page: the virtio-win storage config at the top, then the cluster's guest-tools policy, the fleet table, the ISO download history, and the download source at the bottom.
 
 These actions are gated on the **storage** permissions (`view:storage` / `manage:storage`), not the guest-tools ones, because downloading writes into a Proxmox storage.
 
@@ -1650,7 +1660,7 @@ These actions are gated on the **storage** permissions (`view:storage` / `manage
 
 #### When it checks
 
-The card shows **Last checked** and **Next check**, and lets you say when the next one lands:
+The **virtio-win ISO** panel shows **Last checked** and **Next check**, and lets you say when the next one lands:
 
 | Schedule | Behaviour |
 |----------|-----------|
@@ -1690,12 +1700,12 @@ After changing the source, run **Check now** to rebuild the release list from it
 
 ## Alert Configuration
 
-Navigate to **Alerts** from the sidebar. Its tabs are **Alert History**, **Alert Rules**, **Channels** and, with `view:notification_dlq`, **Dead-letter queue**.
+Open **Alerts** in the navigation rail. Its tabs are **Alert history**, **Alert rules**, **Channels** and, with `view:notification_dlq`, **Dead-letter queue**.
 
 ### Alert Rules
 
-1. Click the **Alert Rules** tab
-2. Click **Create Rule**
+1. Open the **Alert rules** tab, which lists the saved rules
+2. Click **Create rule** at the top of the page
 3. Configure:
    - **Name** — descriptive rule name
    - **Scope** — what the rule judges, which depends on the metric. For CPU, memory, disk and network: **Cluster** (each node of the cluster in turn, with one alert per node; guests are not judged), **Node** (one specific node), or **VM** (one specific guest). VM-scoped rules are pinned to the guest's VMID within the cluster, so they keep working across migrations and inventory re-syncs. The Veeam and UPS metrics add **Global (all Veeam servers)**, **Global (all UPS)** and **One UPS**.
@@ -1703,33 +1713,33 @@ Navigate to **Alerts** from the sidebar. Its tabs are **Alert History**, **Alert
 
      | Metric | Unit | Scopes |
      |--------|------|--------|
-     | CPU Usage | % | cluster, node, VM |
-     | Memory Usage | % | cluster, node, VM |
-     | Disk Read | bytes/s | cluster, node, VM |
-     | Disk Write | bytes/s | cluster, node, VM |
-     | Network In | bytes/s | cluster, node, VM |
-     | Network Out | bytes/s | cluster, node, VM |
-     | Snapshot Age | **days** | cluster, VM |
+     | CPU usage | % | cluster, node, VM |
+     | Memory usage | % | cluster, node, VM |
+     | Disk read | bytes/s | cluster, node, VM |
+     | Disk write | bytes/s | cluster, node, VM |
+     | Network in | bytes/s | cluster, node, VM |
+     | Network out | bytes/s | cluster, node, VM |
+     | Snapshot age | **days** | cluster, VM |
 
-     **Snapshot Age (days)** reads the guest snapshot inventory rather than the metrics history, so it behaves differently from the rest: the value is the age of the oldest dated snapshot in scope, node scope is not offered (picking the metric switches a node-scoped rule to cluster scope), and snapshots whose creation time Proxmox does not report are excluded rather than counted as ancient. With no dated snapshots in scope the condition is false, so the alert auto-resolves once the offenders are cleaned up.
+     **Snapshot age (days)** reads the guest snapshot inventory rather than the metrics history, so it behaves differently from the rest: the value is the age of the oldest dated snapshot in scope, node scope is not offered (picking the metric switches a node-scoped rule to cluster scope), and snapshots whose creation time Proxmox does not report are excluded rather than counted as ancient. With no dated snapshots in scope the condition is false, so the alert auto-resolves once the offenders are cleaned up.
 
-     **Memory Usage** on a VM needs the balloon driver's statistics. A VM without them is measured only from the host, which sits near 100% for most VMs, so such a reading is not judged and the rule does not fire.
+     **Memory usage** on a VM needs the balloon driver's statistics. A VM without them is measured only from the host, which sits near 100% for most VMs, so such a reading is not judged and the rule does not fire.
 
-     **Disk Read/Write** and **Network In/Out** are rates in bytes/s, measured between samples. Under load Proxmox at times leaves a running VM's disk counters unreported (it reads them as 0). Nexara then keeps the last reported figures, for up to six hours, and marks the sample — for a node, any sample in which one of its guests was unreported or a guest list could not be read. A disk rule skips marked samples, holding (neither firing nor resolving) while the newest sample is one, and measures the rate across them once a reported sample follows. A counter Proxmox never reports while the guest runs (network on a VM without a NIC, say) is never judged, so a `<` rule on it never fires. When a counter falls — a guest restarted, stopped or moved off the node, or a node's guest list could not be read — the rule holds until the counter is back at its earlier level or that sample is older than the rule's duration plus ten minutes. A dip Nexara could not mark — one already under way when it started, or one past six hours — can still read as a burst, so give node- and cluster-scope disk rules a duration rather than `0`.
+     **Disk read/write** and **Network in/out** are rates in bytes/s, measured between samples. Under load Proxmox at times leaves a running VM's disk counters unreported (it reads them as 0). Nexara then keeps the last reported figures, for up to six hours, and marks the sample — for a node, any sample in which one of its guests was unreported or a guest list could not be read. A disk rule skips marked samples, holding (neither firing nor resolving) while the newest sample is one, and measures the rate across them once a reported sample follows. A counter Proxmox never reports while the guest runs (network on a VM without a NIC, say) is never judged, so a `<` rule on it never fires. When a counter falls — a guest restarted, stopped or moved off the node, or a node's guest list could not be read — the rule holds until the counter is back at its earlier level or that sample is older than the rule's duration plus ten minutes. A dip Nexara could not mark — one already under way when it started, or one past six hours — can still read as a burst, so give node- and cluster-scope disk rules a duration rather than `0`.
    - **Condition** — threshold and comparison (e.g., CPU > 90%)
    - **Duration** — how long the condition must persist before firing; `0` fires on the first breaching sample. The alert goes pending at the first check that sees the condition and fires once every sample in the duration has met it, so 300 fires about five minutes after the condition starts. A check that finds the condition no longer holding resolves a fired alert and drops a pending one, which never notified anyone and starts no cooldown
    - **Severity** — info, warning, critical
    - **Cooldown** — minimum time between re-fires, measured from when the previous alert resolved
-4. Add an **Escalation Chain** — this is how the rule notifies; a rule with an empty chain never sends anything
+4. Add an **Escalation chain** — this is how the rule notifies; a rule with an empty chain never sends anything
 5. Add a custom message template (optional). It is a Go template, and every channel type carries it: under the chat channels' own text (Slack, Discord, Teams, Telegram), in the email's body, as the webhook payload's `message` and in a PagerDuty event's details. `{{.Message}}` in it is the alert's own one-line message, such as `cpu_usage > 90 on pve-01 (current: 95.00)`. A channel with a template of its own sends that instead, and can place the rule's message in it with `{{.Message}}`. A template cannot use `range`, `template` or `block`, and a `print`, `printf`, `println`, `html`, `js` or `urlquery` in it may be handed and produce at most 64 KB, or the send uses its fallback. A rule's template is at most 4096 bytes, and a channel's (an email subject, a webhook body, a chat message) at most 8 KB. A template past one of these is refused when it is saved, saying which; a stored one past a limit sends the alert's own message instead
-6. Click **Create Rule**
+6. Click **Create rule**
 
 A saved rule can be turned off or on from its row, or deleted, which also deletes every alert it has raised. There is no form for editing one: delete it and create it again, or send the change to `PUT /api/v1/alert-rules/:id`.
 
 ### Notification Channels
 
-1. Click the **Channels** tab
-2. Click **Add Channel**
+1. Open the **Channels** tab, which lists the saved channels
+2. Click **Add channel** at the top of the page
 3. Select channel type and configure:
 
 | Type | Configuration |
@@ -1739,8 +1749,8 @@ A saved rule can be turned off or on from its row, or deleted, which also delete
 | **Discord** | Webhook URL, username |
 | **Microsoft Teams** | Webhook URL |
 | **Telegram** | Bot token, chat ID |
-| **Generic Webhook** | URL, method (POST/PUT/PATCH), custom headers, optional body template |
-| **PagerDuty** | Integration/Routing Key. Its severity mapping can be set only through the API |
+| **Generic webhook** | URL, method (POST/PUT/PATCH), custom headers, optional body template |
+| **PagerDuty** | Integration or routing key. Its severity mapping can be set only through the API |
 
 4. Click **Create**
 5. Click **Test** on the channel's row to send a test notification. A failed test says what kind of failure it was beside the channel — could not connect, timed out, TLS failed (certificate not trusted, or not valid for this host), HTTP status or SMTP code — and nothing the target said. The server log has the detail, with any password, token, webhook URL or header value the channel holds cut out
@@ -1762,7 +1772,7 @@ Escalation only advances while the alert is still firing **and** unacknowledged,
 
 ### Maintenance Windows
 
-Maintenance windows suppress alert evaluation for a cluster (or a single node in it), or for one UPS, during a planned outage. A **UPS's windows** are on its detail page, in the Overview's **Maintenance windows** card: open one for a battery swap, say, and the UPS drops out of the global UPS rules while the rules naming it hold (see UPS Alerts). They need `view:ups` with `view:maintenance_window` to see them and with `manage:maintenance_window` to change them, all held install-wide (a cluster's `maintenance_window` grant does not show the card), and each change is in the UPS's History. A cluster's windows are **API-only** — there is no page for them yet:
+Maintenance windows suppress alert evaluation for a cluster (or a single node in it), or for one UPS, during a planned outage. A **UPS's windows** are on its detail page, in the Overview's **Maintenance windows** panel: open one for a battery swap, say, and the UPS drops out of the global UPS rules while the rules naming it hold (see UPS Alerts). They need `view:ups` with `view:maintenance_window` to see them and with `manage:maintenance_window` to change them, all held install-wide (a cluster's `maintenance_window` grant does not show the panel), and each change is in the UPS's History. A cluster's windows are **API-only** — there is no page for them yet:
 
 ```bash
 curl -X POST https://nexara.example.com/api/v1/clusters/$CLUSTER_ID/maintenance-windows \
@@ -1780,7 +1790,7 @@ Windows do not repeat — create one per outage. Managing them needs `manage:mai
 
 ### Managing Alerts
 
-From the **Alert History** tab:
+From the **Alert history** tab:
 - **Acknowledge** — mark an alert as seen (stops escalation). While its condition holds the rule raises no new alert, and once the condition clears the alert resolves on its own and sends its resolution notification. A rule keeps one alert at a time (a cluster rule judged node by node, one per node), so acknowledging the alert of a rule that judges every UPS, or a cluster's tasks or Veeam jobs, quiets that rule for all of them: give a UPS a rule of its own to hear about it separately
 - **Resolve** — mark an alert as resolved. It sends the resolution notification an automatic resolve sends, to the escalation step the alert reached
 - Filter by state and severity. The tab lists the newest 50 alerts; `GET /api/v1/alerts` also takes a cluster, a limit and an offset
@@ -1807,7 +1817,7 @@ Per row: **Retry** re-dispatches it, **Dismiss** files it away, and **Delete** r
 
 ## CVE Scanning
 
-Navigate to **Security** from the sidebar.
+Open **Security** in the navigation rail. Scanning is on its **Vulnerability scanning** tab.
 
 ### How It Works
 
@@ -1817,25 +1827,25 @@ Navigate to **Security** from the sidebar.
 
 ### Manual Scan
 
-1. Select a cluster from the filter
-2. Click **Scan Now**
+1. With more than one cluster, pick the cluster in the switch at the top of the page
+2. Click **Scan now**
 3. Results appear when the scan completes (typically 30-60 seconds)
 
 ### Automated Scanning
 
 Each cluster is scanned automatically on its own interval — **every 24 hours** unless you change it. The scheduler checks every minute which clusters are due, so a scan starts within a minute of its interval, counted from the start of the cluster's last scan, a manual one included.
 
-1. Open the **Scan Schedule** card on the Security page
-2. Toggle **Automatic scanning** on or off, and pick an interval — hourly, or every 6, 12, 24 or 48 hours
+1. Go to the **Scanning** section at the foot of the **Vulnerability scanning** tab
+2. Turn **Automatic scans** on or off, and pick a **Scan interval** — every hour, every 6, 12, 24 or 48 hours, or weekly
 3. Changes save immediately
 
 ### Security Posture
 
-The posture card shows:
-- **Score** — overall security rating (0-100), with the nodes scanned and the vulnerabilities found
-- **Critical/High/Medium/Low/Unknown** — vulnerability counts by severity
+The **Posture** panel shows:
+- **Posture score** — overall security rating (0-100), with **Nodes scanned**; the summary under the page's title gives the vulnerabilities found
+- **Critical**, **High**, **Medium**, **Low** and, when there are any, **Unknown** — vulnerability counts by severity
 
-Beside it, **Action Required (SSVC)** counts the latest scan's CVEs by the bands described under [CVE Notifications](#cve-notifications).
+Below it, **What to do** counts the latest scan's CVEs by SSVC band: **Act** and **Attend**, the bands described under [CVE Notifications](#cve-notifications), then **Track\*** and **Track**.
 
 ### How Severity Is Decided
 
@@ -1847,13 +1857,13 @@ Nexara does not take the Debian tracker's rating at face value. Each CVE gets a 
 
 A CVE on the KEV list is floored into the **critical** bucket regardless of its CVSS, because "actively exploited right now" outranks any paper score. A top-decile EPSS (≥ 0.9) is floored into **high**. Everything else grades by severity × probability, so a CVSS-9 with no public exploit lands low rather than screaming.
 
-The counts on the posture card are these derived buckets — which is why a CVE's severity here can differ from the Debian tracker's. The tracker rates the flaw; Nexara rates your exposure.
+The counts on the **Posture** panel are these derived buckets — which is why a CVE's severity here can differ from the Debian tracker's. The tracker rates the flaw; Nexara rates your exposure.
 
-The **actively exploited** callout on the posture card opens a per-CVE list: each CVE ID links to its NIST NVD page, and the flame badge beside it links to CISA's KEV catalog entry with the required action and due date.
+**Review**, on the **Posture** panel's line of actively exploited vulnerabilities, opens a per-CVE list: each CVE ID links to its NIST NVD page, and the **KEV** chip beside it links to CISA's KEV catalog entry with the required action and due date.
 
 ### CVE Notifications
 
-The **CVE Notifications** card wires scan results into the same notification channels alerts use. Tick **Enable notifications**, then choose which SSVC-style bands to notify on:
+The notification rows of the **Scanning** section wire scan results into the same notification channels alerts use. Turn on **Enable notifications**, then pick the SSVC-style bands under **Notify on**:
 
 - **Act** — actively exploited (KEV) or high-likelihood (EPSS ≥ 0.5 with CVSS ≥ 7)
 - **Attend** — moderate likelihood (EPSS ≥ 0.1) or critical CVSS
@@ -1864,42 +1874,42 @@ A notice lists up to 20 of the CVEs, highest risk first, on every channel type. 
 
 ### Reviewing Vulnerabilities
 
-In **Scan History**, expanding a scan shows its **Node Results**, and the **›** in the scan's own row opens that scan's vulnerabilities across its nodes, highest **Score** first: **CVE ID**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed In** and **Description**, filtered by **Actively Exploited** and by the severity the **Risk** column shows.
+In **Scan history**, expanding a scan shows its **Node results**, and **Findings** in the scan's own row opens that scan's vulnerabilities across its nodes, highest **Score** first: **CVE**, **Action**, **Risk**, **Score**, **EPSS**, **Package**, **Installed**, **Fixed in** and **Description**, filtered by **Actively exploited** and by the severity the **Risk** column shows.
 
-**Fixed In** is the version that fixes the CVE in the node's Debian release, as the tracker gives it, or the pending version when the changelog entries the upgrade brings name the CVE. It reads `-` for a CVE Debian has not fixed in that release, which the pending upgrade does not fix either, and when the node's release could not be read.
+**Fixed in** is the version that fixes the CVE in the node's Debian release, as the tracker gives it, or the pending version when the changelog entries the upgrade brings name the CVE. It reads `-` for a CVE Debian has not fixed in that release, which the pending upgrade does not fix either, and when the node's release could not be read.
 
-A node whose changelogs Proxmox could not serve still reads completed, and its row in **Node Results** names the packages: CVEs named only in those changelogs are missing from the result. Nexara's log gives the first reason Proxmox returned.
+A node whose changelogs Proxmox could not serve still reads completed, and its row in **Node results** names the packages: CVEs named only in those changelogs are missing from the result. Nexara's log gives the first reason Proxmox returned.
 
 ### How Long Scans Are Kept
 
-Nexara keeps each cluster's 20 newest scans, the number **Scan History** lists, and once an hour deletes older ones with their node results and vulnerabilities. Two kinds of older scan stay, however old: the latest completed scan, which the posture card reads, so a run of failed scans never sets the card back to a score of 100 with no findings; and a scan still running. On an hourly schedule the 20 cover less than a day, on the default daily one 20 days. For a longer record, schedule the **Patch status** report, which keeps each scheduled run for 90 days.
+Nexara keeps each cluster's 20 newest scans, the number **Scan history** lists, and once an hour deletes older ones with their node results and vulnerabilities. Two kinds of older scan stay, however old: the latest completed scan, which the **Posture** panel reads, so a run of failed scans never sets the panel back to a score of 100 with no findings; and a scan still running. On an hourly schedule the 20 cover less than a day, on the default daily one 20 days. For a longer record, schedule the **Patch status** report, which keeps each scheduled run for 90 days.
 
 ---
 
 ## Rolling Updates
 
-Navigate to **Security > Rolling Updates** tab.
+Open **Security** in the navigation rail, then its **Rolling updates** tab.
 
 ### Prerequisites
 
-1. **SSH Credentials** — required for automated upgrades, and on this same tab for the selected cluster (`manage:ssh_credentials`)
-   - Click **Configure SSH** and enter the username, port and **Auth Type**: **Password** (the default) or **SSH Key**
+1. **SSH credentials** — required for automated upgrades, and set in the **SSH access** section of this same tab for the selected cluster (`manage:ssh_credentials`)
+   - Click **Configure SSH** and enter the username, port and **Sign in with**: **Password** (the default) or **SSH key**
    - Saving opens **Pin SSH host keys**, which pins each node's host key; **Pin all node host keys** opens it again, for a node added since. An automated job is refused at creation while a node it names has no pinned host key or no known IP address. When a node's turn comes, the job checks those again and then logs in to the node as the upgrade will, before it drains it. A wrong password or key, a changed host key, an sshd that does not answer, or an SSH user that is not root fails the node with nothing moved
    - The SSH user must be root: the automated upgrade runs `apt-get` without `sudo`
-   - **Test Connection** tests one node you choose, with **Trust & Pin** for its key. A login that works but is not root passes with a warning: sensor readings work without root, automated upgrades do not
-   - When a node refuses the SSH login, Nexara stops trying it for 10 minutes for everything that reads a node over SSH (hardware temperatures, the memory layout, maintenance mode), so an open page does not add a failed login to the node's auth log every minute and trip its lockout. Those reads say the node refused the login. Saving new credentials, or a **Test Connection** that logs in to that node, ends the pause at once
+   - **Test connection** tests one node you choose, with **Trust & Pin** for its key. A login that works but is not root passes with a warning: sensor readings work without root, automated upgrades do not
+   - When a node refuses the SSH login, Nexara stops trying it for 10 minutes for everything that reads a node over SSH (hardware temperatures, the memory layout, maintenance mode), so an open page does not add a failed login to the node's auth log every minute and trip its lockout. Those reads say the node refused the login. Saving new credentials, or a **Test connection** that logs in to that node, ends the pause at once
 
 ### Creating an Update Job
 
-1. Click **New Rolling Update**. The job is for the cluster chosen at the top of the page, which the wizard names under each step's title; the page keeps that choice in its address
+1. Click **New rolling update**. The job is for the cluster chosen at the top of the page, which the wizard names under each step's title; the page keeps that choice in its address
 2. Work through the wizard's three steps — **Select Nodes**, **HA Constraint Check**, **Configure Update**:
    - **Nodes** — select which nodes to update (or all)
    - **Parallelism (max nodes updated at once)** — default 1, set on the **Select Nodes** step because the pre-flight that follows checks capacity for that many nodes drained at once
    - **Conflict Policy** — offered on the **HA Constraint Check** step when the pre-flight finds conflicts: **Warn & Proceed** (continue despite the findings) or **Strict (fail on violation)**. With **Strict** selected you cannot move on to the configure step while the pre-flight report contains errors
-   - **Reboot after update** — on means always reboot. Off, a node is rebooted only when a reboot is owed: its upgrade installs a kernel (a `proxmox-kernel-*`, `pve-kernel-*` or `linux-image-*` package, or `proxmox-default-kernel`, among the node's pending updates when its turn came), or, for an automated upgrade, the node has `/var/run/reboot-required` afterwards. A manual upgrade is judged by the same pending list when you click **Confirm Upgrade**. An automated upgrade never counts a kernel package it holds back, and while it holds any kernel package it does not count a newly installed kernel either, so excluding the series package and `proxmox-default-kernel` keeps the node from being rebooted for a kernel it did not install. An in-place job never reboots unless you asked for it; it marks the node **Reboot required** instead
+   - **Reboot after update** — on means always reboot. Off, a node is rebooted only when a reboot is owed: its upgrade installs a kernel (a `proxmox-kernel-*`, `pve-kernel-*` or `linux-image-*` package, or `proxmox-default-kernel`, among the node's pending updates when its turn came), or, for an automated upgrade, the node has `/var/run/reboot-required` afterwards. A manual upgrade is judged by the same pending list when you click **Confirm upgrade**. An automated upgrade never counts a kernel package it holds back, and while it holds any kernel package it does not count a newly installed kernel either, so excluding the series package and `proxmox-default-kernel` keeps the node from being rebooted for a kernel it did not install. An in-place job never reboots unless you asked for it; it marks the node **Reboot required** instead
    - **Auto-restore guests** — migrate drained guests back after the node returns healthy
    - **Wait for Ceph** and **Hold noout** — offered only when the pre-flight finds that the cluster runs Ceph, both on by default; see **Ceph Clusters** below
-   - **Automated upgrade (SSH)** — run `apt dist-upgrade` over SSH. On by default, and off and disabled while the cluster has no SSH credentials. `manage:rolling_update` is enough to see whether it has them, so a built-in Operator sees the switch as an administrator does. If the page cannot check, the switch is on and can be turned off, and the create is refused with *Auto upgrade requires SSH credentials to be configured for this cluster* if it has none. Each node's host key must be pinned: the create names any node without one, and before draining a node the job logs in to it as root, so a node the upgrade could not run on fails with nothing moved (see **Prerequisites**). With it off, the job pauses at each node in the **Awaiting Upgrade** step until you click **Confirm Upgrade**
+   - **Automated upgrade (SSH)** — run `apt dist-upgrade` over SSH. On by default, and off and disabled while the cluster has no SSH credentials. `manage:rolling_update` is enough to see whether it has them, so a built-in Operator sees the switch as an administrator does. If the page cannot check, the switch is on and can be turned off, and the create is refused with *Auto upgrade requires SSH credentials to be configured for this cluster* if it has none. Each node's host key must be pinned: the create names any node without one, and before draining a node the job logs in to it as root, so a node the upgrade could not run on fails with nothing moved (see **Prerequisites**). With it off, the job pauses at each node in the **Awaiting upgrade** step until you click **Confirm upgrade**
    - **Package excludes** — packages the automated upgrade holds back, as exact names separated by commas; wildcards are refused. Each one installed on the node is put on hold with `apt-mark hold` for the upgrade and released after it, whether the upgrade worked or not, and a package already on hold before the job stays on hold. A held package keeps back any update that needs a newer version of it, and a node with nothing else pending is skipped rather than drained. To keep a node on its kernel, name both its kernel series package, such as `proxmox-kernel-6.17`, which brings each new build of that series, and `proxmox-default-kernel`, which moves the node to a newer series (`dpkg -l 'proxmox-kernel*'` on the node lists them). A manual upgrade ignores the list. The job's page marks a held-back package **Held back** in a node's package list and leaves it out of the count. An upgrade cut off between the hold and the release (Nexara restarted, the SSH session died) leaves its holds on, listed in `/var/lib/nexara-rolling-update-holds` on the node, and the node's next automated upgrade releases them before it starts
    - **Notify on completion/failure** — an existing notification channel to message when the job ends
    - **Start immediately** — begin right after creation instead of leaving the job idle. While it is on, the step says what starting the job does, in the words of the **Start** confirmation, since **Create & Start** does not show that dialog
@@ -1912,10 +1922,10 @@ A cluster has one active job at a time, and any failed node fails the job; a nod
 Each node goes through these steps:
 
 1. **Draining** — migrates guests off the node: VMs live, containers by restart. A guest with a PCI or USB device cannot migrate, so it is shut down where it is and started again afterwards
-2. **Awaiting Upgrade** — manual mode only; the job holds here until you click **Confirm Upgrade** for that node
+2. **Awaiting upgrade** — manual mode only; the job holds here until you click **Confirm upgrade** for that node
 3. **Upgrading** — applies package updates (manual or automated)
 4. **Rebooting** — reboots the node when **Reboot after update** is on or a reboot is owed (see above)
-5. **Health Check** — waits for the node to come back online (its API answers with an uptime that started after the reboot); on a Ceph cluster with **Wait for Ceph** on, also for Ceph to be clean (see **Ceph Clusters**)
+5. **Health check** — waits for the node to come back online (its API answers with an uptime that started after the reboot); on a Ceph cluster with **Wait for Ceph** on, also for Ceph to be clean (see **Ceph Clusters**)
 6. **Restoring** — migrates VMs back to the node
 
 > **Native CRS:** if the cluster runs Proxmox VE 9.2's native CRS dynamic balancer with auto-rebalance enabled, Nexara pauses `ha-auto-rebalance` for the duration of the job — so the balancer can't move guests back onto a node being drained — and restores it when the job finishes or fails.
@@ -1926,7 +1936,7 @@ What the job changes outside itself is audited under the object it changed, as t
 
 On a hyperconverged Ceph cluster a node that reboots takes its OSDs down with it, and a second node down before the first one's OSDs are back can leave placement groups with fewer copies than their pool's `min_size`, which stops I/O to every guest disk in them. Two job options, both on by default, keep a rolling update from doing that. Whether the cluster runs Ceph is what Proxmox answers for its Ceph status, read when the job is created (and on the job's first tick, if that read failed); a cluster without Ceph is read once and never again, and neither option does anything there. Proxmox answers the cluster's Ceph status from the node behind the API address, so when that node has no Ceph of its own (a compute-only member) Nexara asks each member in turn and reads the status from one that runs Ceph; the cluster counts as having no Ceph only when every member says so, and a member that cannot be asked leaves the question open, so the job waits. The Ceph tab reads its status the same way. The answer is kept for the job's life: a cluster that gains Ceph during a job is not waited for, and one that loses it makes the job wait until the time limit pauses it.
 
-- **Wait for Ceph** (`ceph_wait`) — a node is taken down (drained, or upgraded in place) only once Ceph is clean, the first node included, so a job does not begin on a degraded cluster. After its upgrade, and its reboot when there is one, the node stays in **Health Check** until Ceph is clean again; only then are its guests moved back and the node completed, and only then does the next node start. *Clean* means every placement group is `active` and `clean` (scrubbing does not count against it), and as many OSDs are up as were up when the node started; an OSD that was already down before is not waited for. Each gate waits for two clean readings about 15 seconds apart (one check apart), with nothing else between them: while Ceph's manager fails over, its placement-group map can read clean for a few seconds on stale data, so one clean reading is not enough, and the job view says *Ceph reads clean; confirming on the next check* meanwhile. Ceph's health status is not the test: `noout` itself raises a warning, and an unrelated warning does not hold the job. A status that cannot be read counts as not clean. While a node waits, its row says *Waiting for Ceph* and the job's page says why: how many placement groups are not clean, and how many OSDs are up of how many expected. A wait longer than 30 minutes (time paused does not count) **pauses** the job rather than failing it, with the reason on the job's page and in the notification; **Resume** checks Ceph again and waits up to 30 more minutes. Off, the job does not look at Ceph before taking a node down or calling it healthy, and moves on as soon as the node answers again
+- **Wait for Ceph** (`ceph_wait`) — a node is taken down (drained, or upgraded in place) only once Ceph is clean, the first node included, so a job does not begin on a degraded cluster. After its upgrade, and its reboot when there is one, the node stays in **Health check** until Ceph is clean again; only then are its guests moved back and the node completed, and only then does the next node start. *Clean* means every placement group is `active` and `clean` (scrubbing does not count against it), and as many OSDs are up as were up when the node started; an OSD that was already down before is not waited for. Each gate waits for two clean readings about 15 seconds apart (one check apart), with nothing else between them: while Ceph's manager fails over, its placement-group map can read clean for a few seconds on stale data, so one clean reading is not enough, and the job view says *Ceph reads clean; confirming on the next check* meanwhile. Ceph's health status is not the test: `noout` itself raises a warning, and an unrelated warning does not hold the job. A status that cannot be read counts as not clean. While a node waits, its row says *Waiting for Ceph* and the job's page says why: how many placement groups are not clean, and how many OSDs are up of how many expected. A wait longer than 30 minutes (time paused does not count) **pauses** the job rather than failing it, with the reason on the job's page and in the notification; **Resume** checks Ceph again and waits up to 30 more minutes. Off, the job does not look at Ceph before taking a node down or calling it healthy, and moves on as soon as the node answers again
 - **Hold noout** (`ceph_noout`) — Ceph's `noout` flag is set as the job is about to take its first node down and cleared when the job ends, whether it completes, fails or is cancelled; it stays set while the job is paused. With it, a rebooting node's OSDs are not marked out, so Ceph does not start copying their data elsewhere only to copy it back. A `noout` already set when the job looks is left as it is and never cleared by the job. Ceph has no compare-and-set for its flags, so a `noout` an operator sets in the instant between the job's look and its own set is recorded as the job's and cleared when the job ends; the audit row of that change names the job. If the flag cannot be set the job goes on without it, logs and audits that, and the job's page says *noout not held* and why; the next node's start tries again. Proxmox sets Ceph flags only through the node behind the cluster's API address (there is no flags route per node), so on a cluster whose API node has no Ceph the job cannot hold `noout` and says so. A `noout` the job set and could not clear at the end stays recorded, the job's page says *noout still set, being cleared* with the reason, and the cleanup keeps trying in the background (every 2 minutes at first, then hourly) until it is cleared; a new rolling update on the cluster is refused until then. The job sets it with the cluster's API token under `manage:rolling_update`, as it pauses DRS and CRS; Proxmox needs `Sys.Modify` on `/` for the token to set it. Off, nothing is set: a rebooting node's OSDs are marked out after Ceph's `mon_osd_down_out_interval` (10 minutes by default) and their data is copied to other OSDs while the node is away
 - **Parallelism** — with **Wait for Ceph** on, the nodes are taken one at a time whatever the parallelism: Ceph is still clean while a node drains, so a second node started then would reboot with the first. The pre-flight says so when parallelism is above 1, and warns that with **Wait for Ceph** off *taking more than one node down at a time can leave placement groups without enough copies*
 
@@ -1962,11 +1972,11 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 **View** opens a job's page. Its address names the job's cluster as well, so a reload or a pasted link opens the same job; an older link, which names no cluster, opens the job if it is on the first cluster and that cluster's jobs list otherwise.
 
 - **Start** — begin the rolling update. It asks first, naming how many nodes the job updates and what happens to each in turn, and once the job has started opens its page
-- **Pause** — nothing advances and no new node is started until you resume; there is no "stop after this node". Work already under way runs to its own end and the node then waits: a drain or a restore stops after the guest it is moving, an automated upgrade already running finishes but its node is not rebooted, and a reboot already sent goes ahead. A drain that ends during the pause moves its node on to **Upgrading** (or **Awaiting Upgrade**), where nothing runs until you resume. The pause of DRS and CRS, any HA rules disabled for the job, and Ceph's `noout` flag when the job set it, stay in force meanwhile. A job that waited too long for Ceph pauses itself the same way (see **Ceph Clusters**). The job's page says this while the job is paused. Resume carries each node on from where it stopped: a stopped drain or restore at once, and an upgrade that finished during the pause once its last sign of life is 3 minutes old, when the upgrade is run again (it installs nothing) and goes on to the reboot. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
+- **Pause** — nothing advances and no new node is started until you resume; there is no "stop after this node". Work already under way runs to its own end and the node then waits: a drain or a restore stops after the guest it is moving, an automated upgrade already running finishes but its node is not rebooted, and a reboot already sent goes ahead. A drain that ends during the pause moves its node on to **Upgrading** (or **Awaiting upgrade**), where nothing runs until you resume. The pause of DRS and CRS, any HA rules disabled for the job, and Ceph's `noout` flag when the job set it, stay in force meanwhile. A job that waited too long for Ceph pauses itself the same way (see **Ceph Clusters**). The job's page says this while the job is paused. Resume carries each node on from where it stopped: a stopped drain or restore at once, and an upgrade that finished during the pause once its last sign of life is 3 minutes old, when the upgrade is run again (it installs nothing) and goes on to the reboot. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
 - **Resume** — continue a paused job
-- **Cancel** — abort the job, after a confirmation that says what it leaves behind, and release what it holds (DRS, CRS, HA rules, and `noout` when the job set it). Nodes already updated stay updated and guests already migrated are not moved back; a drain or a restore under way stops after the guest it is moving, an upgrade already running finishes without the reboot, and a node waiting for **Confirm Upgrade** stays there. A cancelled job cannot be resumed or started again
+- **Cancel** — abort the job, after a confirmation that says what it leaves behind, and release what it holds (DRS, CRS, HA rules, and `noout` when the job set it). Nodes already updated stay updated and guests already migrated are not moved back; a drain or a restore under way stops after the guest it is moving, an upgrade already running finishes without the reboot, and a node waiting for **Confirm upgrade** stays there. A cancelled job cannot be resumed or started again
 - **Skip** — skip a node that has not started yet; a node already under way cannot be skipped
-- **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, or a kernel among the node's pending updates, this reboots it (an in-place job marks it **Reboot required** instead). Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting Upgrade** stays there
+- **Confirm upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, or a kernel among the node's pending updates, this reboots it (an in-place job marks it **Reboot required** instead). Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting upgrade** stays there
 
 ### HA-Aware Scheduling
 
@@ -1985,11 +1995,11 @@ Scheduled tasks run on cron expressions and are attached to a single guest. They
 
 1. Open a VM or container's detail page
 2. Go to the **Schedules** tab
-3. Click **Add Schedule**
+3. Click **Add schedule**
 4. Configure:
    - **Action** — **Snapshot** or **Reboot**
-   - **Cron Expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
-   - **Snapshot Name Prefix (optional)** (snapshot actions only) — each run takes a new
+   - **Cron expression** — minute hour day month weekday (e.g. `0 2 * * *` = daily at 2 AM)
+   - **Snapshot name prefix (optional)** (snapshot actions only) — each run takes a new
      snapshot named `<prefix>-YYYYMMDD-HHMMSS` from the date and time of the run, for example
      `nightly-20260926-020000`; leave it empty and the prefix is `auto`. The date and time are
      in UTC. The cron expression itself still runs on the Nexara server's clock, in the server's
@@ -2076,13 +2086,13 @@ Everything that happens — user-initiated, scheduled, or automated (DRS, rollin
 
 Failed tasks surface the error message from Proxmox in the UI — failures are never silently swallowed.
 
-Both live on the **Events** page in the sidebar: the **Audit Log** tab, and a **Tasks** tab for anyone holding `view:task`. Reaching the page at all requires `view:audit`, which every built-in role has — including Viewer, so assume audit rows are readable by any signed-in user.
+Both live on the **Events** page in the navigation rail: the **Audit log** tab, and a **Tasks** tab for anyone holding `view:task`. Reaching the page at all requires `view:audit`, which every built-in role has — including Viewer, so assume audit rows are readable by any signed-in user.
 
 Filter the audit log by cluster, resource type, user, action, source, severity and time range. What you see is scoped to the clusters your roles reach.
 
 ### HA and migration markers
 
-Proxmox runs some actions as more than one task and lists each of them, and so does Nexara. A marker on the entry says which part of the action it is, in the Activity drawer, the audit log and every History:
+Proxmox runs some actions as more than one task and lists each of them, and so does Nexara. A marker on the entry says which part of the action it is, in the Activity panel, the audit log and every History:
 
 - **HA request** — a start, stop or migration of an HA-managed guest is asked of the HA manager, and the request is a task of its own under the account that asked. It ends OK as soon as it is queued, whatever becomes of it.
 - **HA manager · for _who_** — the task that does the work, which the HA manager runs as `root@pam` a few seconds later. Its outcome is the action's. It names who asked when that entry is in the same list, or the Proxmox account for a request made in Proxmox.
@@ -2094,12 +2104,12 @@ A `root@pam` start, stop or migration with no marker is an action of its own: a 
 - If the HA manager retries a failed start, the first attempt is the one marked. A migration's start on the target is marked when it began within 5 seconds of the migration, or before the end Proxmox recorded for it.
 - **Events → Tasks** has no markers.
 
-### The Activity Drawer
+### The Activity Panel
 
-A bar at the bottom of every page: **Activity**, how many tasks are running, and **All**, **N errors** and **Others** to filter by. Click the bar to open or close it, and drag its top edge to resize it; both are remembered per browser.
+A panel at the bottom of every page. Collapsed, it is one line: **Activity**, how many tasks are running, **All**, **N errors** and **Others** to filter by, and, except on a phone, the task running now with its progress or, with none running, the last entry (*Last: …*). Click the line, or the arrow at its right end, to expand it into a table of recent entries, and again to collapse it; a filter chosen on the collapsed line opens it on that list. Drag the open panel's top edge to resize it. It starts collapsed; whether it is open and its height are remembered per browser, the filter is not.
 
 - **What it lists** — the 50 newest audit entries you may see (`view:audit`), plus up to 50 older entries for tasks still running or finished in the last hour, so a long disk move stays there however many entries come after it. A running task on an offline node is not kept this way.
-- **Order** — tasks Proxmox confirms are running come first in the default newest-first order; a sort you choose replaces that, and applies within what the drawer holds.
+- **Order** — tasks Proxmox confirms are running come first in the default newest-first order; a sort you choose replaces that, and applies within what the panel holds.
 - **N errors** counts those entries whose Level reads `error`: failed tasks, and errors with no task behind them, such as a TLS fingerprint mismatch or a failed sync. A cluster that is down, or that Nexara reaches through another node because its configured endpoint is unusable, adds an entry every 5 minutes, so the count climbs while that lasts and falls only as newer entries push those out of the newest 50.
 - **Rows** — click to expand with the task's log (`view:task`); double-click a task for its live view.
 
@@ -2135,7 +2145,7 @@ A cluster's page has a **History** tab: everything that happened in the cluster,
 
 ### A Cluster Page's History
 
-Every tab of a cluster's page, and every setting under its **Configure** tab, has a **History**: what was done to its objects, newest first — created, changed, deleted, applied, and the tasks Nexara saw Proxmox run on them — with who did it, when, and for a task how it ended. **Ceph** and the settings that have sub-tabs (High availability, Access control, Networks, Firewall, Certificates, DRS, Options) end with a **History** sub-tab; Resource pools, Replication and Metric servers have a History button beside their title, and Resource mappings one above its cards. Filter by type (its kinds of object, or what happened to one), by source and by time.
+**Ceph**, and every setting under a cluster's **Configure** tab but **Guest tools**, has a **History**: what was done to its objects, newest first — created, changed, deleted, applied, and the tasks Nexara saw Proxmox run on them — with who did it, when, and for a task how it ended. **Ceph** and the settings that have sub-tabs (High availability, Access control, Networks, Firewall, Certificates, DRS, Options) end with a **History** sub-tab; Resource pools, Replication and Metric servers have a History button beside their title, and Resource mappings one above its two panels. Filter by type (its kinds of object, or what happened to one), by source and by time.
 
 - **Rows.** An object with a stable name has a History button in its row, for what happened to that one object: an HA resource, group or rule; a pool; a resource mapping; a Proxmox user, group or role; a replication job; a Ceph OSD, pool or monitor; a node interface and the SDN's zones, VNets, subnets, controllers, IPAMs and DNS plugins; a firewall alias, IP set, security group or template; an ACME account or plugin and a node's certificate; a metric server; a DRS rule. A firewall rule has no name — its position changes with every insert — so the History of the cluster's **Firewall** holds its rule set and options as a whole.
 - **Window.** Every History opens on the last 7 days; pick **All time** for the rest. Each source is read newest first up to 20,000 entries whatever the time chosen, and **Show older** reads on below where one reaches that, as on a folder's History.
@@ -2143,7 +2153,7 @@ Every tab of a cluster's page, and every setting under its **Configure** tab, ha
 - **Aliases, IP sets and security groups** are listed under their lower-case name, the one Proxmox stores them under.
 - **Firewall templates** belong to Nexara, not to a cluster: a template's creation, change and removal are in the template's own History, which needs `view:audit` and `view:network` on every cluster (an instance-wide grant). Applying a template to a cluster is in that cluster's Firewall History too.
 - **DRS.** The sub-tab that lists the moves DRS made is now **Migrations**; **History** is what was done to the DRS configuration, its rules and Proxmox's HA rules.
-- **Permissions.** A tab's History needs the view permission of the tab's own list (`view:ha` for HA, `view:cluster` for Pools, Resource Mappings, Metrics and Options, `view:access`, `view:replication`, `view:ceph`, `view:network` for Networks and Firewall, `view:certificate`, `view:drs`); a row's, that of the object's own page, which is the tab's but for a single pool's (`view:pool`). The tab or button is shown to someone who holds it and `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/history/{tab}` and the object routes beneath it) `view:audit` and that permission give the rows; a task's exit text needs `view:task` as well.
+- **Permissions.** A tab's History needs the view permission of the tab's own list (`view:ha` for High availability, `view:cluster` for Resource pools, Resource mappings, Metric servers and Options, `view:access`, `view:replication`, `view:ceph`, `view:network` for Networks and Firewall, `view:certificate`, `view:drs`); a row's, that of the object's own page, which is the tab's but for a single pool's (`view:pool`). The tab or button is shown to someone who holds it and `view:audit` and `view:task`. Through the API (`GET /api/v1/clusters/{cluster_id}/history/{tab}` and the object routes beneath it) `view:audit` and that permission give the rows; a task's exit text needs `view:task` as well.
 - **What is recorded.** Nexara's own changes, and the tasks it ingests from Proxmox that name the object (Ceph daemons and pools, certificates, the SDN and network applies). An edit made directly in Proxmox that nothing on record explains shows too, as **Changed in Proxmox** with the fields that changed (see Changes Made Directly in Proxmox).
 
 ### A Node's History
@@ -2161,7 +2171,7 @@ A node's page has a **History** tab: what happened to the node, newest first —
 A storage, a backup server and a backup job have the same timeline as a guest: newest first, with the type, source and time filters, and rows that expand to their details and, for a task, its Proxmox log.
 
 - **A storage** — the **History** tab of its page: its definition added, changed or removed, uploads, downloads and deletes of its content, disks moved onto it or off it, the backups and restores that name it, the LVM, LVM-thin or directory volume that added it, and a resource pool it was added to or taken out of. A disk that a migration places on it by the migration itself (a remote migration's target storage, a storage map) is not there, because the migration's entries name the nodes and not the storages; the per-disk moves of a storage migration are. A storage is its name in its cluster, as Proxmox calls it on every node, so the History outlives Nexara's inventory row for the storage and never mixes in another cluster's storage of the same name. A storage that is not shared is a different storage on every node: its page shows what ran on its host node, and the changes to its configuration, which belong to every node's.
-- **A Proxmox Backup Server** — the **History** tab beside Tasks: the server added, changed or removed, datastore garbage collections and prunes, snapshot changes, sync and verify jobs run from Nexara, and the restores from the server (a restore that Nexara tied to the server only because no other storage could be reads *source not confirmed*). Above the first page are the server's own latest tasks, read live; a task Nexara started is one row there, named by who started it. **A datastore** has a **History** button on its card, with the rows that name it and the restores from it.
+- **A Proxmox Backup Server** — the **History** tab beside Tasks: the server added, changed or removed, datastore garbage collections and prunes, snapshot changes, sync and verify jobs run from Nexara, and the restores from the server (a restore that Nexara tied to the server only because no other storage could be reads *source not confirmed*). Above the first page are the server's own latest tasks, read live; a task Nexara started is one row there, named by who started it. **A datastore** has a **History** button on its panel, with the rows that name it and the restores from it.
 - **A Veeam server, one of its jobs and one of its runs** — the **History** button in the row's actions: the server added, changed, removed or tested, a platform mapped to a cluster and a backup object mapped to a guest, every job started, stopped, enabled or disabled and every run stopped; the job's, what was done to it and its runs; the run's, a stop asked for. A job's latest runs are listed live above its history, from the runs Nexara has collected; they are not in the history itself, which is what was done to the job.
 - **A Proxmox backup job** — the **History** button in the Schedules table: created, changed or deleted, and run from Nexara, with each run's outcome. The runs Proxmox starts on the job's schedule are not here: the task they start names no job, so they are in the History of each guest they back up. A job is the id Proxmox gave it, not its name.
 
@@ -2185,23 +2195,23 @@ An edit made in the Proxmox GUI, its API or a node's shell often runs no task �
 
 ### Exporting the Audit Log
 
-The **CSV**, **JSON** and **Syslog** (RFC 5424) buttons export what the cluster, resource type, user, action and time-range filters select — handy for a one-off handover to an auditor. The source and severity filters do not narrow the file, and severity narrows only the page on screen, since it is worked out in the browser. An export stops at the newest 10,000 entries; a JSON export's `total` says how many matched.
+The **Export** menu's **CSV**, **JSON** and **Syslog (RFC 5424)** export what the cluster, resource type, user, action and time-range filters select — handy for a one-off handover to an auditor. The source and severity filters do not narrow the file, and severity narrows only the page on screen, since it is worked out in the browser. An export stops at the newest 10,000 entries; a JSON export's `total` says how many matched.
 
 ### Forwarding to a SIEM
 
-For continuous delivery, expand **Syslog Forwarding** on the Audit Log tab:
+For continuous delivery, click **Configure** on the **Syslog forwarding** panel of the **Audit log** tab:
 
 - **Host** and **Port** — your collector. The port follows the protocol (514 for UDP and TCP, 6514 for TLS) until you enter one of your own; leave it blank to use the protocol's default
 - **Protocol** — UDP, TCP, or TLS (with an optional *Skip TLS certificate verification* for self-signed collectors)
 - **Facility** — the syslog facility to stamp on records
 
-Tick **Enable syslog forwarding** and click **Save**. **Test Connection** sends a single probe record so you can confirm the collector is receiving before turning it on; over UDP nothing answers, so success means only that it was sent. Records are RFC 5424 with STRUCTURED-DATA, every field quoted and the record length bounded, and forwarding happens off the request path so a slow or dead collector never stalls an API call. Nothing is stored for later, though: a record a dead collector cannot take, or that overflows the 1,024-record queue, is dropped and only the log says so, so the audit log stays the record of truth. Every entry is forwarded as it is written: authentication events and resource changes made through the UI or API, tasks started outside Nexara and observed on Proxmox, and the entries Nexara writes itself, such as sync failures, scheduled tasks, rolling updates, a migration's own progress and failure entries, DRS moves, automatic guest-tools actions and daily memory reads. An observed task's record carries the task's start time, so the first sync after an outage sends back-dated records, and a large backlog can overflow the queue; those drops are counted in the log like any other, and the audit log and `GET /api/v1/audit-log/export` still hold every entry. On a stop Nexara spends up to a second sending what is still queued; an entry it cannot send by then is in the audit log only. Changes to the forwarding configuration — plus the test probes themselves — are audited. Editing this configuration requires `manage:audit`.
+Turn on **Enable syslog forwarding** and click **Save**. **Test connection** sends a single probe record so you can confirm the collector is receiving before turning it on; over UDP nothing answers, so success means only that it was sent. Records are RFC 5424 with STRUCTURED-DATA, every field quoted and the record length bounded, and forwarding happens off the request path so a slow or dead collector never stalls an API call. Nothing is stored for later, though: a record a dead collector cannot take, or that overflows the 1,024-record queue, is dropped and only the log says so, so the audit log stays the record of truth. Every entry is forwarded as it is written: authentication events and resource changes made through the UI or API, tasks started outside Nexara and observed on Proxmox, and the entries Nexara writes itself, such as sync failures, scheduled tasks, rolling updates, a migration's own progress and failure entries, DRS moves, automatic guest-tools actions and daily memory reads. An observed task's record carries the task's start time, so the first sync after an outage sends back-dated records, and a large backlog can overflow the queue; those drops are counted in the log like any other, and the audit log and `GET /api/v1/audit-log/export` still hold every entry. On a stop Nexara spends up to a second sending what is still queued; an entry it cannot send by then is in the audit log only. Changes to the forwarding configuration — plus the test probes themselves — are audited. Editing this configuration requires `manage:audit`.
 
 ---
 
 ## Reports
 
-Navigate to **Reports** from the sidebar. The page opens on a **catalogue** of report types — each card says what the report answers, what is inside, and when it last ran — with the run history and schedules beneath it.
+Open **Reports** in the navigation rail. The page holds the **Schedules** and the **Report history**, and beside them (below them on a narrow screen) a catalogue of **Report types**: each entry says what the report answers, what is inside, and when it last ran.
 
 Every report shares one layout: a masthead with the period and the sources consulted, a strip of headline figures, a ranked list of **findings** in plain language (the thing to act on, most severe first), the evidence sections with charts and tables, and a footer stating exactly how each number was computed. Charts are inline SVG, so the same document previews in the app, prints or saves as PDF from the viewer's **Print / PDF** button, downloads as HTML, and travels as an email attachment.
 
@@ -2227,30 +2237,30 @@ Veeam data appears in a report when the person who requested it — the on-deman
 
 ### Generating a report
 
-1. Click **Generate** on a catalogue card (or **Generate report** at the top of the page)
-2. Pick the **Cluster** and the **Period** in hours (1–8760). Point-in-time reports — snapshots, patch status — use the period as context only
+1. Click **Generate** beside a report type (or **Generate report** at the top of the page)
+2. Pick the **Cluster** and the **Period (hours)**, from 1 to 8760. Point-in-time reports — snapshots, patch status — use the period as context only
 3. Set any **report options** the type offers; blank means the documented default
-4. Click **Generate**. The finished run opens on its own page with **Print / PDF**, **HTML**, **CSV**, **Email** and **Run again**. Generating, emailing and running again need `generate:report`, and at most three reports generate at once across the install; a fourth caller is told to try again
+4. Click **Generate**. The finished run opens on its own page with **Run again**, **Print / PDF** and, under **More**, **Download HTML**, **Download CSV** and **Email**. Generating, emailing and running again need `generate:report`, and at most three reports generate at once across the install; a fourth caller is told to try again
 
-Runs also appear on the **Report history** tab, where each one can be opened, downloaded, emailed or — with `manage:report` — deleted. Runs produced by a *schedule* are pruned automatically after 90 days; a report you generate on demand is kept until you delete it.
+Runs also appear in **Report history**, where a row's menu opens, downloads or emails the run, or — with `manage:report` — deletes it. Runs produced by a *schedule* are pruned automatically after 90 days; a report you generate on demand is kept until you delete it.
 
 ### Scheduled reports
 
-1. Click the schedule button on a catalogue card (or **New Schedule**)
+1. Click the schedule button beside a report type (or **New schedule** at the top of the page)
 2. Configure:
    - **Name** — e.g. `Weekly backup review`
-   - **Report Type** and **Cluster** — one cluster per schedule
-   - **Cron Schedule** — minute hour day month weekday (e.g. `0 6 * * 1` = Mondays at 06:00, on the server's clock: UTC unless the container is given a time zone. **Next Run** shows it in your browser's)
-   - **Time Range (hours)** — how much history each run covers
+   - **Report type** and **Cluster** — one cluster per schedule
+   - **Cron schedule** — minute hour day month weekday (e.g. `0 6 * * 1` = Mondays at 06:00, on the server's clock: UTC unless the container is given a time zone. **Next run** shows it in your browser's)
+   - **Time range (hours)** — how much history each run covers
    - **Attachments** — **HTML report**, or **HTML report + CSV**
    - **Report options** — the same options as an on-demand run
    - **Email delivery** (optional) — pick an email notification channel and every run is mailed to it
    - **Enabled**
-3. Click **Create Schedule**
+3. Click **Create schedule**
 
 ### Emailed reports
 
-An emailed run carries a **digest** as the body — the headline figures, a coverage bar and the top findings, built from plain tables so every mail client renders it — with the full report attached as `<type>-<cluster>-<date>.html` (and `.csv` when the schedule asks for it). The digest is built from the same data as the attachment, so the two cannot disagree. Any finished run can also be sent on demand from its page or the history tab: pick the channel, optionally override the recipients, and choose whether to attach the CSV.
+An emailed run carries a **digest** as the body — the headline figures, a coverage bar and the top findings, built from plain tables so every mail client renders it — with the full report attached as `<type>-<cluster>-<date>.html` (and `.csv` when the schedule asks for it). The digest is built from the same data as the attachment, so the two cannot disagree. Any finished run can also be sent on demand from its page or from **Report history**: pick the channel, optionally override the recipients, and choose whether to attach the CSV.
 
 ---
 
@@ -2258,10 +2268,10 @@ An emailed run carries a **digest** as the body — the headline figures, a cove
 
 The entire UI is responsive — every feature works on phones and tablets:
 
-- Navigation collapses into a drawer menu
+- The menu button at the left of the top bar opens the navigation in a drawer, with the inventory tree folded under **Inventory**
 - Detail pages and tables reflow into mobile-friendly layouts
 - Consoles (VNC, node shell) take over the full screen on mobile
-- Touch targets are sized for fingers, including tree and header actions
+- Touch targets are sized for fingers, including tree and top-bar actions
 
 To install Nexara as an app, open it in your phone's browser and choose **Add to Home Screen** (or **Install app**). It then launches in a standalone window without browser chrome.
 
@@ -2271,7 +2281,9 @@ To install Nexara as an app, open it in your phone's browser and choose **Add to
 
 ## UI Tips
 
-- **Command palette** — press **Ctrl+K** (**⌘K** on macOS) anywhere, or click **Search or jump to…**. Type at least two characters to search guests by name or VMID, nodes, storage and clusters, and, with a global `view:ups`, UPSes by name, description, model or NUT server. It also jumps to pages and to a cluster's tabs, and runs actions: create a VM or container, import a VM, open the console page, switch the theme. Right-click a guest in the results for its own actions.
+Every page has the same layout. The navigation rail on the left lists the destinations, each an icon over its name, with **Settings** and **Admin** at its foot. Beside it, the inventory tree has a panel of its own, titled **Inventory**, which a button in its header hides and a button at the left of the top bar shows again. The top bar holds the search box and command palette (**Ctrl+K**), the health indicator, **Create**, the theme toggle and the user menu, and the [Activity panel](#the-activity-panel) runs along the bottom. On a phone, the menu button at the left of the top bar opens the destinations in a drawer, with the inventory tree folded under **Inventory**.
+
+- **Command palette** — press **Ctrl+K** (**⌘K** on macOS) anywhere, or click **Search or jump to…**. Type at least two characters to search guests by name or VMID, nodes, storage and clusters, and, with a global `view:ups`, UPSes by name, description, model or NUT server. It also jumps to pages, to a cluster's **Ceph** tab and to its settings under **Configure**, and runs actions: create a VM or container, import a VM, open the console page, switch the theme. Right-click a guest in the results for its own actions.
 - **What's new** — after an upgrade, a "What's new" dialog summarizes the releases you've picked up since your last visit (fed by GitHub Releases, per browser). **What's New** in the user menu shows the current release again. If Nexara cannot reach GitHub there is no popup, and the menu item says so with a link to the releases.
 - **About** — the user menu's **About** shows the version you are running, with links to the source, the releases and the issue tracker.
 - **Confirmation dialogs** — most destructive operations ask first and name the exact resource affected; the exceptions are noted where they apply.
@@ -2280,9 +2292,9 @@ To install Nexara as an app, open it in your phone's browser and choose **Add to
 ### Tables
 
 - **Sort** — click a heading for ascending, again for descending; blanks sort last. A sort is not saved.
-- **Rearrange** — on the Activity drawer, **Events → Tasks**, every History, the Veeam, Guest Tools and UPS tables, drag a heading to move the column and drag its right edge to resize it. That is saved per browser; **Reset columns** appears once you have changed something.
+- **Rearrange** — on the Activity panel, **Events → Tasks**, every History, the Veeam, Guest tools and UPS tables, drag a heading to move the column and drag its right edge to resize it. That is saved per browser; **Reset columns** appears once you have changed something.
 - **Choose columns** — the Inventory table has a **Columns** menu instead, saved separately for desktop and mobile.
-- **Expand** — click a row to expand it. Alerts, the Audit Log, Tasks, Activity and History keep one row open at a time.
+- **Expand** — click a row to expand it. Alerts, the Audit log, Tasks, Activity and History keep one row open at a time.
 
 ---
 
@@ -2292,20 +2304,20 @@ Navigate to **Admin > Branding**.
 
 ### Custom Branding
 
-- **Application Title** — change the title shown in the browser tab and sidebar
-- **Logo** — upload a custom logo (displayed in the sidebar)
+- **Application title** — change the title shown in the top bar and the browser tab, and on a phone at the top of the navigation drawer
+- **Logo** — upload a custom logo, shown in the square at the top of the navigation rail, and on a phone at the top of the navigation drawer
 - **Favicon** — upload a custom favicon
 
 ### Appearance
 
-**Settings** in the sidebar opens **Appearance**, for your own account:
+**Settings** in the navigation rail opens **Appearance**, for your own account:
 
+- **Theme** — light, dark, or system (follows OS preference), saved with your account once you pick one, wherever you pick it (here, the top bar's toggle or the command palette); the sign-in page and an account that never picked one keep the browser's own choice
+- **Accent color** — **Default** or one of 9 colors. The color you pick is used for the main button, the active navigation item and tab, links, toggles, charts and usage bars; green, orange, red and amber leave charts and usage bars blue, because those colors also mean a state
 - **Language** — only English ships today; see the [translation guide](../frontend/src/locales/CONTRIBUTING.md)
-- **Theme** — light, dark, or system (follows OS preference), saved with your account once you pick one, wherever you pick it (here, the header's toggle or the command palette); the sign-in page and an account that never picked one keep the browser's own choice
-- **Accent Color** — the default or one of 9 presets, which theme the entire UI
-- **Storage Units** — binary (GiB) or decimal (GB)
-- **Date Format** — how every date and time in the app is written: **Automatic** (the default: each place as it has always been, relative in recent-activity lists and the browser's locale elsewhere), **Relative** ("5m ago"; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Browser locale**. A date-only field stays a date, narrow time columns show the clock for today and the date otherwise with the exact time on hover, and chart axes always show the clock
-- **Default Refresh Interval** — scales how often lists and status pages reload on their own: at 30 s (the default) each view keeps its designed pace, and heavier views reload at two or four times the chosen interval; 10 s makes everything three times as fast, 1 min and 5 min slow it down, never below 10 s. **Manual** reloads only after your own changes and on live updates. Running tasks, log tails, the guest-agent check and live charts keep their own pace, and the dashboard's live metrics keep their own refresh control
+- **Storage units** — binary (GiB) or decimal (GB)
+- **Date format** — how every date and time in the app is written: **Automatic** (the default: each place as it has always been, relative in recent-activity lists and the browser's locale elsewhere), **Relative** ("5m ago"; point at one to see the exact time), **ISO 8601** (`2026-03-08T14:30:00+00:00`, with the browser's offset) or **Browser locale**. A date-only field stays a date, narrow time columns show the clock for today and the date otherwise with the exact time on hover, and chart axes always show the clock
+- **Default refresh interval** — scales how often lists and status pages reload on their own: at 30 s (the default) each view keeps its designed pace, and heavier views reload at two or four times the chosen interval; 10 s makes everything three times as fast, 1 min and 5 min slow it down, never below 10 s. **Manual** reloads only after your own changes and on live updates. Running tasks, log tails, the guest-agent check and live charts keep their own pace, and the dashboard's live metrics keep their own refresh control
 - **Open consoles in** — **Floating window** (the default) or **New browser tab**; see [Consoles](#consoles)
 
 ---

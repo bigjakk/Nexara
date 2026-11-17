@@ -3,7 +3,7 @@
 Nexara exposes a REST API at `/api/v1`. Every endpoint takes a JWT access token or an `nxra_` API key as a bearer token, except `/healthz`, `/version`, `/changelog` and `/auth/login`, `refresh`, `register`, `logout`, `setup-status`, `sso-status`, `oidc/*` and `totp/verify-login`.
 
 > **The live source of truth is the in-app catalog at `/settings/api-docs`**
-> (**API Keys** in the user menu, then **View API Documentation**), which renders
+> (**API Keys** in the user menu, then **API reference**), which renders
 > `GET /api/v1/api-docs`. Its route list is read from the running router, `/api/v1`
 > routes only, so `/healthz` and `/ws*` are not in it. Each entry's description,
 > permission and parameters are that route's registry declaration; the 16 `/api/v1`

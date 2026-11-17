@@ -40,6 +40,10 @@ Manage multiple Proxmox clusters from a single pane of glass. Real-time dashboar
     <td><img src="docs/screenshots/rbac.png" alt="RBAC Management"></td>
   </tr>
   <tr>
+    <td><img src="docs/screenshots/power.png" alt="UPS Power Monitoring"></td>
+    <td><img src="docs/screenshots/history.png" alt="Object History"></td>
+  </tr>
+  <tr>
     <td colspan="2"><img src="docs/screenshots/ceph-storage.png" alt="Ceph Storage Dashboard"></td>
   </tr>
 </table>
@@ -108,7 +112,7 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 - **USB and PCI passthrough** — through Proxmox resource mappings, which Nexara builds from the node's own report of the device, so it works with an API token; the cluster's Resource mappings, under Configure, show Proxmox's check of each mapping on each node
 - Live migration with pre-flight checks — within a cluster or across clusters, with per-disk storage placement and network mapping
 - **Node evacuation** — bulk migrate a node's running guests off it
-- **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one dismissible health indicator
+- **Health rollup** — Ceph, disk S.M.A.R.T., quorum, storage, and task failures aggregated into one health indicator in the top bar, each issue dismissible
 - **UPS monitoring** — the UPSes your Network UPS Tools (NUT) servers report: status, charge, runtime, load, power events and alerts; which nodes each UPS powers, with a warning for any node that has no `upsmon` to shut it down before the battery runs out; instant commands and settings through an account you give it, with the UPS's name typed for anything that cuts its power
 
 </td>
@@ -177,9 +181,9 @@ Either way, Proxmox's default self-signed certificate means you'll be shown its 
 <td>
 
 ### History & Audit
-- **History for every object** — guests, nodes, clusters, folders, storage, backup servers and jobs, UPSes and each tab of a cluster's page: what happened, who did it and how it ended, whether done in Nexara or in Proxmox
+- **History for every object** — guests, nodes, clusters, folders, storage, backup servers and jobs, UPSes, and a cluster's Ceph tab and almost every setting under Configure: what happened, who did it and how it ended, whether done in Nexara or in Proxmox
 - **Edits made directly in Proxmox** — a background pass compares each cluster's guest configurations and objects with its last reading and records which fields changed, never their values
-- **Task tracking** — every Proxmox task, started in Nexara or outside it, with live status, logs and an activity drawer
+- **Task tracking** — every Proxmox task, started in Nexara or outside it, with live status, logs and an Activity panel
 - **Audit log** — the full trail, exported as JSON, CSV or syslog and forwarded to a SIEM over RFC 5424
 
 </td>
@@ -364,7 +368,7 @@ nexara.example.com {
 |--|--|
 | [Installation Guide](docs/installation.md) | Setup, configuration, updating, backup and restore, troubleshooting |
 | [Admin Guide](docs/admin-guide.md) | Clusters, guests, consoles, migration, storage, backup, networking, UPS monitoring, RBAC and auth, alerts, DRS, HA, rolling updates, History, reports |
-| [API Reference](docs/api-reference.md) | Auth, errors, rate limits, WebSocket protocol and every endpoint group. A running install also has a live catalog: **API Keys** in the user menu, then **View API Documentation** |
+| [API Reference](docs/api-reference.md) | Auth, errors, rate limits, WebSocket protocol and every endpoint group. A running install also has a live catalog: **API Keys** in the user menu, then **API reference** |
 | [Contributing](docs/contributing.md) | Dev environment, project layout, adding an endpoint, testing, PR process |
 
 ---
