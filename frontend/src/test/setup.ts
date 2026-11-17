@@ -14,8 +14,10 @@ class ResizeObserverStub {
   globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }
 ).ResizeObserver = ResizeObserverStub;
 
-// No addListener/removeListener: they are deprecated, and the only library
-// that calls one (sonner) does so only when addEventListener throws.
+// No addListener/removeListener: they are deprecated. sonner calls addListener
+// only if addEventListener throws; @xterm/xterm calls it directly, and is mocked
+// in tests. A test that renders the real terminal must add both methods to its
+// own matchMedia mock.
 const mediaQueryList = (
   query: string,
 ): Omit<MediaQueryList, "addListener" | "removeListener"> => ({
