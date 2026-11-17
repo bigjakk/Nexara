@@ -78,6 +78,25 @@ describe("CreateRollingUpdateWizard", () => {
     ).not.toBeChecked();
   });
 
+  // "Create & Start" starts the job without the Start confirmation, so its
+  // last step says what Start does, in the confirmation's own words.
+  it("says what the job does on the last step while Start immediately is on", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<CreateRollingUpdateWizard clusterId={CLUSTER} />);
+    await openWithBothNodes(user);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(await screen.findByRole("button", { name: "Next" }));
+
+    const steps = await screen.findByText(/Each node is drained first/);
+    expect(steps).toHaveTextContent(
+      "Nexara waits for the node to come back healthy",
+    );
+    await user.click(screen.getByRole("switch", { name: "Start immediately" }));
+    expect(
+      screen.queryByText(/Each node is drained first/),
+    ).not.toBeInTheDocument();
+  });
+
   // The automated upgrade is on by default, but the create is refused for a
   // cluster with no SSH credential. One the caller may not read (an Operator)
   // is unknown rather than absent, so it stays on and the create decides.

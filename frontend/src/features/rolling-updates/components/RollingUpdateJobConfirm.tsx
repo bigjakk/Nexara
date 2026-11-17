@@ -1,55 +1,14 @@
 import { useRef } from "react";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import type { RollingUpdateJob } from "@/types/api";
 import { useRollingUpdateNodes } from "../api/rolling-update-queries";
+import { startJobSteps } from "../lib/start-steps";
 
 /** A Start or Cancel waiting on its confirmation. */
 export interface PendingJobAction {
   kind: "start" | "cancel";
   job: RollingUpdateJob;
-}
-
-/**
- * What Start sets going, in the order the orchestrator does it
- * (internal/rolling/orchestrator.go processJob, finishUpgrade and
- * reboot_policy.go decideReboot).
- */
-function startSteps(job: RollingUpdateJob, t: TFunction<"security">): string {
-  const steps = [
-    job.parallelism > 1
-      ? t("startJobOrderMany", { count: job.parallelism })
-      : t("startJobOrderOne"),
-    job.drain_guests
-      ? `${t("startJobDrain")} ${t("startJobHARules")}`
-      : t("startJobInPlace"),
-    job.auto_upgrade ? t("startJobUpgradeSSH") : t("startJobUpgradeManual"),
-  ];
-  if (!job.drain_guests) {
-    steps.push(
-      job.reboot_after_update
-        ? t("startJobRebootInPlace")
-        : // Only the SSH path reads /var/run/reboot-required; a confirmed
-          // manual upgrade goes straight on (ConfirmUpgrade).
-          job.auto_upgrade
-          ? t("startJobRebootInPlaceNever")
-          : t("startJobRebootNever"),
-    );
-  } else if (job.reboot_after_update) {
-    steps.push(t("startJobRebootAlways"));
-  } else {
-    // An automated upgrade reboots when /var/run/reboot-required asks; a
-    // manual one never does.
-    steps.push(
-      job.auto_upgrade ? t("startJobRebootIfAsked") : t("startJobRebootNever"),
-    );
-  }
-  steps.push(t("startJobHealth"));
-  if (job.drain_guests && job.auto_restore_guests)
-    steps.push(t("startJobRestore"));
-  steps.push(t("startJobPauses"));
-  return steps.join(" ");
 }
 
 /** The confirmation a rolling update's Start and Cancel go through. */
@@ -89,7 +48,7 @@ export function RollingUpdateJobConfirm({
           ? a.job.status === "pending"
             ? t("cancelJobPending")
             : t("cancelJobActive")
-          : `${nodes.isError ? `${t("startJobNodesUnread")} ` : ""}${startSteps(a.job, t)}`
+          : `${nodes.isError ? `${t("startJobNodesUnread")} ` : ""}${startJobSteps(a.job, t)}`
       }
       confirmLabel={(a) =>
         a.kind === "cancel" ? t("cancelJob") : t("startJob")

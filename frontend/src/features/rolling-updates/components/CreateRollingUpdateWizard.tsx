@@ -37,6 +37,7 @@ import {
   usePreflightHA,
   useSSHConfigured,
 } from "../api/rolling-update-queries";
+import { startJobSteps } from "../lib/start-steps";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
 import type {
   HAConflict,
@@ -610,6 +611,24 @@ export function CreateRollingUpdateWizard({
               {selectedNodes.length > 1 ? "s" : ""} in order:{" "}
               {selectedNodes.join(" → ")}
             </p>
+
+            {/* What "Create & Start" sets going: the Start confirmation's own
+                text, since this button starts the job without that dialog. */}
+            {startImmediately && (
+              <p className="text-sm">
+                {startJobSteps(
+                  {
+                    parallelism: effectiveParallelism,
+                    // The wizard always drains (the create's default).
+                    drain_guests: true,
+                    auto_upgrade: effectiveAutoUpgrade,
+                    reboot_after_update: rebootAfterUpdate,
+                    auto_restore_guests: autoRestoreGuests,
+                  },
+                  t,
+                )}
+              </p>
+            )}
 
             <div className="flex justify-between">
               <Button
