@@ -1181,6 +1181,14 @@ func createVMParams() apischema.Properties {
 		"ipconfig0":    optString(512, "<ipconfig>", "Cloud-init network config for net0."),
 		"nameserver":   optString(512, "<addresses>", "Cloud-init DNS servers."),
 		"searchdomain": optString(512, "<domains>", "Cloud-init DNS search domains."),
+		// qemu-server's own enum for citype (PVE/QemuServer.pm $confdesc_cloudinit).
+		"citype": {
+			Type:        apischema.String,
+			Optional:    true,
+			Enum:        []string{"configdrive2", "nocloud", "opennebula"},
+			Typetext:    "<configdrive2|nocloud|opennebula>",
+			Description: "Cloud-init configuration format. Omitted lets Proxmox choose by ostype.",
+		},
 
 		// Metadata.
 		"description": optString(8192, "<string>", "Free-text note stored on the VM."),
@@ -1194,8 +1202,9 @@ func createVMParams() apischema.Properties {
 			Description: "Additional Proxmox config keys as a flat object of string values — " +
 				"further disks (scsi1, sata0, virtio0), CD-ROM slots and anything else this schema does not name. " +
 				"A key a typed parameter of this route sets (start, vmid, name, pool, …) is refused with 400: " +
-				"use the typed parameter. An archive key makes the create a restore, which also requires " +
-				"manage:backup and is recorded as one; force also requires delete:vm, and live-restore execute:vm.",
+				"use the typed parameter. Restore options (archive, force, unique, live-restore) are refused with " +
+				"400 too: a restore goes through POST /api/v1/clusters/:cluster_id/restore and a live import " +
+				"through the import route.",
 		},
 	}
 }

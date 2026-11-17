@@ -673,6 +673,9 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 	if err != nil {
 		return err
 	}
+	if err := refuseExtraRestoreKeys(extra, true); err != nil {
+		return err
+	}
 
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
@@ -683,10 +686,6 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 		if err := requireGuestPowerPerm(c, "container", clusterID, "Starting the container once it is created"); err != nil {
 			return err
 		}
-	}
-	restore, err := requireExtraRestorePerm(c, extra, true, clusterID)
-	if err != nil {
-		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -728,7 +727,7 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 		Action:       "create",
 		UPID:         upid,
 		Description:  "create CT " + strconv.Itoa(vmid),
-		Extra:        createDetails(vmid, restore, p.String("ostemplate"), extra),
+		Extra:        map[string]any{"vmid": vmid},
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "container", strconv.Itoa(vmid), "create")
 

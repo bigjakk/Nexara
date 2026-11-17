@@ -178,11 +178,11 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	p.CPUType = args["cpu"]
 	p.Boot = args["boot"]
 
-	// Forward remaining create-args verbatim (smbios1, vga, numa, ...). Disk and NIC
-	// slots are handled below from the dedicated maps, so skip anything that looks like one.
-	// An owned key outside `mapped` is dropped rather than sent through Extra,
-	// which CreateVM refuses: PVE's import metadata does not produce one (ESXi
-	// get_create_args, OVF.pm), and one would have overridden the typed field.
+	// Forward the create-args CreateVM has no typed field for verbatim (smbios1,
+	// serialN). Disk and NIC slots are handled below from the dedicated maps, so skip
+	// anything that looks like one. Any other key a typed field owns is dropped, as
+	// CreateVM refuses it in Extra: PVE's import metadata produces none beyond
+	// `mapped` (ESXiPlugin get_create_args, OVF.pm).
 	for k, v := range args {
 		if mapped[k] || v == "" || isGuestSlotKey(k) || vmCreateOwnedKeys[k] {
 			continue

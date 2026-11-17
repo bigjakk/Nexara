@@ -1210,19 +1210,18 @@ asked of Proxmox.
 **A create's `extra` cannot stand in for its typed parameters.** A key in
 `extra` that a typed parameter of the same create sets (`start`, `vmid`,
 `name`/`hostname`, `pool`, `ostemplate`, `password`, …) is refused with `400`
-naming it: use the typed parameter. An `extra` that makes the create a restore
-(`archive` on a VM, `restore` other than `0` on a container) also needs
-`manage:backup` on the cluster, as the restore route does, and the task and audit
-entry record `restore`, the `archive` volume and `force`. A VM's `live-restore`
-in `extra` starts it, so it needs `execute:vm`.
+naming it: use the typed parameter. Restore options are not accepted on a create
+either: `archive`, `force`, `unique` and `live-restore` on a VM, `restore`,
+`force` and `unique` on a container, whatever their value, answer `400`. A
+restore goes through `POST /clusters/:id/restore` and a live import through the
+import route.
 
-**Overwriting a guest needs `delete` on its kind.** A `force` restore, and a
-create whose `extra` object carries a `force` key, replace the guest at that VMID
-as deleting it would, so they need what its delete route needs: `delete:vm` for
-a VM, `delete:container` for a container, on the cluster, whether or not a guest
-holds the VMID. Proxmox itself would accept `VM.Backup` there; Nexara does not.
-Without it the answer is `403` naming the permission, and nothing is asked of
-Proxmox.
+**Restoring over a guest needs `delete` on its kind.** A `force` restore
+replaces the guest at that VMID as deleting it would, so it needs what its
+delete route needs: `delete:vm` for a VM, `delete:container` for a container, on
+the cluster, whether or not a guest holds the VMID. Proxmox itself would accept
+`VM.Backup` there; Nexara does not. Without it the answer is `403` naming the
+permission, and nothing is asked of Proxmox.
 
 | Method | Path | Description |
 |--------|------|-------------|

@@ -1375,6 +1375,9 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseExtraRestoreKeys(extra, false); err != nil {
+		return err
+	}
 
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
@@ -1385,10 +1388,6 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 		if err := requireGuestPowerPerm(c, "vm", clusterID, "Starting the VM once it is created"); err != nil {
 			return err
 		}
-	}
-	restore, err := requireExtraRestorePerm(c, extra, false, clusterID)
-	if err != nil {
-		return err
 	}
 
 	pxClient, err := h.createProxmoxClient(c, clusterID)
@@ -1434,6 +1433,7 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 		CIPassword:   p.String("cipassword"),
 		SSHKeys:      p.String("sshkeys"),
 		IPConfig0:    p.String("ipconfig0"),
+		CIType:       p.String("citype"),
 		Nameserver:   p.String("nameserver"),
 		Searchdomain: p.String("searchdomain"),
 		// Meta
@@ -1456,7 +1456,7 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 		Action:       "create",
 		UPID:         upid,
 		Description:  "create VM " + strconv.Itoa(vmid),
-		Extra:        createDetails(vmid, restore, extra["archive"], extra),
+		Extra:        map[string]any{"vmid": vmid},
 	})
 	h.eventPub.ClusterEvent(c.Context(), clusterID.String(), events.KindInventoryChange, "vm", strconv.Itoa(vmid), "create")
 
