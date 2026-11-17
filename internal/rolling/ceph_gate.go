@@ -18,8 +18,8 @@ import (
 const cephWaitLimit = 30 * time.Minute
 
 // cephPresent reads the cluster's Ceph status for a job that has a Ceph option
-// on, and decides once per job whether the cluster runs Ceph: the first answer
-// is remembered in ceph_present, and a cluster remembered without Ceph is never
+// on, and decides once per job whether the cluster runs Ceph: the first answer,
+// the create's (DetectCeph) or else the engine's own, is remembered in ceph_present, and a cluster remembered without Ceph is never
 // read again, so it pays one status read per job and logs nothing. A cluster
 // that gains Ceph mid-job is not waited for. One remembered with Ceph that then
 // answers "not configured" reads as could-not-look: its nodes keep waiting until
@@ -43,6 +43,20 @@ func (o *Orchestrator) cephPresent(ctx context.Context, client *proxmox.Client, 
 		o.remember(ctx, job, true)
 	}
 	return true, status, nil
+}
+
+// DetectCeph is the create's look at whether the cluster runs Ceph, which the
+// job then keeps (ceph_present): valid when Proxmox answered either way, NULL
+// when the read failed, for the engine to decide on its first look.
+func DetectCeph(ctx context.Context, client *proxmox.Client) pgtype.Bool {
+	_, err := client.GetClusterCephStatus(ctx)
+	switch {
+	case err == nil:
+		return pgtype.Bool{Bool: true, Valid: true}
+	case proxmox.IsCephNotConfigured(err):
+		return pgtype.Bool{Bool: false, Valid: true}
+	}
+	return pgtype.Bool{}
 }
 
 func (o *Orchestrator) remember(ctx context.Context, job *db.RollingUpdateJob, present bool) {

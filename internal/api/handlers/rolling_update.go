@@ -413,6 +413,14 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 		notifyChannelID = pgtype.UUID{Bytes: parsed, Valid: true}
 	}
 
+	// Whether the cluster runs Ceph, for the job's Start text and its gates;
+	// not read when both Ceph options are off.
+	cephWait, cephNoout := p.Bool("ceph_wait"), p.Bool("ceph_noout")
+	var cephPresent pgtype.Bool
+	if clientErr == nil && (cephWait || cephNoout) {
+		cephPresent = rolling.DetectCeph(c.Context(), client)
+	}
+
 	job, err := h.queries.InsertRollingUpdateJob(c.Context(), db.InsertRollingUpdateJobParams{
 		ClusterID:         clusterID,
 		Parallelism:       parallelism,
@@ -423,8 +431,9 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 		HaWarnings:        haWarningsJSON,
 		AutoUpgrade:       autoUpgrade,
 		DrainGuests:       drainGuests,
-		CephWait:          p.Bool("ceph_wait"),
-		CephNoout:         p.Bool("ceph_noout"),
+		CephWait:          cephWait,
+		CephNoout:         cephNoout,
+		CephPresent:       cephPresent,
 		CreatedBy:         userID,
 		NotifyChannelID:   notifyChannelID,
 	})
