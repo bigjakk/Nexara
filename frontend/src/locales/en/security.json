@@ -58,6 +58,7 @@
   "nooutState": {
     "off": "noout off",
     "pending": "noout not set yet",
+    "not_set": "noout not set",
     "held": "noout held",
     "held_after_end": "noout still set, being cleared",
     "already_set": "noout set before the job, left alone",

@@ -200,3 +200,29 @@ describe("RollingUpdateProgress — waiting for Ceph", () => {
     expect(screen.getByText("waits, noout held")).toBeInTheDocument();
   });
 });
+
+describe("RollingUpdateProgress — the Ceph fact of an ended job", () => {
+  // A job that ended before it knew about Ceph says nothing of it, and one that
+  // never set noout says so in the past, not "not set yet".
+  it.each([
+    { ceph_present: null, want: null },
+    { ceph_present: true, want: "waits, noout not set" },
+  ])(
+    "ceph_present $ceph_present shows $want",
+    async ({ ceph_present, want }) => {
+      stubApi({
+        [JOB_PATH]: { ...JOB, status: "completed", ceph_present },
+        [`${JOB_PATH}/nodes`]: listOf([]),
+      });
+      renderWithProviders(
+        <RollingUpdateProgress clusterId="c1" jobId="j1" canManage />,
+      );
+    await screen.findAllByText("Nodes");
+      if (want === null) {
+        expect(screen.queryByText("Ceph")).not.toBeInTheDocument();
+      } else {
+        expect(screen.getByText(want)).toBeInTheDocument();
+      }
+    },
+  );
+});

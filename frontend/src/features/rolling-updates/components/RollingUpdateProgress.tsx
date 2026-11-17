@@ -417,12 +417,18 @@ function HAWarningsPanel({
 }
 
 /** The job's two Ceph options and what became of noout, in a few words. */
+function jobEnded(job: RollingUpdateJob): boolean {
+  return ["completed", "failed", "cancelled"].includes(job.status);
+}
+
 function cephSummary(job: RollingUpdateJob, t: TFunction<"security">): string {
-  const ended = ["completed", "failed", "cancelled"].includes(job.status);
+  const ended = jobEnded(job);
   const noout = !job.ceph_noout
     ? t("nooutState.off")
     : job.ceph_noout_state === ""
-      ? t("nooutState.pending")
+      ? ended
+        ? t("nooutState.not_set")
+        : t("nooutState.pending")
       : ended && job.ceph_noout_state === "held"
         ? t("nooutState.held_after_end")
         : t(`nooutState.${job.ceph_noout_state}`);
@@ -520,8 +526,12 @@ export function RollingUpdateProgress({
             </Fact>
             <Fact label="At a time">{String(job.parallelism)}</Fact>
             <Fact label="Reboot">{job.reboot_after_update ? "yes" : "no"}</Fact>
-            {/* Null is a cluster Proxmox has not answered for yet. */}
-            {job.ceph_present !== false && (
+            {/* Null is a cluster Proxmox has not answered for yet: still
+                possibly Ceph while the job may run, never for one that ended
+                (or ended before the job knew about Ceph). */}
+            {(jobEnded(job)
+              ? job.ceph_present === true
+              : job.ceph_present !== false) && (
               <Fact label={t("cephFact")}>{cephSummary(job, t)}</Fact>
             )}
             <Fact label="Created">
