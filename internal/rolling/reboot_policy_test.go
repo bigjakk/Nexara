@@ -121,3 +121,38 @@ func TestRebootOwed(t *testing.T) {
 		})
 	}
 }
+
+// A Proxmox kernel's postinst never writes /var/run/reboot-required, so a
+// kernel among the node's recorded updates is what says a reboot is owed. A
+// series package the automated upgrade holds is not installed; a new build is
+// never held, and a manual upgrade ignores the excludes.
+func TestUpgradeInstallsKernel(t *testing.T) {
+	t.Parallel()
+	const series = `{"Package":"proxmox-kernel-6.17","OldVersion":"6.17.2-1","Version":"6.17.2-2"}`
+	auto := db.RollingUpdateJob{AutoUpgrade: true, PackageExcludes: []string{"proxmox-kernel-6.17", "proxmox-kernel-6.17.2-2-pve-signed"}}
+	tests := []struct {
+		name string
+		job  db.RollingUpdateJob
+		pkgs string
+		want bool
+	}{
+		{"nothing recorded", db.RollingUpdateJob{}, "", false},
+		{"userland only", db.RollingUpdateJob{}, `[{"Package":"pve-manager","OldVersion":"9.0.1"}]`, false},
+		{"series package upgraded", db.RollingUpdateJob{}, `[` + series + `]`, true},
+		{"new build pulled in", db.RollingUpdateJob{}, `[{"Package":"proxmox-kernel-6.17.2-2-pve-signed"}]`, true},
+		{"Debian kernel", db.RollingUpdateJob{}, `[{"Package":"linux-image-amd64","OldVersion":"6.1.1"}]`, true},
+		{"the boot tool is no kernel", db.RollingUpdateJob{}, `[{"Package":"proxmox-kernel-helper","OldVersion":"9.0.1"}]`, false},
+		{"series held by the automated upgrade", auto, `[` + series + `]`, false},
+		{"excluded, but a manual upgrade", db.RollingUpdateJob{PackageExcludes: auto.PackageExcludes}, `[` + series + `]`, true},
+		{"excluded new build is not held", auto, `[{"Package":"proxmox-kernel-6.17.2-2-pve-signed"}]`, true},
+		{"unreadable list", db.RollingUpdateJob{}, `{`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := upgradeInstallsKernel(tt.job, []byte(tt.pkgs)); got != tt.want {
+				t.Errorf("upgradeInstallsKernel(%s) = %v, want %v", tt.pkgs, got, tt.want)
+			}
+		})
+	}
+}

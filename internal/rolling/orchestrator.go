@@ -1264,8 +1264,13 @@ func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJo
 		return
 	}
 
-	// Check if a reboot is actually required (kernel update, etc.).
+	// Check if a reboot is actually required: a kernel was installed, or a
+	// package asked for one.
 	needsReboot := job.RebootAfterUpdate
+	if !needsReboot && upgradeInstallsKernel(job, node.PackagesJson) {
+		o.logger.Info("reboot required after upgrade: it installed a kernel", "node", node.NodeName)
+		needsReboot = true
+	}
 	if !needsReboot {
 		rebootCheck, rebootErr := sshpkg.Execute(ctx, sshCfg, rebootCheckCommand)
 		var stdout string
@@ -1280,7 +1285,7 @@ func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJo
 				"node", node.NodeName, "error", rebootErr)
 		}
 		if rebootOwed(stdout, rebootErr) {
-			o.logger.Info("reboot required after upgrade (kernel/critical update detected, or the check failed)", "node", node.NodeName)
+			o.logger.Info("reboot required after upgrade (the node asked for one, or the check failed)", "node", node.NodeName)
 			needsReboot = true
 		}
 	}
@@ -1624,8 +1629,11 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 		return err
 	}
 
+	// A kernel the operator installed by hand is owed a reboot as one the
+	// automated upgrade installed is; decideReboot says when it is taken.
+	reboot := job.RebootAfterUpdate || upgradeInstallsKernel(job, node.PackagesJson)
 	var client *proxmox.Client
-	if job.RebootAfterUpdate {
+	if reboot {
 		var err error
 		client, err = o.createClient(ctx, job.ClusterID)
 		if err != nil {
@@ -1669,7 +1677,7 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 		return errors.New("the node is no longer awaiting its upgrade, or its job is no longer running; nothing was confirmed")
 	}
 
-	if job.RebootAfterUpdate {
+	if reboot {
 		if err := client.RebootNode(ctx, node.NodeName); err != nil {
 			// Mark reboot started even on failure — the node might still reboot.
 			_ = o.queries.SetNodeRebootStarted(ctx, node.ID)

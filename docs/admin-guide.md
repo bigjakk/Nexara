@@ -1890,7 +1890,7 @@ Navigate to **Security > Rolling Updates** tab.
    - **Nodes** — select which nodes to update (or all)
    - **Parallelism (max nodes updated at once)** — default 1, set on the **Select Nodes** step because the pre-flight that follows checks capacity for that many nodes drained at once
    - **Conflict Policy** — offered on the **HA Constraint Check** step when the pre-flight finds conflicts: **Warn & Proceed** (continue despite the findings) or **Strict (fail on violation)**. With **Strict** selected you cannot move on to the configure step while the pre-flight report contains errors
-   - **Reboot after update** — on means always reboot. Off, an automated upgrade reboots only when the node asks for it, and a manual one never reboots
+   - **Reboot after update** — on means always reboot. Off, a node is rebooted only when a reboot is owed: its upgrade installs a kernel (a `proxmox-kernel-*`, `pve-kernel-*` or `linux-image-*` package, or `proxmox-default-kernel`, among the node's pending updates when its turn came), or, for an automated upgrade, the node has `/var/run/reboot-required` afterwards. A manual upgrade is judged by the same pending list when you click **Confirm Upgrade**. A kernel package the automated upgrade holds back does not count. An in-place job never reboots unless you asked for it; it marks the node **Reboot required** instead
    - **Auto-restore guests** — migrate drained guests back after the node returns healthy
    - **Automated upgrade (SSH)** — run `apt dist-upgrade` over SSH. On by default, and off and disabled while the cluster has no SSH credentials. `manage:rolling_update` is enough to see whether it has them, so a built-in Operator sees the switch as an administrator does. If the page cannot check, the switch is on and can be turned off, and the create is refused with *Auto upgrade requires SSH credentials to be configured for this cluster* if it has none. Each node's host key must be pinned: the create names any node without one, and before draining a node the job logs in to it as root, so a node the upgrade could not run on fails with nothing moved (see **Prerequisites**). With it off, the job pauses at each node in the **Awaiting Upgrade** step until you click **Confirm Upgrade**
    - **Package excludes** — packages the automated upgrade holds back, as exact names separated by commas; wildcards are refused. Each one installed on the node is put on hold with `apt-mark hold` for the upgrade and released after it, whether the upgrade worked or not, and a package already on hold before the job stays on hold. A held package keeps back any update that needs a newer version of it, and a node with nothing else pending is skipped rather than drained. To keep a node on its kernel, name both its kernel series package, such as `proxmox-kernel-6.17`, which brings each new build of that series, and `proxmox-default-kernel`, which moves the node to a newer series (`dpkg -l 'proxmox-kernel*'` on the node lists them). A manual upgrade ignores the list. The job's page marks a held-back package **Held back** in a node's package list and leaves it out of the count. An upgrade cut off between the hold and the release (Nexara restarted, the SSH session died) leaves its holds on, listed in `/var/lib/nexara-rolling-update-holds` on the node, and the node's next automated upgrade releases them before it starts
@@ -1907,7 +1907,7 @@ Each node goes through these steps:
 1. **Draining** — migrates guests off the node: VMs live, containers by restart. A guest with a PCI or USB device cannot migrate, so it is shut down where it is and started again afterwards
 2. **Awaiting Upgrade** — manual mode only; the job holds here until you click **Confirm Upgrade** for that node
 3. **Upgrading** — applies package updates (manual or automated)
-4. **Rebooting** — reboots the node if kernel updates were applied
+4. **Rebooting** — reboots the node when **Reboot after update** is on or a reboot is owed (see above)
 5. **Health Check** — waits for the node to come back online and healthy
 6. **Restoring** — migrates VMs back to the node
 
@@ -1934,7 +1934,7 @@ What it does differently from a cluster-wide rolling update:
 
 DRS and native CRS are paused for the cluster in both cases, and restored when the job ends.
 
-**Reboots are never taken under running guests.** If the upgrade needs one — any kernel update leaves `/var/run/reboot-required` behind — the node finishes as **Reboot required** instead of **Completed**, the completion notification names it, and you schedule the reboot yourself. The same applies when Nexara cannot confirm what is running on the node: it defers rather than guessing.
+**Reboots are never taken under running guests.** If the upgrade needs one — it installed a kernel, or left `/var/run/reboot-required` behind — the node finishes as **Reboot required** instead of **Completed**, the completion notification names it, and you schedule the reboot yourself. The same applies when Nexara cannot confirm what is running on the node: it defers rather than guessing.
 
 The cluster-wide wizard does not offer this mode; it is reached from the node page.
 
@@ -1947,7 +1947,7 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 - **Resume** — continue a paused job
 - **Cancel** — abort the job, after a confirmation that says what it leaves behind. Nodes already updated stay updated and guests already migrated are not moved back; a drain or a restore under way stops after the guest it is moving, an upgrade already running finishes without the reboot, and a node waiting for **Confirm Upgrade** stays there. A cancelled job cannot be resumed or started again
 - **Skip** — skip a node that has not started yet; a node already under way cannot be skipped
-- **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, this reboots it. Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting Upgrade** stays there
+- **Confirm Upgrade** — in manual mode, confirm that you've completed the upgrade on a node; with **Reboot after update** on, or a kernel among the node's pending updates, this reboots it (an in-place job marks it **Reboot required** instead). Only a running job's node can be confirmed: resume a paused job first, and a node a failed or cancelled job left in **Awaiting Upgrade** stays there
 
 ### HA-Aware Scheduling
 

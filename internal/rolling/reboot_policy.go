@@ -1,14 +1,69 @@
 package rolling
 
 import (
+	"encoding/json"
+	"slices"
 	"strings"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// rebootCheckCommand asks a node whether its upgrade left a reboot owed:
-// Debian and Proxmox create /var/run/reboot-required when one is.
+// rebootCheckCommand asks a node whether something it installed asked for a
+// reboot. Only a package hook that calls update-notifier's notify-reboot-required
+// writes /var/run/reboot-required, and Debian has not shipped update-notifier
+// since wheezy: a Proxmox kernel's postinst runs depmod and /etc/kernel/postinst.d
+// and never writes it. So the file is one signal, and upgradeInstallsKernel the
+// other.
 const rebootCheckCommand = "test -f /var/run/reboot-required && echo REBOOT_NEEDED || echo NO_REBOOT"
+
+// kernelPackagePrefixes name the packages that install a kernel: Proxmox's
+// series and build packages (proxmox-kernel-6.17, proxmox-kernel-6.17.2-1-pve-signed),
+// their PVE 7 names, and Debian's own.
+var kernelPackagePrefixes = []string{"proxmox-kernel-", "pve-kernel-", "linux-image-"}
+
+// notKernelSuffixes are the packages under those prefixes that install no
+// kernel: the boot tool, the libc headers, debug symbols and the signing template.
+var notKernelSuffixes = []string{"-helper", "-libc-dev", "-dbgsym", "-dbg", "-signed-template"}
+
+// isKernelPackage reports whether installing name installs a kernel.
+// proxmox-default-kernel moves the node to a newer series, so it counts.
+func isKernelPackage(name string) bool {
+	if name == "proxmox-default-kernel" {
+		return true
+	}
+	if !slices.ContainsFunc(kernelPackagePrefixes, func(p string) bool { return strings.HasPrefix(name, p) }) {
+		return false
+	}
+	return !slices.ContainsFunc(notKernelSuffixes, func(s string) bool { return strings.HasSuffix(name, s) })
+}
+
+// upgradeInstallsKernel reports whether the node's upgrade installs a kernel, read
+// from packagesJSON: the pending updates startNode recorded from Proxmox's apt
+// listing, which names both the series package being upgraded and the new build
+// it pulls in. It serves the automated and the manual path alike, and needs
+// nothing from the node. A package the automated upgrade holds back does not
+// count, but only one already installed: upgradeCommand holds nothing else.
+// A list that cannot be read is not a "no", as in rebootOwed.
+func upgradeInstallsKernel(job db.RollingUpdateJob, packagesJSON []byte) bool {
+	if len(packagesJSON) == 0 {
+		return false
+	}
+	var updates []proxmox.AptUpdate
+	if err := json.Unmarshal(packagesJSON, &updates); err != nil {
+		return true
+	}
+	for _, u := range updates {
+		if !isKernelPackage(u.Package) {
+			continue
+		}
+		if job.AutoUpgrade && u.OldVersion != "" && slices.Contains(job.PackageExcludes, u.Package) {
+			continue
+		}
+		return true
+	}
+	return false
+}
 
 // rebootOwed reads the answer to rebootCheckCommand: a reboot is owed unless
 // the node said NO_REBOOT. A check that could not run, or ran and gave no
@@ -71,9 +126,9 @@ func decideReboot(job db.RollingUpdateJob, violations []string, verifyErr error)
 	}
 
 	// An in-place job never reboots unless the operator asked for one. The
-	// caller may have raised needsReboot on its own from
-	// /var/run/reboot-required — which every kernel update leaves behind — and
-	// that is a reason to tell the operator a reboot is owed, not a licence to
+	// caller may have raised needsReboot on its own, because the upgrade
+	// installed a kernel or left /var/run/reboot-required behind, and that is
+	// a reason to tell the operator a reboot is owed, not a licence to
 	// take the node down under guests they chose to leave running. A node whose
 	// guests all happen to be stopped is still serving storage, Ceph OSDs and
 	// the operator's own SSH session.
