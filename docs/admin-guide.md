@@ -1896,7 +1896,7 @@ Navigate to **Security > Rolling Updates** tab.
    - **Package excludes** — packages the automated upgrade holds back, as exact names separated by commas; wildcards are refused. Each one installed on the node is put on hold with `apt-mark hold` for the upgrade and released after it, whether the upgrade worked or not, and a package already on hold before the job stays on hold. A held package keeps back any update that needs a newer version of it, and a node with nothing else pending is skipped rather than drained. To keep a node on its kernel, name both its kernel series package, such as `proxmox-kernel-6.17`, which brings each new build of that series, and `proxmox-default-kernel`, which moves the node to a newer series (`dpkg -l 'proxmox-kernel*'` on the node lists them). A manual upgrade ignores the list. An upgrade cut off between the hold and the release (Nexara restarted, the SSH session died) leaves its holds on, listed in `/var/lib/nexara-rolling-update-holds` on the node, and the node's next automated upgrade releases them before it starts
    - **Notify on completion/failure** — an existing notification channel to message when the job ends
    - **Start immediately** — begin right after creation instead of leaving the job idle
-3. Click **Create & Start**, or **Create Job** with **Start immediately** off
+3. Click **Create & Start**, which opens the job's page once the job has started, or **Create Job** with **Start immediately** off
 
 A cluster has one active job at a time, and any failed node fails the job; a node whose automated upgrade finishes after that is left upgraded and is not rebooted. A failed job is created again rather than resumed. A job waiting to be started counts as the active one, so a job not started within 24 hours of being created is cancelled automatically, with *Never started* as its reason.
 
@@ -1942,7 +1942,7 @@ The cluster-wide wizard does not offer this mode; it is reached from the node pa
 
 **View** opens a job's page. Its address names the job's cluster as well, so a reload or a pasted link opens the same job; an older link, which names no cluster, opens the job if it is on the first cluster and that cluster's jobs list otherwise.
 
-- **Start** — begin the rolling update. It asks first, naming how many nodes the job updates and what happens to each in turn
+- **Start** — begin the rolling update. It asks first, naming how many nodes the job updates and what happens to each in turn, and once the job has started opens its page
 - **Pause** — the node in flight finishes its current step and nothing advances until you resume. The pause of DRS and CRS, and any HA rules disabled for the job, stay in force meanwhile. A restore already under way stops after the guest it is moving and carries on from there once you resume. Resuming restarts the timeouts of the nodes in flight (1 hour in **Draining**, 60 minutes in **Upgrading**, 10 minutes in **Rebooting**, 30 minutes in **Restoring**), so the time spent paused does not count against them
 - **Resume** — continue a paused job
 - **Cancel** — abort the job, after a confirmation that says what it leaves behind. Nodes already updated stay updated and guests already migrated are not moved back; a drain or a restore under way stops after the guest it is moving, an upgrade already running finishes without the reboot, and a node waiting for **Confirm Upgrade** stays there. A cancelled job cannot be resumed or started again

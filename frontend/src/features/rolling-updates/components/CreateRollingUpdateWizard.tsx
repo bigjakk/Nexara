@@ -38,7 +38,11 @@ import {
   useSSHConfigured,
 } from "../api/rolling-update-queries";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
-import type { HAConflict, HAPreFlightReport } from "@/types/api";
+import type {
+  HAConflict,
+  HAPreFlightReport,
+  RollingUpdateJob,
+} from "@/types/api";
 import { describeError } from "@/lib/api-error";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { useTranslation } from "react-i18next";
@@ -47,6 +51,8 @@ interface CreateRollingUpdateWizardProps {
   clusterId: string;
   /** Named on every step, so the cluster the job acts on is never a guess. */
   clusterName?: string | undefined;
+  /** Called once a "Create & Start" job has started, to open its view. */
+  onStarted?: (job: RollingUpdateJob) => void;
 }
 
 function ConflictCard({ conflict }: { conflict: HAConflict }) {
@@ -78,6 +84,7 @@ function ConflictCard({ conflict }: { conflict: HAConflict }) {
 export function CreateRollingUpdateWizard({
   clusterId,
   clusterName,
+  onStarted,
 }: CreateRollingUpdateWizardProps) {
   const { t } = useTranslation("security");
   const [open, setOpen] = useState(false);
@@ -178,7 +185,14 @@ export function CreateRollingUpdateWizard({
       {
         onSuccess: (job) => {
           if (startImmediately) {
-            startJob.mutate({ clusterId, jobId: job.id });
+            startJob.mutate(
+              { clusterId, jobId: job.id },
+              {
+                onSuccess: () => {
+                  onStarted?.(job);
+                },
+              },
+            );
           }
           setOpen(false);
           reset();

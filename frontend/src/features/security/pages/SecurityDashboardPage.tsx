@@ -203,6 +203,7 @@ export function SecurityDashboardPage() {
                   clusterName={
                     clusters.find((c) => c.id === activeClusterId)?.name
                   }
+                  onStarted={setSelectedJob}
                 />
               )
             ) : (
@@ -335,7 +336,19 @@ export function SecurityDashboardPage() {
                 canManage={canManageRolling}
                 onSelect={setSelectedJob}
                 onStart={(jobId) => {
-                  startJob.mutate({ clusterId: activeClusterId, jobId });
+                  // A started job is watched from its own view, where the
+                  // node steps, Pause and Cancel are.
+                  startJob.mutate(
+                    { clusterId: activeClusterId, jobId },
+                    {
+                      onSuccess: (_job, vars) => {
+                        setSelectedJob({
+                          id: vars.jobId,
+                          cluster_id: vars.clusterId,
+                        });
+                      },
+                    },
+                  );
                 }}
                 onCancel={(jobId) => {
                   cancelJob.mutate({ clusterId: activeClusterId, jobId });
