@@ -217,7 +217,7 @@ describe("RollingUpdateProgress — the Ceph fact of an ended job", () => {
       renderWithProviders(
         <RollingUpdateProgress clusterId="c1" jobId="j1" canManage />,
       );
-    await screen.findAllByText("Nodes");
+      await screen.findAllByText("Nodes");
       if (want === null) {
         expect(screen.queryByText("Ceph")).not.toBeInTheDocument();
       } else {

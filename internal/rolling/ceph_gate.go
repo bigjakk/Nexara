@@ -27,33 +27,45 @@ const cephWaitLimit = 30 * time.Minute
 // would pass a gate.
 const cephConfirmInterval = 10 * time.Second
 
+// cephConfirmMaxGap is the longest gap between readings that still continues
+// a run: about two ticks. A longer one (a restore, a pause) is time nobody
+// watched Ceph, so the next reading starts a new run.
+const cephConfirmMaxGap = 35 * time.Second
+
 // cephConfirmingReason is the wait reason while a gate waits only for the
 // confirming reading.
 const cephConfirmingReason = "Ceph reads clean; confirming on the next check"
 
-// cephConfirm keeps, in memory, when each job's run of clean readings began.
-// Lost on a restart or a leader change, which costs one more tick of waiting.
+// cephConfirm keeps, in memory, when each job's run of clean readings began
+// and when it was last read. Lost on a restart or a leader change, which costs
+// one more tick of waiting.
 type cephConfirm struct {
 	mu    sync.Mutex
 	now   func() time.Time
-	since map[uuid.UUID]time.Time
+	since map[uuid.UUID]cephRun
 }
+
+type cephRun struct{ first, last time.Time }
 
 func newCephConfirm(now func() time.Time) *cephConfirm {
-	return &cephConfirm{now: now, since: map[uuid.UUID]time.Time{}}
+	return &cephConfirm{now: now, since: map[uuid.UUID]cephRun{}}
 }
 
-// clean records a clean reading and reports whether the run began at least
-// cephConfirmInterval ago.
+// clean records a clean reading and reports whether its run began at least
+// cephConfirmInterval ago. A reading more than cephConfirmMaxGap after the
+// last one starts a new run.
 func (c *cephConfirm) clean(job uuid.UUID) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	first, ok := c.since[job]
-	if !ok {
-		c.since[job] = c.now()
+	now := c.now()
+	run, ok := c.since[job]
+	if !ok || now.Sub(run.last) > cephConfirmMaxGap {
+		c.since[job] = cephRun{first: now, last: now}
 		return false
 	}
-	return c.now().Sub(first) >= cephConfirmInterval
+	run.last = now
+	c.since[job] = run
+	return now.Sub(run.first) >= cephConfirmInterval
 }
 
 // reset ends a job's run: a reading not clean, one not taken, or a node going

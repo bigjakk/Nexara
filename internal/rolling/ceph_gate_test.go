@@ -80,7 +80,7 @@ func TestCephGate_APendingNodeWaitsForCleanCeph(t *testing.T) {
 				rowFor: map[string]any{"CountActiveNodes": struct{ N int64 }{tt.active}, "GetNextPendingNode": node},
 				accept: map[string]int64{"SetJobCephPresent": 1, "SetNodeCephWait": 1, "SetJobCephOSDBaseline": 1}}
 			o, client, _ := engineOn(t, d, cephStub(3, tt.pgs))
-			o.cephConfirm.since[job.ID] = time.Now().Add(-time.Minute) // A clean reading a tick ago.
+			o.cephConfirm.since[job.ID] = cephRun{time.Now().Add(-15 * time.Second), time.Now().Add(-15 * time.Second)} // A clean reading a tick ago.
 
 			o.startNextNode(context.Background(), client, job)
 
@@ -128,7 +128,7 @@ func TestCephGate_ANodeIsNotCalledHealthyUntilCephIsClean(t *testing.T) {
 			o, client, _ := engineOn(t, d, cephStub(tt.osdsUp, "active+clean=128"))
 			job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, Status: "running", CephWait: true,
 				CephPresent: pgtype.Bool{Bool: true, Valid: true}, CephOsdsBaseline: 3, AutoRestoreGuests: true, ResumedAt: tt.resumed}
-			o.cephConfirm.since[job.ID] = time.Now().Add(-time.Minute) // A clean reading a tick ago.
+			o.cephConfirm.since[job.ID] = cephRun{time.Now().Add(-15 * time.Second), time.Now().Add(-15 * time.Second)} // A clean reading a tick ago.
 			node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01", Step: "health_check",
 				GuestsJson: []byte(`[{"vmid":101,"type":"qemu"}]`), StoppedPassthroughJson: []byte(`[]`),
 				CephWaitStartedAt: tt.waitStarted}
@@ -188,13 +188,16 @@ func TestCephGate_PassesOnTwoCleanReadingsATickApart(t *testing.T) {
 	const clean, peering = "3/active+clean=97", "3/peering=97"
 	for _, tt := range []struct {
 		name     string
-		readings []string // "osdsUp/pgs", one a tick (15 s) apart
-		wantAt   int      // the reading the node is called healthy at; -1 never
+		readings []string        // "osdsUp/pgs", one a tick (15 s) apart unless gaps says
+		gaps     []time.Duration // the time before each reading after the first
+		wantAt   int             // the reading the node is called healthy at; -1 never
 	}{
-		{"a single clean reading", []string{clean}, -1},
-		{"a second clean reading a tick later", []string{clean, clean}, 1},
-		{"a not-clean reading in between", []string{clean, peering, clean}, -1},
-		{"stale", []string{"2/active+clean=97", clean, peering, clean, clean}, 4},
+		{"a single clean reading", []string{clean}, nil, -1},
+		{"a second clean reading a tick later", []string{clean, clean}, nil, 1},
+		{"a second clean reading a second later", []string{clean, clean}, []time.Duration{time.Second}, -1},
+		{"a clean reading after a long gap", []string{clean, clean, clean}, []time.Duration{5 * time.Minute, 15 * time.Second}, 2},
+		{"a not-clean reading in between", []string{clean, peering, clean}, nil, -1},
+		{"stale", []string{"2/active+clean=97", clean, peering, clean, clean}, nil, 4},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -216,12 +219,18 @@ func TestCephGate_PassesOnTwoCleanReadingsATickApart(t *testing.T) {
 				StoppedPassthroughJson: []byte(`[]`)}
 			at := -1
 			for i, r := range tt.readings {
+				if i > 0 {
+					gap := 15 * time.Second
+					if i-1 < len(tt.gaps) {
+						gap = tt.gaps[i-1]
+					}
+					now.Add(int64(gap))
+				}
 				reading.Store(r)
 				o.advanceNode(context.Background(), client, job, node)
 				if at < 0 && slices.Contains(d.writes, "SetNodeRestoreCompleted") {
 					at = i
 				}
-				now.Add(int64(15 * time.Second))
 			}
 			if at != tt.wantAt {
 				t.Errorf("called healthy at reading %d, want %d (wrote %v)", at, tt.wantAt, d.writes)
@@ -237,12 +246,26 @@ func TestCephGate_PassesOnTwoCleanReadingsATickApart(t *testing.T) {
 		job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, Status: "running", CephWait: true,
 			CephPresent: pgtype.Bool{Bool: true, Valid: true}}
 		node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01"}
-		o.cephConfirm.since[job.ID] = time.Now().Add(-time.Minute)
+		o.cephConfirm.since[job.ID] = cephRun{time.Now().Add(-15 * time.Second), time.Now().Add(-15 * time.Second)}
 		if !o.cephAllowsStart(context.Background(), client, &job, node) {
 			t.Fatal("a confirmed clean Ceph did not let the node start")
 		}
 		if o.cephAllowsHealthy(context.Background(), client, &job, node) {
 			t.Error("the health gate passed on the first reading after a node went down")
+		}
+	})
+
+	t.Run("the next node starts in the tick the gate passed", func(t *testing.T) {
+		t.Parallel()
+		cluster := uuid.New()
+		d := &memberDB{t: t, cluster: cluster, accept: map[string]int64{"SetJobCephOSDBaseline": 1}}
+		o, client, _ := engineOn(t, d, cephStub(3, "active+clean=97"))
+		job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, Status: "running", CephWait: true,
+			CephPresent: pgtype.Bool{Bool: true, Valid: true}}
+		node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01"}
+		o.cephConfirm.since[job.ID] = cephRun{time.Now().Add(-15 * time.Second), time.Now().Add(-15 * time.Second)}
+		if !o.cephAllowsHealthy(context.Background(), client, &job, node) || !o.cephAllowsStart(context.Background(), client, &job, node) {
+			t.Error("the health gate and the next start did not both pass in one tick")
 		}
 	})
 }
