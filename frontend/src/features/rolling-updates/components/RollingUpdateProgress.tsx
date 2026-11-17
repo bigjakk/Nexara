@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Loader2,
   Pause,
@@ -410,6 +411,7 @@ export function RollingUpdateProgress({
   jobId,
   canManage,
 }: RollingUpdateProgressProps) {
+  const { t } = useTranslation("security");
   const { data: job, isLoading: jobLoading } = useRollingUpdateJob(
     clusterId,
     jobId,
@@ -542,6 +544,10 @@ export function RollingUpdateProgress({
       />
 
       <div className="space-y-4">
+        {job.status === "paused" && (
+          <p className="text-sm text-muted-foreground">{t("jobPausedNote")}</p>
+        )}
+
         {job.failure_reason && (
           <Panel title="Why it failed">
             <p className="text-sm text-red-700 [overflow-wrap:anywhere] dark:text-red-400">
