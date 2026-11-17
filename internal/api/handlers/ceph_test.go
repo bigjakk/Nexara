@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -147,12 +146,10 @@ func TestCephOSDActionsCoverTheDisruptiveSet(t *testing.T) {
 	}
 }
 
-// cephNodesDBTX is pathParamDBTX with a node list of its own and the cluster
-// row GetCluster reads; anything else still fails.
+// cephNodesDBTX is pathParamDBTX with a node list of its own.
 type cephNodesDBTX struct {
 	pathParamDBTX
-	nodes   []db.Node
-	cluster db.Cluster
+	nodes []db.Node
 }
 
 func (d cephNodesDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -162,11 +159,15 @@ func (d cephNodesDBTX) Query(_ context.Context, sql string, _ ...any) (pgx.Rows,
 	return &nodeRows{rows: d.nodes}, nil
 }
 
-func (d cephNodesDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
-	if strings.Contains(sql, "-- name: GetCluster :one") {
-		return replayRow{row: d.cluster}
-	}
-	return failRow{err: errPathParamUnexpectedQuery}
+// cephCacheQueries is pathParamCacheQueries with the member endpoints the
+// cache fails over between.
+type cephCacheQueries struct {
+	pathParamCacheQueries
+	endpoints []db.ListNodeEndpointsRow
+}
+
+func (q cephCacheQueries) ListNodeEndpoints(context.Context, uuid.UUID) ([]db.ListNodeEndpointsRow, error) {
+	return q.endpoints, nil
 }
 
 // cephMember is a stand-in Proxmox node: it records each path asked of it and
@@ -188,9 +189,9 @@ func cephMember(t *testing.T, srv *httptest.Server, reply map[string]string) *pr
 	return capture
 }
 
-// cephReadApp mounts the Ceph routes these tests drive on a fresh app whose
-// client cache points every client at apiURL.
-func cephReadApp(t *testing.T, apiURL string, nodes []db.Node) (*fiber.App, uuid.UUID) {
+// cephReadApp mounts the Ceph routes these tests drive on a fresh app with a
+// fresh client cache for a cluster at apiURL.
+func cephReadApp(t *testing.T, apiURL string, nodes []db.Node, endpoints []db.ListNodeEndpointsRow) (*fiber.App, uuid.UUID) {
 	t.Helper()
 	encrypted, err := crypto.Encrypt("token-secret-value", pathParamEncKey)
 	if err != nil {
@@ -198,8 +199,9 @@ func cephReadApp(t *testing.T, apiURL string, nodes []db.Node) (*fiber.App, uuid
 	}
 	cluster := db.Cluster{ID: uuid.New(), Name: "cluster01", ApiUrl: apiURL,
 		TokenID: "user@pam!test", TokenSecretEncrypted: encrypted, IsActive: true}
-	cache := proxmox.NewClientCache(pathParamCacheQueries{cluster: cluster}, pathParamEncKey, nil, nil)
-	h := NewCephHandler(db.New(cephNodesDBTX{nodes: nodes, cluster: cluster}), pathParamEncKey, nil)
+	cache := proxmox.NewClientCache(cephCacheQueries{pathParamCacheQueries{cluster: cluster}, endpoints},
+		pathParamEncKey, nil, nil)
+	h := NewCephHandler(db.New(cephNodesDBTX{nodes: nodes}), pathParamEncKey, nil)
 
 	clusterOnly := apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")}
 	app := fiber.New()
@@ -228,16 +230,18 @@ const cephStatusFixture = `{"health":{"status":"HEALTH_WARN"},"monmap":{"num_mon
 	"pgmap":{"num_pgs":97,"pgs_by_state":[{"state_name":"active+undersized+degraded","count":16},
 	{"state_name":"active+clean","count":81}]}}`
 
-// D5: the node behind the cluster's api_url reboots. Reads must carry on through
-// another member — directly at its own address and pinned certificate, since
-// the endpoint itself is gone — and a write must not be re-sent anywhere.
+// D5: the node behind the cluster's api_url reboots while the database still
+// calls it online. A read that finds the endpoint gone takes the client from
+// the cache once more, which now points at the member the cache chose, and a
+// write is not re-sent anywhere. Each row gets a fresh cache.
 func TestCephReadsSurviveTheEndpointNodeGoingDown(t *testing.T) {
 	t.Parallel()
-	// The member listens on 127.0.0.2; the endpoint is 127.0.0.3 on the same
-	// port, where nothing listens, so every connection to it is refused.
-	ln, err := net.Listen("tcp", "127.0.0.2:0")
+	// The cache fails over only for an api_url on pveproxy's port, so the
+	// member listens on 127.0.0.2:8006 and the endpoint is 127.0.0.3:8006,
+	// where nothing listens.
+	ln, err := net.Listen("tcp", "127.0.0.2:8006")
 	if err != nil {
-		t.Skipf("no 127.0.0.2 loopback alias: %v", err)
+		t.Skipf("cannot listen on 127.0.0.2:8006: %v", err)
 	}
 	srv := httptest.NewUnstartedServer(nil)
 	_ = srv.Listener.Close()
@@ -248,39 +252,38 @@ func TestCephReadsSurviveTheEndpointNodeGoingDown(t *testing.T) {
 	})
 	srv.StartTLS()
 	sum := sha256.Sum256(srv.Certificate().Raw)
-	port := ln.Addr().(*net.TCPAddr).Port
-
-	app, clusterID := cephReadApp(t, fmt.Sprintf("https://127.0.0.3:%d", port), []db.Node{
-		{Name: "pve-01", Status: "online", Address: "127.0.0.3", SslFingerprint: strings.Repeat("AA", 32)},
-		{Name: "pve-02", Status: "online", Address: "127.0.0.2", SslFingerprint: hex.EncodeToString(sum[:])},
-	})
-	base := "/api/v1/clusters/" + clusterID.String() + "/ceph"
+	nodes := []db.Node{{Name: "pve-01", Status: "online"}, {Name: "pve-02", Status: "online"}}
+	endpoints := []db.ListNodeEndpointsRow{
+		{Name: "pve-01", Address: "127.0.0.3", SslFingerprint: strings.Repeat("AA", 32), Status: "online"},
+		{Name: "pve-02", Address: "127.0.0.2", SslFingerprint: hex.EncodeToString(sum[:]), Status: "online"},
+	}
 
 	for _, tt := range []struct {
-		method, target, wantPath string
-		wantStatus               int
-		wantBody                 string // D9: the PG states reach the answer as Proxmox gave them
+		method, route string
+		wantPaths     []string
+		wantStatus    int
+		wantBody      string // D9: the PG states reach the answer as Proxmox gave them
 	}{
-		{http.MethodGet, base + "/status", "/api2/json/cluster/ceph/status", http.StatusOK,
+		{http.MethodGet, "/status", []string{"/api2/json/cluster/ceph/status"}, http.StatusOK,
 			`"num_pgs":97,"pgs_by_state":[{"state_name":"active+undersized+degraded","count":16},` +
 				`{"state_name":"active+clean","count":81}]`},
-		{http.MethodGet, base + "/osds", "/api2/json/nodes/pve-02/ceph/osd", http.StatusOK, ""},
-		{http.MethodDelete, base + "/pools/store01", "", http.StatusBadGateway, ""},
+		// Through the member, pve-01 is a node it cannot forward to (595).
+		{http.MethodGet, "/osds", []string{"/api2/json/nodes/pve-01/ceph/osd", "/api2/json/nodes/pve-02/ceph/osd"},
+			http.StatusOK, ""},
+		{http.MethodDelete, "/pools/store01", nil, http.StatusBadGateway, ""},
 	} {
+		app, clusterID := cephReadApp(t, "https://127.0.0.3:8006", nodes, endpoints)
+		target := "/api/v1/clusters/" + clusterID.String() + "/ceph" + tt.route
 		member.reset()
-		status, body := cephCall(t, app, tt.method, tt.target)
+		status, body := cephCall(t, app, tt.method, target)
 		if status != tt.wantStatus {
-			t.Errorf("%s %s = %d %s, want %d", tt.method, tt.target, status, body, tt.wantStatus)
+			t.Errorf("%s %s = %d %s, want %d", tt.method, tt.route, status, body, tt.wantStatus)
 		}
 		if !strings.Contains(body, tt.wantBody) {
-			t.Errorf("%s %s answered %s, want it to hold %s", tt.method, tt.target, body, tt.wantBody)
+			t.Errorf("%s %s answered %s, want it to hold %s", tt.method, tt.route, body, tt.wantBody)
 		}
-		var want []string
-		if tt.wantPath != "" {
-			want = []string{tt.wantPath}
-		}
-		if got := member.seen(); !slices.Equal(got, want) {
-			t.Errorf("%s %s: the other member was asked %q, want %q", tt.method, tt.target, got, want)
+		if got := member.seen(); !slices.Equal(got, tt.wantPaths) {
+			t.Errorf("%s %s: the member was asked %q, want %q", tt.method, tt.route, got, tt.wantPaths)
 		}
 	}
 }
@@ -296,7 +299,7 @@ func TestCephReadMovesOnFromANodeTheEndpointCannotReach(t *testing.T) {
 	srv.Start()
 	app, clusterID := cephReadApp(t, srv.URL, []db.Node{
 		{Name: "pve-01", Status: "online"}, {Name: "pve-02", Status: "online"},
-	})
+	}, nil)
 
 	status, body := cephCall(t, app, http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/ceph/osds")
 	if status != http.StatusOK {

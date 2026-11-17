@@ -134,8 +134,8 @@ func (h *CephHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	// The cluster-level route, so the answer does not hang on the node the
-	// database picked; cephRead moves on to another member if the endpoint is
-	// down.
+	// database picked; if the endpoint is gone, cephRead asks again through the
+	// client the cache rebuilds.
 	status, err := cephRead(h, c, clusterID, func(px *proxmox.Client, ctx context.Context, _ string) (*proxmox.CephStatus, error) {
 		return px.GetClusterCephStatus(ctx)
 	})

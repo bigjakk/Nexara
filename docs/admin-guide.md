@@ -104,6 +104,10 @@ Removing a cluster leaves its audit entries untouched, so it takes no longer for
 
 Click a cluster in the inventory tree. Its tabs are **Overview**, **VMs**, **Storage**, **Backup**, **Ceph**, **Configure** and **History**. **Configure** lists the cluster's settings beside the one open (a drop-down on a narrow screen), in four groups: **Options**, **Resource pools**, **Resource mappings**, **Guest tools** and **Metric servers**; **High availability**, **DRS** and **Replication**; **Networks** and **Firewall**; **Access control** and **Certificates**. It opens on the setting last shown, **Options** at first. Each is covered in its own section below.
 
+### When the Node Behind the API URL Is Down
+
+When a request cannot connect to the cluster's API URL at all (refused, no route, timed out connecting), Nexara stops using that address for a minute and sends the cluster's next requests to another node: the first that is online and has a certificate fingerprint on record, pinned to that fingerprint. The request that found the address gone still fails; the ones after it go through. A node Nexara switched to that cannot be reached either is passed over the same way. After the minute, the choice follows the node states the collector has recorded, which by then show a rebooting node offline. An answer of any kind, an error status or a certificate that does not match its pin, is not treated as the node being down. Nothing changes when the API URL is a VIP, a load balancer or anything other than a node on port 8006, or when no other node has a fingerprint on record. The collector does the same on its own, and audits it as `cluster_endpoint_failover`.
+
 ### When a Node's Certificate Changes
 
 Nexara pins a self-signed certificate's fingerprint, and a Proxmox upgrade can regenerate the certificate. Live calls to that address then fail the TLS handshake while the collector fails over to another node, so inventory and metrics keep flowing and the only symptom is tabs that render empty or answer 502. The health pill says **TLS certificate changed**, and the cluster's page shows a banner.
@@ -1078,7 +1082,7 @@ A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change a
 
 **Before a daemon stops or an OSD goes out,** Nexara shows the hosts serving data, the OSDs up and in, and each pool's redundancy, and warns *Redundancy will be reduced* or *This can stall guest I/O*, in which case the button reads "… anyway". This assumes host-level failure domains. It advises and never blocks, and reads **Safety check unavailable** when it cannot be worked out.
 
-**While a node is down,** the tab keeps reading through the others. A read that cannot reach the node it asked is asked once more of each other node, and when the node behind the cluster's API URL is the one down, the others are asked at their own addresses with their own pinned certificates (a node with none recorded is skipped). Changes are never retried: a pool or OSD action that cannot reach its node fails and says so.
+**While a node is down,** the tab keeps reading through the others. A read that the cluster's API address cannot pass on to the node it asked is asked once more of each other node. When the node behind the API URL is the one down, a read that finds it gone is repeated once through the node Nexara switches to (see [When the Node Behind the API URL Is Down](#when-the-node-behind-the-api-url-is-down)). Changes are never retried: a pool or OSD action that cannot reach its node fails and says so.
 
 Creating or destroying an OSD and creating a CephFS are not offered.
 
