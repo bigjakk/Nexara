@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
@@ -316,5 +319,16 @@ func TestOrchestrator_WaitForGuestUnlocked_ConfirmsTarget(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("waitForGuestUnlocked did not settle within 20s")
+	}
+}
+
+// The job's notification says which cluster as every other sender does: the
+// id in cluster_id, the name in resource_name. It carried the name in both.
+func TestJobNotificationPayload_ClusterIDIsTheID(t *testing.T) {
+	t.Parallel()
+	job := db.RollingUpdateJob{ClusterID: uuid.New()}
+	p := jobNotificationPayload(job, "cluster01", "failed", "node pve-01 failed")
+	if p.ClusterID != job.ClusterID.String() || p.ResourceName != "cluster01" || p.Severity != "critical" {
+		t.Errorf("payload = %+v, want cluster_id %s, resource_name cluster01, severity critical", p, job.ClusterID)
 	}
 }

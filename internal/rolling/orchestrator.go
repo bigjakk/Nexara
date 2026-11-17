@@ -2388,26 +2388,11 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 		return
 	}
 
-	severity := "info"
-	if status == "failed" {
-		severity = "critical"
-	}
-
 	clusterName := job.ClusterID.String()
 	if cluster, err := o.queries.GetCluster(ctx, job.ClusterID); err == nil {
 		clusterName = cluster.Name
 	}
-
-	payload := notifications.AlertPayload{
-		RuleName:     "Rolling Update",
-		Severity:     severity,
-		State:        status,
-		Metric:       "rolling_update",
-		ResourceName: clusterName,
-		ClusterID:    clusterName,
-		Message:      message,
-		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
-	}
+	payload := jobNotificationPayload(job, clusterName, status, message)
 
 	go func() {
 		// Derive from shutdownCtx so SIGTERM aborts the dispatch quickly;
@@ -2424,6 +2409,26 @@ func (o *Orchestrator) sendJobNotification(ctx context.Context, job db.RollingUp
 				"channel_id", channelID, "status", status)
 		}
 	}()
+}
+
+// jobNotificationPayload is the job's outcome as a notification. cluster_id
+// carries the cluster's id and resource_name its name, as the alert engine's
+// and the CVE notices' payloads do.
+func jobNotificationPayload(job db.RollingUpdateJob, clusterName, status, message string) notifications.AlertPayload {
+	severity := "info"
+	if status == "failed" {
+		severity = "critical"
+	}
+	return notifications.AlertPayload{
+		RuleName:     "Rolling Update",
+		Severity:     severity,
+		State:        status,
+		Metric:       "rolling_update",
+		ResourceName: clusterName,
+		ClusterID:    job.ClusterID.String(),
+		Message:      message,
+		FiredAt:      time.Now().UTC().Format(time.RFC3339Nano),
+	}
 }
 
 // triggerPostUpgradeCVEScan kicks off a CVE rescan in the background after a
