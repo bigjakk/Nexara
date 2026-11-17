@@ -69,7 +69,7 @@ func NewBootstrapClient(cfg BootstrapConfig) (*BootstrapClient, error) {
 		cfg.Timeout = 30 * time.Second
 	}
 
-	httpClient, tlsCfg := buildHTTPClient(cfg.TLSFingerprint, cfg.Timeout)
+	httpClient, tlsCfg := buildHTTPClient(cfg.TLSFingerprint, cfg.Timeout, 0)
 
 	return &BootstrapClient{
 		apiClient: &apiClient{

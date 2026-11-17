@@ -12,11 +12,13 @@ import (
 	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
-// cephReadAttemptTimeout bounds one attempt of a Ceph read. The cached client's
-// own bound is proxmox.CachedClientTimeout (five minutes), which a dial to a
-// member that went down without a reset would sit out before the next attempt.
-// Thirty seconds is what pveproxy itself gives a proxied request
-// (pve-http-server AnyEvent.pm, proxy_request: timeout => 30).
+// cephReadAttemptTimeout bounds one attempt of a Ceph read, in place of the
+// cached client's five-minute request bound. Thirty seconds is what pveproxy
+// itself gives a proxied request (pve-http-server AnyEvent.pm, proxy_request:
+// timeout => 30). It must stay above the cache's ten-second connect bound: a
+// silent endpoint then fails its dial inside the attempt, the cache drops it,
+// and the one repeat goes to the member the cache picks instead, so the worst
+// case is about ten seconds plus the repeat's own answer.
 const cephReadAttemptTimeout = 30 * time.Second
 
 // cephRead runs a Ceph read against the node resolveClusterNode would pick,

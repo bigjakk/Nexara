@@ -41,9 +41,16 @@ func NormalizeFingerprint(fp string) string {
 //
 // The returned *tls.Config is the same one installed on the transport; callers
 // keep it because the console websocket dialer needs to reuse it.
-func buildHTTPClient(tlsFingerprint string, timeout time.Duration) (*http.Client, *tls.Config) {
+//
+// dialTimeout bounds the TCP connect alone; zero gives it timeout, the whole
+// request's bound, which is what every client but the cached PVE ones keeps
+// (see cachedDialTimeout).
+func buildHTTPClient(tlsFingerprint string, timeout, dialTimeout time.Duration) (*http.Client, *tls.Config) {
 	if timeout == 0 {
 		timeout = 30 * time.Second
+	}
+	if dialTimeout == 0 {
+		dialTimeout = timeout
 	}
 
 	tlsCfg := &tls.Config{
@@ -71,7 +78,7 @@ func buildHTTPClient(tlsFingerprint string, timeout time.Duration) (*http.Client
 
 	transport := &http.Transport{
 		TLSClientConfig:     tlsCfg,
-		DialContext:         guardedDialer(timeout).DialContext,
+		DialContext:         guardedDialer(dialTimeout).DialContext,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     90 * time.Second,
 	}

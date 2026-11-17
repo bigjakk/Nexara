@@ -50,6 +50,17 @@ const cacheTTL = 10 * time.Minute
 // 60s fallback timeout instead, which made it three times too small.
 const CachedClientTimeout = 5 * time.Minute
 
+// cachedDialTimeout bounds the TCP connect of a cached PVE client, apart from
+// CachedClientTimeout, which bounds the whole request. Without it a member
+// that went silent (powered off, or rebooting behind a router, so SYNs go
+// unanswered) held each request for the kernel's connect timeout, about two
+// minutes, or until the caller's own deadline, which surfaces as a context
+// error rather than a failed dial, so the failover below never fired. A
+// Proxmox node on a reachable network answers a connect in milliseconds; ten
+// seconds leaves room for a slow WAN link. It bounds the connect only: TLS,
+// the request and the answer keep CachedClientTimeout.
+const cachedDialTimeout = 10 * time.Second
+
 // unreachableWindow is how long an endpoint that could not be connected to is
 // treated as offline when the cache picks one, whatever the database says. It
 // covers the collector's lag: a rebooting node reads offline in the node table
@@ -97,7 +108,7 @@ func NewClientForCluster(ctx context.Context, q CacheQueries, encryptionKey stri
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 	}
-	return newClientForClusterRow(cluster, clusterEndpoint(ctx, q, cluster, nil), encryptionKey, timeout)
+	return newClientForClusterRow(cluster, clusterEndpoint(ctx, q, cluster, nil), encryptionKey, timeout, 0)
 }
 
 // clusterEndpoint picks the member this client should talk to. A failed or
@@ -132,18 +143,18 @@ func clusterEndpoint(ctx context.Context, q CacheQueries, cluster db.Cluster, un
 // newClientForClusterRow is NewClientForCluster's second half, split out so
 // ClientCache.Get can reuse it while keeping the db.Cluster row it needs for
 // the credential signature.
-func newClientForClusterRow(cluster db.Cluster, endpoint ClusterEndpoint, encryptionKey string, timeout time.Duration) (*Client, error) {
+func newClientForClusterRow(cluster db.Cluster, endpoint ClusterEndpoint, encryptionKey string, timeout, dialTimeout time.Duration) (*Client, error) {
 	tokenSecret, err := crypto.Decrypt(cluster.TokenSecretEncrypted, encryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt cluster %s credentials: %w", cluster.ID, err)
 	}
-	client, err := NewClient(ClientConfig{
+	client, err := newPVEClient(ClientConfig{
 		BaseURL:        endpoint.BaseURL,
 		TokenID:        cluster.TokenID,
 		TokenSecret:    tokenSecret,
 		TLSFingerprint: endpoint.TLSFingerprint,
 		Timeout:        timeout,
-	})
+	}, dialTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("create proxmox client for cluster %s: %w", cluster.ID, err)
 	}
@@ -198,6 +209,8 @@ type ClientCache struct {
 	// now is the clock the PVE entries' TTL and the unreachable window read;
 	// tests replace it.
 	now func() time.Time
+	// dialTimeout is cachedDialTimeout; tests shorten it.
+	dialTimeout time.Duration
 
 	subOnce   sync.Once
 	closeOnce sync.Once
@@ -223,6 +236,7 @@ func NewClientCache(queries CacheQueries, encryptionKey string, rdb *redis.Clien
 
 		unreachable: make(map[uuid.UUID]map[string]time.Time),
 		now:         time.Now,
+		dialTimeout: cachedDialTimeout,
 	}
 }
 
@@ -305,7 +319,7 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		}
 		unreachable, until := c.heldUnreachable(clusterID)
 		endpoint := clusterEndpoint(ctx, c.queries, cluster, unreachable)
-		client, err := newClientForClusterRow(cluster, endpoint, c.encKey, CachedClientTimeout)
+		client, err := newClientForClusterRow(cluster, endpoint, c.encKey, CachedClientTimeout, c.dialTimeout)
 		if err != nil {
 			return nil, err
 		}
@@ -444,14 +458,23 @@ func (c *ClientCache) fresh(e *pveEntry) bool {
 // again — and picks an alternate only as SelectClusterEndpoint would for an
 // offline primary. Nothing is dialled here; the request that failed still
 // fails, and the next one goes wherever the rebuild points.
+//
+// A host already held is left as it is: with nothing to fail over to, the
+// rebuilt client points at it again, and rebuilding and logging on each of its
+// failed requests would change nothing. The hold, and the entry built under
+// it, lapse together, so such a cluster is retried once a window.
 func (c *ClientCache) endpointUnreachable(clusterID uuid.UUID, client *Client, host string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if host != "" {
+		now := c.now()
+		if at, held := c.unreachable[clusterID][host]; held && now.Before(at.Add(unreachableWindow)) {
+			return
+		}
 		if c.unreachable[clusterID] == nil {
 			c.unreachable[clusterID] = make(map[string]time.Time)
 		}
-		c.unreachable[clusterID][host] = c.now()
+		c.unreachable[clusterID][host] = now
 	}
 	if entry, ok := c.pve[clusterID]; ok && entry.client == client {
 		delete(c.pve, clusterID)

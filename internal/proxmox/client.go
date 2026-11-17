@@ -172,7 +172,13 @@ type Client struct {
 
 // NewClient creates a Client from the given config.
 func NewClient(cfg ClientConfig) (*Client, error) {
-	ac, err := newAPIClient(cfg, "PVEAPIToken")
+	return newPVEClient(cfg, 0)
+}
+
+// newPVEClient is NewClient with buildHTTPClient's dialTimeout, which only
+// ClientCache sets.
+func newPVEClient(cfg ClientConfig, dialTimeout time.Duration) (*Client, error) {
+	ac, err := newAPIClient(cfg, "PVEAPIToken", dialTimeout)
 	if err != nil {
 		return nil, err
 	}

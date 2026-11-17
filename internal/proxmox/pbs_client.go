@@ -15,7 +15,7 @@ type PBSClient struct {
 
 // NewPBSClient creates a PBSClient from the given config.
 func NewPBSClient(cfg ClientConfig) (*PBSClient, error) {
-	ac, err := newAPIClient(cfg, "PBSAPIToken")
+	ac, err := newAPIClient(cfg, "PBSAPIToken", 0)
 	if err != nil {
 		return nil, err
 	}

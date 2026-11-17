@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -241,6 +242,10 @@ func TestCephReadsSurviveTheEndpointNodeGoingDown(t *testing.T) {
 	// where nothing listens.
 	ln, err := net.Listen("tcp", "127.0.0.2:8006")
 	if err != nil {
+		// Free on CI by construction; a developer machine may hold the port.
+		if os.Getenv("CI") != "" {
+			t.Fatalf("cannot listen on 127.0.0.2:8006: %v", err)
+		}
 		t.Skipf("cannot listen on 127.0.0.2:8006: %v", err)
 	}
 	srv := httptest.NewUnstartedServer(nil)

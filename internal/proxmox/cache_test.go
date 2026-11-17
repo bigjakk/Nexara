@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -600,7 +601,7 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 	for _, addr := range []string{"127.0.0.3:8006", "127.0.0.4:8006"} {
 		if conn, err := net.Dial("tcp", addr); err == nil {
 			_ = conn.Close()
-			t.Skipf("something listens on %s", addr)
+			skipUnlessCI(t, "something listens on %s", addr)
 		}
 	}
 	const primary = "https://127.0.0.3:8006"
@@ -616,6 +617,9 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 		cache := NewClientCache(q, testCacheEncryptionKey, nil, quietLogger())
 		now := time.Unix(1_700_000_000, 0)
 		cache.now = func() time.Time { return now }
+		// Short, so the silent row's dial times out quickly; getAndFail's
+		// deadline is far longer, so a dial left unbounded fails that row.
+		cache.dialTimeout = 200 * time.Millisecond
 		t.Cleanup(cache.Close)
 		return cache, cluster.ID, &now
 	}
@@ -632,7 +636,9 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 		sig := strings.Split(cache.pve[id].signature, "|")
 		cache.mu.RUnlock()
 		if strings.HasPrefix(sig[1], "https://127.") {
-			_ = client.do(context.Background(), "/version", nil)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = client.do(ctx, "/version", nil)
 		}
 		return sig[1], sig[2]
 	}
@@ -642,22 +648,30 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 			name, apiURL string
 			eps          []db.ListNodeEndpointsRow
 			want         []string // base URL, pin of each successive Get
+			silent       bool     // the api_url drops SYNs instead of refusing
 		}{
+			{"silent member primary", "https://127.0.0.5:8006", []db.ListNodeEndpointsRow{
+				member("pve-01", "127.0.0.5", "AA:AA", "online"),
+				member("pve-02", "192.0.2.12", "BB:BB", "online"),
+			}, []string{"https://127.0.0.5:8006", "AA:AA", "https://192.0.2.12:8006", "BB:BB"}, true},
 			{"refused member primary, then a refused alternate", primary, []db.ListNodeEndpointsRow{
 				member("pve-01", "127.0.0.3", "AA:AA", "online"),
 				member("pve-02", "127.0.0.4", "BB:BB", "online"),
 				member("pve-03", "192.0.2.13", "CC:CC", "online"),
-			}, []string{primary, "AA:AA", "https://127.0.0.4:8006", "BB:BB", "https://192.0.2.13:8006", "CC:CC"}},
+			}, []string{primary, "AA:AA", "https://127.0.0.4:8006", "BB:BB", "https://192.0.2.13:8006", "CC:CC"}, false},
 			{"a VIP is not a member", "https://127.0.0.3:8006", []db.ListNodeEndpointsRow{
 				member("pve-02", "192.0.2.12", "BB:BB", "online"),
-			}, []string{primary, "AA:AA", primary, "AA:AA"}},
+			}, []string{primary, "AA:AA", primary, "AA:AA"}, false},
 			{"no alternate without a pin, nor one not online", primary, []db.ListNodeEndpointsRow{
 				member("pve-01", "127.0.0.3", "AA:AA", "online"),
 				member("pve-02", "192.0.2.12", "", "online"),
 				member("pve-03", "192.0.2.13", "CC:CC", "unknown"),
-			}, []string{primary, "AA:AA", primary, "AA:AA"}},
+			}, []string{primary, "AA:AA", primary, "AA:AA"}, false},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
+				if tt.silent {
+					silentListener(t, "127.0.0.5:8006")
+				}
 				cache, id, _ := setup(t, tt.apiURL, tt.eps...)
 				for i := 0; i < len(tt.want); i += 2 {
 					if base, pin := getAndFail(t, cache, id); base != tt.want[i] || pin != tt.want[i+1] {
@@ -681,6 +695,26 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 		}
 	})
 
+	t.Run("a held host's failures change nothing", func(t *testing.T) {
+		// Nothing to fail over to: the rebuilt client points at the held host.
+		cache, id, _ := setup(t, primary, member("pve-01", "127.0.0.3", "AA:AA", "online"))
+		getAndFail(t, cache, id)
+		held, _ := cache.Get(context.Background(), id)
+		_ = held.do(context.Background(), "/version", nil)
+		if again, _ := cache.Get(context.Background(), id); again != held {
+			t.Error("a failure on a host already held dropped and rebuilt the client")
+		}
+	})
+
+	t.Run("a stale client's failure leaves the current entry", func(t *testing.T) {
+		cache, id, _ := setup(t, primary, member("pve-01", "127.0.0.3", "AA:AA", "online"))
+		current, _ := cache.Get(context.Background(), id)
+		cache.endpointUnreachable(id, &Client{}, "192.0.2.99")
+		if again, _ := cache.Get(context.Background(), id); again != current {
+			t.Error("another client's failure dropped the cached one")
+		}
+	})
+
 	t.Run("an answer is not unreachable", func(t *testing.T) {
 		for name, srv := range map[string]*httptest.Server{
 			// The pin set below is not this server's certificate.
@@ -700,4 +734,14 @@ func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
 			}
 		}
 	})
+}
+
+// skipUnlessCI skips a test whose fixed loopback addresses are taken on a
+// developer machine, and fails it under CI, where they must be free.
+func skipUnlessCI(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
 }
