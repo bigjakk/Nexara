@@ -39,6 +39,8 @@
   "steps": "Steps",
   "pools": "Pools",
   "pgStatus": "PG Status",
+  "pgsAllClean": "All active+clean",
+  "pgStateCount": "{{count}} {{state}}",
   "objects": "Objects",
   "rawUsage": "Raw Usage",
   "maxAvail": "Max Avail",

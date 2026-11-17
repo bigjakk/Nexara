@@ -1572,7 +1572,7 @@ request set the comment (`""` clears it) — never the comment's text.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/clusters/:id/ceph/status` | Get Ceph cluster status |
+| GET | `/clusters/:id/ceph/status` | Get Ceph cluster status: health and its checks, capacity and I/O (`pgmap`), OSD and monitor counts. `pgmap.pgs_by_state` lists each PG state with its count, `[{"state_name": "active+clean", "count": 97}]`, in Ceph's own state strings and order; every PG is clean when every state holds both `active` and `clean`. Read from Proxmox's node-free `/cluster/ceph/status` |
 | GET | `/clusters/:id/ceph/osds` | List OSDs |
 | GET | `/clusters/:id/ceph/pools` | List Ceph pools |
 | GET | `/clusters/:id/ceph/monitors` | List monitors |

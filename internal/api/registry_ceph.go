@@ -127,7 +127,8 @@ func registerCephEndpoints(reg *Registry, h *handlers.CephHandler) {
 		description string
 		handler     Handler
 	}{
-		{"/status", "Read the cluster's live Ceph health, PG, OSD and monitor counters.", h.GetStatus},
+		{"/status", "Read the cluster's live Ceph health, PG count and PG states with their counts, " +
+			"OSD and monitor counters.", h.GetStatus},
 		{"/osds", "List the cluster's OSDs, flattened out of the CRUSH tree with each one's host.", h.ListOSDs},
 		{"/pools", "List the cluster's Ceph pools with their size, PG count and throughput.", h.ListPools},
 		{"/monitors", "List the cluster's Ceph monitors.", h.ListMonitors},

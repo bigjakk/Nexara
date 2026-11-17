@@ -49,6 +49,10 @@ type cephPGMapResponse struct {
 	ReadOpPerSec int64 `json:"read_op_per_sec"`
 	WritOpPerSec int64 `json:"write_op_per_sec"`
 	NumPGs       int   `json:"num_pgs"`
+	// PGsByState is Ceph's own pgs_by_state, as Proxmox relays it: each state
+	// string ("active+clean", "active+undersized+degraded") with its PG count.
+	// Never null, so "no states" and "not reported" read the same.
+	PGsByState []proxmox.PGStateCount `json:"pgs_by_state"`
 }
 
 type cephOSDMapResponse struct {
@@ -153,6 +157,7 @@ func (h *CephHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
 			ReadOpPerSec: status.PGMap.ReadOpPerSec,
 			WritOpPerSec: status.PGMap.WritOpPerSec,
 			NumPGs:       status.PGMap.NumPGs,
+			PGsByState:   pgStates(status.PGMap.PGsPerState),
 		},
 		OSDMap: cephOSDMapResponse{
 			NumOSDs:   status.OSDMap.NumOSDs,
@@ -212,6 +217,14 @@ func appendTreeOSDs(dst []cephOSDResponse, node *proxmox.CephOSDTreeNode, host s
 		dst = appendTreeOSDs(dst, &node.Children[i], host)
 	}
 	return dst
+}
+
+// pgStates is states as given, or an empty list in place of a missing one.
+func pgStates(states []proxmox.PGStateCount) []proxmox.PGStateCount {
+	if states == nil {
+		return []proxmox.PGStateCount{}
+	}
+	return states
 }
 
 func boolToInt(b bool) int {

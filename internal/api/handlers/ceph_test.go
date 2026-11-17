@@ -259,15 +259,21 @@ func TestCephReadsSurviveTheEndpointNodeGoingDown(t *testing.T) {
 	for _, tt := range []struct {
 		method, target, wantPath string
 		wantStatus               int
+		wantBody                 string // D9: the PG states reach the answer as Proxmox gave them
 	}{
-		{http.MethodGet, base + "/status", "/api2/json/cluster/ceph/status", http.StatusOK},
-		{http.MethodGet, base + "/osds", "/api2/json/nodes/pve-02/ceph/osd", http.StatusOK},
-		{http.MethodDelete, base + "/pools/store01", "", http.StatusBadGateway},
+		{http.MethodGet, base + "/status", "/api2/json/cluster/ceph/status", http.StatusOK,
+			`"num_pgs":97,"pgs_by_state":[{"state_name":"active+undersized+degraded","count":16},` +
+				`{"state_name":"active+clean","count":81}]`},
+		{http.MethodGet, base + "/osds", "/api2/json/nodes/pve-02/ceph/osd", http.StatusOK, ""},
+		{http.MethodDelete, base + "/pools/store01", "", http.StatusBadGateway, ""},
 	} {
 		member.reset()
 		status, body := cephCall(t, app, tt.method, tt.target)
 		if status != tt.wantStatus {
 			t.Errorf("%s %s = %d %s, want %d", tt.method, tt.target, status, body, tt.wantStatus)
+		}
+		if !strings.Contains(body, tt.wantBody) {
+			t.Errorf("%s %s answered %s, want it to hold %s", tt.method, tt.target, body, tt.wantBody)
 		}
 		var want []string
 		if tt.wantPath != "" {

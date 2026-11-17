@@ -3,6 +3,7 @@
 // keeps the badge, dashboard card, sidebar dot, and global indicator consistent.
 
 import type { HealthSeverity } from "@/types/api";
+import type { CephPGStateCount } from "../types/ceph";
 
 export type CephSeverity = "ok" | "warn" | "err" | "unknown";
 
@@ -74,4 +75,35 @@ export function worstIssueSeverity(
   if (issues.some((i) => i.severity === "err")) return "err";
   if (issues.some((i) => i.severity === "warn")) return "warn";
   return "ok";
+}
+
+/**
+ * How far a PG state is from serving cleanly: 2 when it is not active (I/O to
+ * it stops), 1 when active but not clean (degraded, recovering, remapped…),
+ * 0 when both. Ceph joins a PG's flags with "+".
+ */
+function pgStateRank(state: string): number {
+  const flags = state.split("+");
+  if (!flags.includes("active")) return 2;
+  if (!flags.includes("clean")) return 1;
+  return 0;
+}
+
+/**
+ * The PG states as a severity and the states to name: none when every PG is
+ * active and clean, otherwise every state, worst first, then the larger count.
+ */
+export function pgStateSummary(states: readonly CephPGStateCount[]): {
+  severity: CephSeverity;
+  states: CephPGStateCount[];
+} {
+  const sorted = [...states].sort(
+    (a, b) =>
+      pgStateRank(b.state_name) - pgStateRank(a.state_name) ||
+      b.count - a.count,
+  );
+  const first = sorted[0];
+  const worst = first === undefined ? 0 : pgStateRank(first.state_name);
+  if (worst === 0) return { severity: "ok", states: [] };
+  return { severity: worst === 2 ? "err" : "warn", states: sorted };
 }

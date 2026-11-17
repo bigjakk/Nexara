@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Panel } from "@/components/page/Panel";
 import { Stat, StatStrip, type StatTone } from "@/components/page/StatStrip";
 import { formatBytes, formatPercent } from "@/lib/format";
@@ -5,6 +6,7 @@ import { cn } from "@/lib/utils";
 import {
   cephHealthLabel,
   cephSeverity,
+  pgStateSummary,
   type CephSeverity,
 } from "../lib/ceph-health";
 import type { CephStatus } from "../types/ceph";
@@ -30,6 +32,7 @@ const HEALTH_DOT: Record<CephSeverity, string> = {
  * a warning or an error under it.
  */
 export function CephStatusPanel({ status }: { status: CephStatus }) {
+  const { t } = useTranslation("ceph");
   const { health, pgmap, osdmap, monmap } = status;
   const severity = cephSeverity(health.status);
   const checks = health.checks;
@@ -49,6 +52,12 @@ export function CephStatusPanel({ status }: { status: CephStatus }) {
     ...(out > 0 ? [`${String(out)} out`] : []),
     ...(osdmap.full ? ["full"] : osdmap.nearfull ? ["near full"] : []),
   ];
+
+  // Absent from an answer older than the field; then the count stands alone.
+  const pgStates =
+    pgmap.pgs_by_state === undefined || pgmap.pgs_by_state.length === 0
+      ? null
+      : pgStateSummary(pgmap.pgs_by_state);
 
   return (
     <Panel flush bodyClassName="py-4">
@@ -99,8 +108,28 @@ export function CephStatusPanel({ status }: { status: CephStatus }) {
         />
         <Stat
           label="Placement groups"
-          tone={pgmap.num_pgs === 0 ? "quiet" : "default"}
+          tone={
+            pgStates !== null && pgStates.severity !== "ok"
+              ? HEALTH_TONE[pgStates.severity]
+              : pgmap.num_pgs === 0
+                ? "quiet"
+                : "default"
+          }
           value={String(pgmap.num_pgs)}
+          sub={
+            pgStates === null
+              ? undefined
+              : pgStates.severity === "ok"
+                ? t("pgsAllClean")
+                : pgStates.states
+                    .map((s) =>
+                      t("pgStateCount", {
+                        count: s.count,
+                        state: s.state_name,
+                      }),
+                    )
+                    .join(", ")
+          }
         />
       </StatStrip>
       {checks.length > 0 && (

@@ -24,6 +24,13 @@ export interface CephPGMap {
   read_op_per_sec: number;
   write_op_per_sec: number;
   num_pgs: number;
+  /** Each PG state Ceph reports ("active+clean") with how many PGs are in it. */
+  pgs_by_state?: CephPGStateCount[];
+}
+
+export interface CephPGStateCount {
+  state_name: string;
+  count: number;
 }
 
 export interface CephOSDMap {

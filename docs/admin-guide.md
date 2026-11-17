@@ -1068,7 +1068,7 @@ for those.
 
 ## Ceph
 
-A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change anything. A cluster without Ceph reads **Ceph Not Available**. Above the tabs are health, capacity, IOPS and throughput cards. Below them:
+A cluster's **Ceph** tab needs `view:ceph` to read and `manage:ceph` to change anything. A cluster without Ceph reads **Ceph Not Available**. Above the tabs are health, capacity, IOPS and throughput cards; the placement-group count reads *All active+clean*, or else each PG state with its count, the states that stop I/O first. Below them:
 
 - **Overview** — charts from an hour to 7 days, and the CRUSH topology
 - **OSDs** — each OSD's menu has **Mark Out** / **Mark In**, which take effect immediately, and **Stop** / **Start** / **Restart Daemon**, which run as a task on the OSD's host
