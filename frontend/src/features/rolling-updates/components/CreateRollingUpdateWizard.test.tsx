@@ -78,7 +78,7 @@ describe("CreateRollingUpdateWizard", () => {
     ).not.toBeChecked();
   });
 
-  // "Create & Start" starts the job without the Start confirmation, so its
+  // "Create and start" starts the job without the Start confirmation, so its
   // last step says what Start does, in the confirmation's own words.
   it("says what the job does on the last step while Start immediately is on", async () => {
     const user = userEvent.setup({ delay: null });
@@ -142,7 +142,7 @@ describe("CreateRollingUpdateWizard", () => {
       await user.click(
         screen.getByRole("switch", { name: "Start immediately" }),
       );
-      await user.click(screen.getByRole("button", { name: "Create Job" }));
+      await user.click(screen.getByRole("button", { name: "Create job" }));
 
       await waitFor(() => {
         expect(postMock).toHaveBeenCalledWith(
@@ -198,7 +198,7 @@ describe("CreateRollingUpdateWizard", () => {
       await user.click(
         screen.getByRole("switch", { name: "Start immediately" }),
       );
-      await user.click(screen.getByRole("button", { name: "Create Job" }));
+      await user.click(screen.getByRole("button", { name: "Create job" }));
 
       await waitFor(() => {
         expect(postMock).toHaveBeenCalledWith(

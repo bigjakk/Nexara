@@ -41,7 +41,7 @@ var (
 	ErrNodeAddressUnknown = errors.New("no IP address is known for this node yet")
 
 	// ErrHostKeyNotPinned means credentials exist but the node's host key was
-	// never pinned. Actionable: run Test Connection and confirm the fingerprint.
+	// never pinned. Actionable: run Test connection and confirm the fingerprint.
 	ErrHostKeyNotPinned = errors.New("the SSH host key for this node is not pinned")
 
 	// ErrSSHLoginHeldBack means the node refused a recent login and this call
@@ -55,7 +55,7 @@ var (
 type heldBackError struct{ remaining time.Duration }
 
 func (e *heldBackError) Error() string {
-	return fmt.Sprintf("%s; not tried again for %s, or until the SSH credentials are changed or Test Connection passes",
+	return fmt.Sprintf("%s; not tried again for %s, or until the SSH credentials are changed or Test connection passes",
 		ErrSSHLoginHeldBack, e.remaining)
 }
 
@@ -77,9 +77,9 @@ func UnavailableReason(err error, what string) (reason string, classified bool) 
 	var mismatch *sshpkg.HostKeyMismatchError
 	switch {
 	case errors.Is(err, ErrSSHNotConfigured):
-		return "SSH is not configured for this cluster. Add credentials under Security → Rolling Updates → SSH Credentials to read " + what + ".", true
+		return "SSH is not configured for this cluster. Add credentials under Security → Rolling updates → SSH access to read " + what + ".", true
 	case errors.Is(err, ErrHostKeyNotPinned):
-		return "This node's SSH host key is not pinned. Open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint.", true
+		return "This node's SSH host key is not pinned. Open Security → Rolling updates → SSH access, run Test connection, and confirm the fingerprint.", true
 	case errors.Is(err, ErrNodeAddressUnknown):
 		return "No IP address is known for this node yet — the collector has not reported one.", true
 	case errors.Is(err, ErrSSHLoginHeldBack):
@@ -89,13 +89,13 @@ func UnavailableReason(err error, what string) (reason string, classified bool) 
 			wait = fmt.Sprintf("%d min", max(1, int(held.remaining.Round(time.Minute)/time.Minute)))
 		}
 		return "This node refused the SSH login, so Nexara is not trying it again for " + wait +
-			". Saving new credentials under Security → Rolling Updates → SSH Credentials, or a Test Connection that logs in, ends the pause.", true
+			". Saving new credentials under Security → Rolling updates → SSH access, or a Test connection that logs in, ends the pause.", true
 	case errors.Is(err, sshpkg.ErrAuthRejected):
 		// Unclassified so the caller still logs it: the first one is a real
 		// failed login, and a node's own lockout may follow.
-		return "This node refused the SSH login. Check the credentials under Security → Rolling Updates → SSH Credentials and run Test Connection.", false
+		return "This node refused the SSH login. Check the credentials under Security → Rolling updates → SSH access and run Test connection.", false
 	case errors.As(err, &mismatch):
-		return "This node presented an SSH host key that does not match the pinned one. If it was not reinstalled, treat this as a possible interception; otherwise re-pin it under Security → Rolling Updates → SSH Credentials.", false
+		return "This node presented an SSH host key that does not match the pinned one. If it was not reinstalled, treat this as a possible interception; otherwise re-pin it under Security → Rolling updates → SSH access.", false
 	default:
 		return "Could not read " + what + " over SSH from this node.", false
 	}
@@ -121,7 +121,7 @@ func RunNodeCommand(ctx context.Context, queries *db.Queries, encryptionKey stri
 // that refusal back without a dial for loginBackoffWindow, so a page polling a
 // node's sensors cannot add a failed login to the node's auth log every minute
 // and trip its lockout. Changed credentials, a changed node address, a success
-// or a passing Test Connection (ForgetSSHRejection) end it at once.
+// or a passing Test connection (ForgetSSHRejection) end it at once.
 func RunNodeCommandLimited(ctx context.Context, queries *db.Queries, encryptionKey string, clusterID uuid.UUID, nodeName, command string, maxOutput int) (*sshpkg.ExecResult, error) {
 	return runNodeCommand(ctx, queries, encryptionKey, clusterID, nodeName, command, maxOutput, loginBackoff, executeSSH)
 }
@@ -166,7 +166,7 @@ const maxRememberedRejections = 4096
 
 var loginBackoff = newRejectionBackoff(time.Now)
 
-// ForgetSSHRejection ends the back-off for a node, for a Test Connection that
+// ForgetSSHRejection ends the back-off for a node, for a Test connection that
 // logged in to it.
 func ForgetSSHRejection(clusterID uuid.UUID, nodeName string) {
 	loginBackoff.forget(nodeKey{clusterID, nodeName})
@@ -318,7 +318,7 @@ func resolveNodeSSH(ctx context.Context, queries *db.Queries, encryptionKey stri
 		if !errors.Is(pinErr, pgx.ErrNoRows) {
 			return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w: look up pinned host key for %s: %w", ErrSSHLookup, sshHost, pinErr)
 		}
-		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w (%s) — open Security → Rolling Updates → SSH Credentials, run Test Connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
+		return sshpkg.Config{}, db.ClusterSshCredential{}, fmt.Errorf("%w (%s) — open Security → Rolling updates → SSH access, run Test connection, and confirm the fingerprint", ErrHostKeyNotPinned, sshHost)
 	}
 	knownKey, parseErr := sshpkg.ParseAuthorizedKey(pinned.PublicKey)
 	if parseErr != nil {

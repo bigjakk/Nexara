@@ -372,7 +372,7 @@ export function VMDetailPage() {
                 disabled={vm.template}
               >
                 <Monitor className="h-4 w-4" />
-                VNC Console
+                VNC console
               </Button>
             )}
             {kind === "ct" && consoleAllowed && (
@@ -405,10 +405,10 @@ export function VMDetailPage() {
           )}
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           {kind === "vm" && (
-            <TabsTrigger value="cloud-init">Cloud-Init</TabsTrigger>
+            <TabsTrigger value="cloud-init">Cloud-init</TabsTrigger>
           )}
           {kind === "vm" && isWindowsGuest && (
-            <TabsTrigger value="guest-tools">Guest Tools</TabsTrigger>
+            <TabsTrigger value="guest-tools">Guest tools</TabsTrigger>
           )}
           <TabsTrigger value="backups">Backups</TabsTrigger>
           <TabsTrigger value="schedules">Schedules</TabsTrigger>
@@ -763,7 +763,7 @@ function GuestAgentSection({
               <DetailField label="Hostname">{data.os_info.name}</DetailField>
             )}
             {/* Read-only status so "is an update waiting?" is answerable from
-                Overview. The controls live on the Guest Tools tab. */}
+                Overview. The controls live on the Guest tools tab. */}
             <VMGuestToolsSummary
               clusterId={clusterId}
               vmid={vmid}
@@ -968,18 +968,18 @@ function VMMetricsPanel({
           />
         </StatStrip>
         <div className="-mt-px border-t px-[18px] pt-4">
-          {focus === "cpu" && chart("CPU Usage", "cpuPercent")}
-          {focus === "memory" && chart("Memory Usage", "memPercent", memDetail)}
+          {focus === "cpu" && chart("CPU usage", "cpuPercent")}
+          {focus === "memory" && chart("Memory usage", "memPercent", memDetail)}
           {focus === "disk" && (
             <div className="grid gap-6 sm:grid-cols-2">
-              {chart("Disk Read", "diskReadBps")}
-              {chart("Disk Write", "diskWriteBps")}
+              {chart("Disk read", "diskReadBps")}
+              {chart("Disk write", "diskWriteBps")}
             </div>
           )}
           {focus === "network" && (
             <div className="grid gap-6 sm:grid-cols-2">
-              {chart("Network In", "netInBps")}
-              {chart("Network Out", "netOutBps")}
+              {chart("Network in", "netInBps")}
+              {chart("Network out", "netOutBps")}
             </div>
           )}
         </div>

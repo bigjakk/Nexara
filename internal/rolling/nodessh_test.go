@@ -29,12 +29,12 @@ func TestUnavailableReason(t *testing.T) {
 		wantClassified bool
 		wantContains   []string
 	}{
-		{"missing credentials points at where they are set", fmt.Errorf("%w: no rows in result set", ErrSSHNotConfigured), true, []string{"Security → Rolling Updates → SSH Credentials", "the memory layout"}},
-		{"an unpinned host key asks for Test Connection", fmt.Errorf("%w (192.0.2.10)", ErrHostKeyNotPinned), true, []string{"Test Connection"}},
+		{"missing credentials points at where they are set", fmt.Errorf("%w: no rows in result set", ErrSSHNotConfigured), true, []string{"Security → Rolling updates → SSH access", "the memory layout"}},
+		{"an unpinned host key asks for Test connection", fmt.Errorf("%w (192.0.2.10)", ErrHostKeyNotPinned), true, []string{"Test connection"}},
 		{"an unknown node address blames the collector", fmt.Errorf("%w (node %q)", ErrNodeAddressUnknown, "pve-01"), true, []string{"collector"}},
 		{"a changed host key is named, and still logged", &sshpkg.HostKeyMismatchError{Host: "192.0.2.10"}, false, []string{"does not match the pinned one"}},
-		{"a held-back refusal says for how long, and is not logged", &heldBackError{remaining: 9*time.Minute + 40*time.Second}, true, []string{"refused the SSH login", "10 min", "Test Connection"}},
-		{"a refused login points at the credentials, and is still logged", fmt.Errorf("SSH handshake with 192.0.2.10:22: %w", sshpkg.ErrAuthRejected), false, []string{"refused the SSH login", "Test Connection"}},
+		{"a held-back refusal says for how long, and is not logged", &heldBackError{remaining: 9*time.Minute + 40*time.Second}, true, []string{"refused the SSH login", "10 min", "Test connection"}},
+		{"a refused login points at the credentials, and is still logged", fmt.Errorf("SSH handshake with 192.0.2.10:22: %w", sshpkg.ErrAuthRejected), false, []string{"refused the SSH login", "Test connection"}},
 		{"anything else is generic", errors.New("dial 192.0.2.10:22: connect: connection refused"), false, []string{"Could not read the memory layout"}},
 	}
 	for _, tt := range tests {

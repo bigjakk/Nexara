@@ -130,7 +130,7 @@ function GivenAnotherCluster({ closed }: { closed: (open: boolean) => void }) {
 
 /** Renames the cluster in the open dialog and presses Save, and waits for the request to be out. */
 async function saveRename(user: UserEvent): Promise<HTMLElement> {
-  const dialog = await screen.findByRole("dialog", { name: "Edit Cluster" });
+  const dialog = await screen.findByRole("dialog", { name: "Edit cluster" });
   await user.type(within(dialog).getByLabelText("Name"), " renamed");
   await user.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(
@@ -232,7 +232,7 @@ describe("a cluster save that settles after the dialog was closed and opened aga
   async function closeAndReopen(user: UserEvent) {
     await dismiss(user, await saveRename(user));
     await user.click(screen.getByRole("button", { name: "Edit again" }));
-    return screen.findByRole("dialog", { name: "Edit Cluster" });
+    return screen.findByRole("dialog", { name: "Edit cluster" });
   }
 
   // What reset() is there for: a failure the first dialog showed is gone from
@@ -248,14 +248,14 @@ describe("a cluster save that settles after the dialog was closed and opened aga
       mockedPut.mockRejectedValueOnce(denied());
       renderOnAppClient(<Host closed={vi.fn()} keep />);
 
-      const first = await screen.findByRole("dialog", { name: "Edit Cluster" });
+      const first = await screen.findByRole("dialog", { name: "Edit cluster" });
       await user.type(within(first).getByLabelText("Name"), " renamed");
       await user.click(within(first).getByRole("button", { name: "Save" }));
       expect(await within(first).findByText(DENIED)).toBeInTheDocument();
       await dismiss(user, first, leave);
       await user.click(screen.getByRole("button", { name: "Edit again" }));
       const second = await screen.findByRole("dialog", {
-        name: "Edit Cluster",
+        name: "Edit cluster",
       });
 
       expect(within(second).queryByText(DENIED)).toBeNull();
@@ -341,7 +341,7 @@ describe.each([
       }),
     );
     await user.keyboard("{Enter}");
-    const dialog = await screen.findByRole("dialog", { name: "Edit Cluster" });
+    const dialog = await screen.findByRole("dialog", { name: "Edit cluster" });
     await within(dialog).findByText(/Update the configuration for cluster01/);
   }
 

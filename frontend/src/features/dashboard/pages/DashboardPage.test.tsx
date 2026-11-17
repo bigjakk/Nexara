@@ -197,7 +197,7 @@ describe("DashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows CPU Usage chart title for first cluster", () => {
+  it("shows CPU usage chart title for first cluster", () => {
     mockUseDashboardData.mockReturnValue({
       data: mockDashboardData,
       isLoading: false,
@@ -205,7 +205,7 @@ describe("DashboardPage", () => {
     });
 
     renderWithProviders(<DashboardPage />);
-    expect(screen.getByText("Prod Cluster — CPU Usage")).toBeInTheDocument();
+    expect(screen.getByText("Prod Cluster — CPU usage")).toBeInTheDocument();
   });
 
   it("renders time range selector with all buttons enabled", () => {

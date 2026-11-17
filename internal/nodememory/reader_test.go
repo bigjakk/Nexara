@@ -82,7 +82,7 @@ func TestRunDue(t *testing.T) {
 		{name: "offline", nodeStatus: "offline", res: good},
 		{
 			name: "no credentials is re-checked every pass", nodeStatus: "online", attempted: 5 * time.Minute, lastStatus: StatusUnavailable,
-			err: fmt.Errorf("%w: no rows", rolling.ErrSSHNotConfigured), wantRun: true, wantStored: StatusUnavailable, wantReason: "SSH Credentials",
+			err: fmt.Errorf("%w: no rows", rolling.ErrSSHNotConfigured), wantRun: true, wantStored: StatusUnavailable, wantReason: "SSH access",
 		},
 		{name: "a failed login waits the interval", nodeStatus: "online", attempted: time.Hour, lastStatus: StatusError, res: good},
 		{

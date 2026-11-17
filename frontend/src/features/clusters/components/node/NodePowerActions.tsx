@@ -239,7 +239,7 @@ export function NodePowerActions({
           disabled
           title={
             canNode
-              ? "Configure SSH credentials (Security → Rolling Updates → SSH Credentials) to use node maintenance, or use Evacuate."
+              ? "Configure SSH credentials (Security → Rolling updates → SSH access) to use node maintenance, or use Evacuate."
               : "Node maintenance needs the manage:node permission."
           }
         >

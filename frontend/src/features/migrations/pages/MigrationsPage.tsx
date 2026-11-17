@@ -75,7 +75,7 @@ export function MigrationsPage() {
         <EmptyState
           icon={ArrowLeftRight}
           title="No migration jobs yet"
-          description="A job moves one guest and records its pre-flight checks, its progress and its outcome. New Migration starts one."
+          description="A job moves one guest and records its pre-flight checks, its progress and its outcome. New migration starts one."
         />
       ) : (
         <Panel flush title="Jobs" aside={String(jobs.length)}>

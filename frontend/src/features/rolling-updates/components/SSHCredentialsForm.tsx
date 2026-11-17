@@ -428,7 +428,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
                 {pinKey.isPending && (
                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
                 )}
-                Trust &amp; Pin
+                Trust and pin
               </Button>
               <Button
                 size="sm"
@@ -580,10 +580,10 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           // if it has not started) and the job. The pin is looked up by
           // (host, the credential's port) in NodeSSHConfig, so it is
           // host:port that is refused. A key is only pinned again
-          // through Test Connection + Trust & Pin (PinSSHHostKey re-scans and
+          // through Test connection + Trust and pin (PinSSHHostKey re-scans and
           // must match the fingerprint the operator confirmed).
           description={(kh) =>
-            `Nexara forgets the pinned key ${kh.fingerprint}. It will not trust whatever key this host presents next: SSH connections to ${kh.host}:${String(kh.port)} are refused until you pin a key again with Test Connection, so automated upgrades, maintenance mode and sensor readings on that host stop working until then.`
+            `Nexara forgets the pinned key ${kh.fingerprint}. It will not trust whatever key this host presents next: SSH connections to ${kh.host}:${String(kh.port)} are refused until you pin a key again with Test connection, so automated upgrades, maintenance mode and sensor readings on that host stop working until then.`
           }
           confirmLabel="Unpin"
         />

@@ -552,8 +552,8 @@ func checkLogoutUnconfirmed(t *testing.T, body map[string]any) {
 	if !strings.Contains(msg, "could not be confirmed") || !strings.Contains(msg, "may still be active") {
 		t.Errorf("message = %q, want it to say the sign-out could not be confirmed and the session may still be active", msg)
 	}
-	if !strings.Contains(msg, "Sign Out All Devices") {
-		t.Errorf("message = %q, want it to name what a browser user can do, \"Sign Out All Devices\"", msg)
+	if !strings.Contains(msg, "Sign out all devices") {
+		t.Errorf("message = %q, want it to name what a browser user can do, \"Sign out all devices\"", msg)
 	}
 	if strings.Contains(strings.ToLower(msg), "try signing out again") {
 		t.Errorf("message = %q: it still tells a browser to try signing out again, which carries no token now", msg)

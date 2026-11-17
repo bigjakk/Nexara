@@ -197,7 +197,7 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            title="Run Now"
+                            title="Run now"
                             onClick={() => {
                               setConfirmRun(job);
                             }}

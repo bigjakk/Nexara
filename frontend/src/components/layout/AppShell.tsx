@@ -306,12 +306,12 @@ export function AppShell() {
                   }}
                 >
                   <Key className="mr-2 h-4 w-4" />
-                  API Keys
+                  API keys
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleShowChangelog}>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  What&apos;s New
+                  What&apos;s new
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {

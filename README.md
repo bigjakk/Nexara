@@ -79,7 +79,7 @@ Open **http://localhost** and create your admin account. That's it.
 
 ### Connecting your first cluster
 
-**Add Cluster** → enter the API URL (`https://your-proxmox:8006`) and pick how Nexara gets its credential:
+**Add cluster** → enter the API URL (`https://your-proxmox:8006`) and pick how Nexara gets its credential:
 
 **Create a token for me (the default tab).** Supply a privileged Proxmox login once — `root@pam` and its password, plus a TOTP code if the account has 2FA. Nexara logs in, creates a dedicated `nexara@pve` user, grants it an ACL, mints a token and verifies it works. The password is used for that one request and is never stored, logged or audited; only the minted token's ciphertext is kept.
 
@@ -368,7 +368,7 @@ nexara.example.com {
 |--|--|
 | [Installation Guide](docs/installation.md) | Setup, configuration, updating, backup and restore, troubleshooting |
 | [Admin Guide](docs/admin-guide.md) | Clusters, guests, consoles, migration, storage, backup, networking, UPS monitoring, RBAC and auth, alerts, DRS, HA, rolling updates, History, reports |
-| [API Reference](docs/api-reference.md) | Auth, errors, rate limits, WebSocket protocol and every endpoint group. A running install also has a live catalog: **API Keys** in the user menu, then **API reference** |
+| [API Reference](docs/api-reference.md) | Auth, errors, rate limits, WebSocket protocol and every endpoint group. A running install also has a live catalog: **API keys** in the user menu, then **API reference** |
 | [Contributing](docs/contributing.md) | Dev environment, project layout, adding an endpoint, testing, PR process |
 
 ---

@@ -41,7 +41,7 @@ interface VMGuestToolsCardProps {
 
 /**
  * Guest tools status and controls for a single VM: the content of the VM's
- * Guest Tools tab.
+ * Guest tools tab.
  *
  * The Overview tab carries only a one-line summary on the QEMU Guest Agent
  * panel; everything actionable lives here so Overview stays readable.

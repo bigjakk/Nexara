@@ -355,7 +355,7 @@ export function BulkPinDialog({
                 Cancel
               </Button>
               <Button onClick={handlePinAll} disabled={checkedCount === 0}>
-                Trust &amp; Pin{" "}
+                Trust and pin{" "}
                 {checkedCount > 0
                   ? `${String(checkedCount)} of ${String(selectableCount)}`
                   : ""}

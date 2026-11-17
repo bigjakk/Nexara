@@ -256,16 +256,16 @@ export function MigrateWizard() {
       <DialogTrigger asChild>
         <Button>
           <Plus className="mr-2 h-4 w-4" />
-          New Migration
+          New migration
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowLeftRight className="h-5 w-5" />
-            {step === "config" && "Create Migration Job"}
-            {step === "preflight" && "Pre-Flight Checks"}
-            {step === "progress" && "Migration Progress"}
+            {step === "config" && "Create migration job"}
+            {step === "preflight" && "Pre-flight checks"}
+            {step === "progress" && "Migration progress"}
           </DialogTitle>
         </DialogHeader>
 
@@ -273,7 +273,7 @@ export function MigrateWizard() {
           <div className="space-y-4">
             {/* Migration Type */}
             <div className="space-y-2">
-              <Label>Migration Type</Label>
+              <Label>Migration type</Label>
               <Select
                 value={migrationType}
                 onValueChange={(v) => {
@@ -287,10 +287,10 @@ export function MigrateWizard() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="intra-cluster">
-                    Intra-Cluster (same cluster)
+                    Within the source cluster
                   </SelectItem>
                   <SelectItem value="cross-cluster">
-                    Cross-Cluster (different clusters)
+                    To another cluster
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -298,7 +298,7 @@ export function MigrateWizard() {
 
             {/* Source Cluster */}
             <div className="space-y-2">
-              <Label>Source Cluster</Label>
+              <Label>Source cluster</Label>
               <Select
                 value={sourceClusterId}
                 onValueChange={(v) => {
@@ -324,7 +324,7 @@ export function MigrateWizard() {
             {/* Target Cluster (cross-cluster only) */}
             {migrationType === "cross-cluster" && (
               <div className="space-y-2">
-                <Label>Target Cluster</Label>
+                <Label>Target cluster</Label>
                 <Select
                   value={targetClusterId}
                   onValueChange={(v) => {
@@ -375,7 +375,7 @@ export function MigrateWizard() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="qemu">QEMU VM</SelectItem>
-                    <SelectItem value="lxc">LXC Container</SelectItem>
+                    <SelectItem value="lxc">LXC container</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -397,7 +397,7 @@ export function MigrateWizard() {
             {/* Source / Target Node */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Source Node</Label>
+                <Label>Source node</Label>
                 <Select
                   value={sourceNode}
                   onValueChange={setSourceNode}
@@ -416,7 +416,7 @@ export function MigrateWizard() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Target Node</Label>
+                <Label>Target node</Label>
                 <Select
                   value={targetNode}
                   onValueChange={setTargetNode}
@@ -455,7 +455,7 @@ export function MigrateWizard() {
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  Auto-selects the least loaded node
+                  The least loaded node is picked for you.
                 </p>
               </div>
             </div>
@@ -465,7 +465,7 @@ export function MigrateWizard() {
               targetClusterId.length > 0 &&
               uniqueSourceStorage.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Storage Mapping</Label>
+                  <Label>Storage mapping</Label>
                   <div className="space-y-2 rounded-md border p-3">
                     {uniqueSourceStorage.map((src) => (
                       <div
@@ -506,7 +506,7 @@ export function MigrateWizard() {
               sourceBridges &&
               sourceBridges.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Network Mapping</Label>
+                  <Label>Network mapping</Label>
                   <div className="space-y-2 rounded-md border p-3">
                     {sourceBridges.map((src) => (
                       <div
@@ -541,7 +541,7 @@ export function MigrateWizard() {
             {/* Options */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>Live Migration</Label>
+                <Label>Live migration</Label>
                 <Switch checked={online} onCheckedChange={setOnline} />
               </div>
               {/* Live-only wizard: no disks change storage, so no format. */}
@@ -552,7 +552,7 @@ export function MigrateWizard() {
                 onBwlimitChange={setBwlimit}
                 deleteSource={deleteSource}
                 onDeleteSourceChange={setDeleteSource}
-                deleteSourceLabel="Delete Source After Migration"
+                deleteSourceLabel="Delete source after migration"
                 hideDeleteSource={!showDeleteSource}
               />
             </div>
@@ -565,7 +565,7 @@ export function MigrateWizard() {
               {createMutation.isPending || checkMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Running Pre-Flight Checks...
+                  Running pre-flight checks...
                 </>
               ) : (
                 "Run pre-flight checks"
@@ -604,7 +604,7 @@ export function MigrateWizard() {
                       {executeMutation.isPending ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       ) : null}
-                      Execute Migration
+                      Execute migration
                     </Button>
                   ) : (
                     <p className="text-sm text-red-500">

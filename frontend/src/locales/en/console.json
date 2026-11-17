@@ -10,9 +10,9 @@
   "openConsole": "Open Console",
   "selectVMOrContainer": "Select a VM or Container",
   "noVMsOrContainersFound": "No VMs or containers found",
-  "vncConsole": "VNC Console",
-  "serialConsole": "Serial Console",
-  "containerAttach": "Container Attach",
+  "vncConsole": "VNC console",
+  "serialConsole": "Serial console",
+  "containerAttach": "Container attach",
   "openGuestLinkTitle": "Open a link to {{host}}?",
   "openGuestLinkDescription": "The console printed this address. A guest can print any link, so open it only if you expected it.",
   "openGuestLink": "Open link",
@@ -49,8 +49,8 @@
     "noVMsOrContainersFound": "No VMs or containers found",
     "vnc": "VNC",
     "attach": "Attach",
-    "containerAttach": "Container Attach",
-    "vncConsole": "VNC Console"
+    "containerAttach": "Container attach",
+    "vncConsole": "VNC console"
   },
   "vncToolbar": {
     "lengthCharacterSCouldNot": "{{length}} character(s) could not be typed",

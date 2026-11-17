@@ -20,7 +20,7 @@ import {
 import type { ClusterResponse } from "@/types/api";
 import { ClustersListPage } from "./ClustersListPage";
 
-// The Edit Cluster dialog is not held while its request is out, so focus can Tab out of the
+// The Edit cluster dialog is not held while its request is out, so focus can Tab out of the
 // modal and Enter on another cluster's Edit button puts its dialog where the first was, with
 // nothing closed between. The dialog seeds its form once and keeps its save's error, so the
 // page keys it on the cluster; unkeyed, it would be the first dialog under another name.
@@ -94,7 +94,7 @@ async function sendRename(user: UserEvent): Promise<HTMLElement> {
   await user.click(
     await screen.findByRole("button", { name: "Edit cluster01" }),
   );
-  const first = await screen.findByRole("dialog", { name: "Edit Cluster" });
+  const first = await screen.findByRole("dialog", { name: "Edit cluster" });
   await user.type(within(first).getByLabelText("Name"), "x");
   await user.click(within(first).getByRole("button", { name: "Save" }));
   await within(first).findByRole("button", { name: "Saving..." });
@@ -109,7 +109,7 @@ async function replaceWithSecond(user: UserEvent) {
     screen.getByRole("button", { name: "Edit cluster02", hidden: true }),
   );
   await user.keyboard("{Enter}");
-  const second = await screen.findByRole("dialog", { name: "Edit Cluster" });
+  const second = await screen.findByRole("dialog", { name: "Edit cluster" });
   await within(second).findByText(/Update the configuration for cluster02/);
   return second;
 }

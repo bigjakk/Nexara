@@ -287,7 +287,7 @@ export function PCIMappingsCard({ clusterId }: { clusterId: string }) {
           A VM passes a host PCI device through as hostpciN:
           mapping=&lt;name&gt;. A node may have several entries — a VM starting
           there takes the first device not in use — and a VM will not start on a
-          node the mapping has none for. Add PCI Device on a VM creates a
+          node the mapping has none for. Add PCI device on a VM creates a
           mapping; Proxmox lists only the mappings Nexara&apos;s API token may
           see.
         </p>

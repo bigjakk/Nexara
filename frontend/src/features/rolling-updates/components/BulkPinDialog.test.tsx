@@ -115,12 +115,12 @@ function openTheDialog() {
   );
 }
 
-/** Scans every node and presses Trust & Pin on all of them. */
+/** Scans every node and presses Trust and pin on all of them. */
 async function pinEveryNode() {
   const user = userEvent.setup();
   const view = openTheDialog();
   await user.click(
-    await screen.findByRole("button", { name: /Trust & Pin 3 of 3/ }),
+    await screen.findByRole("button", { name: /Trust and pin 3 of 3/ }),
   );
   await waitFor(() => {
     expect(server.times(PIN)).toBe(1);
@@ -224,7 +224,7 @@ describe("BulkPinDialog, scanning the nodes", () => {
     });
 
     firstScan.resolve(PENDING("pve-01"));
-    await screen.findByRole("button", { name: /Trust & Pin 3 of 3/ });
+    await screen.findByRole("button", { name: /Trust and pin 3 of 3/ });
 
     expect(server.times(SCAN)).toBe(3);
     expect(laterScanCallers).toHaveLength(2);

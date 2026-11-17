@@ -252,7 +252,7 @@ export function VMActions({
             onClick={onDeploy}
           >
             <Rocket className="h-4 w-4" />
-            Deploy from Template
+            Deploy from template
           </Button>
         )}
 
@@ -287,13 +287,13 @@ export function VMActions({
             {!template && onCloneToTemplate && (
               <DropdownMenuItem className="gap-2" onClick={onCloneToTemplate}>
                 <FileBox className="h-4 w-4" />
-                Clone to Template
+                Clone to template
               </DropdownMenuItem>
             )}
             {canConvert && (
               <DropdownMenuItem className="gap-2" onClick={onConvertToTemplate}>
                 <FileBox className="h-4 w-4" />
-                Convert to Template
+                Convert to template
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

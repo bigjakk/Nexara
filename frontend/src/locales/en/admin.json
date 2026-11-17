@@ -92,7 +92,7 @@
   "defaultRole": "Default Role (no group match)",
   "noDefaultRole": "No default role",
   "syncInterval": "Sync Interval (minutes)",
-  "testConnection": "Test Connection",
+  "testConnection": "Test connection",
   "testUsernamePlaceholder": "Test username (optional)",
   "syncNow": "Sync Now",
   "authConfig": {

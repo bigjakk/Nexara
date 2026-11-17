@@ -205,7 +205,7 @@ function NodeBranch({ node, vms, clusterId, filter }: NodeBranchProps) {
                 }}
               >
                 <Wrench className="mr-2 h-3.5 w-3.5" />
-                {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+                {inMaintenance ? "Exit maintenance" : "Enter maintenance"}
               </ContextMenuItem>
             </>
           )}
@@ -248,7 +248,7 @@ function NodeBranch({ node, vms, clusterId, filter }: NodeBranchProps) {
               }}
               disabled={maintenance.isPending}
             >
-              {inMaintenance ? "Exit Maintenance" : "Enter Maintenance"}
+              {inMaintenance ? "Exit maintenance" : "Enter maintenance"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

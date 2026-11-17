@@ -72,7 +72,7 @@ async function pressCreate() {
       <MigrateWizard />
     </QueryClientProvider>,
   );
-  await user.click(screen.getByRole("button", { name: "New Migration" }));
+  await user.click(screen.getByRole("button", { name: "New migration" }));
   // The selects have no name of their own: in order, they are the migration
   // type, the source cluster, the guest's type, the source node and the target.
   const SOURCE_CLUSTER = 1;

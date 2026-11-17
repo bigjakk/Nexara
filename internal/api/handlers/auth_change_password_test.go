@@ -294,7 +294,7 @@ func TestChangePassword_ThePasswordAndTheSessionsAreOneTransaction(t *testing.T)
 				if strings.Contains(msg, notChanged) {
 					t.Errorf("an unconfirmed commit says the password was NOT changed: %q", msg)
 				}
-				if !strings.Contains(msg, "Sign Out All Devices") || !strings.Contains(msg, "may be in effect") {
+				if !strings.Contains(msg, "Sign out all devices") || !strings.Contains(msg, "may be in effect") {
 					t.Errorf("message = %q, want it to say the change may be in effect and how to make sure", msg)
 				}
 				// Revoke-all ends EVERY session, the caller's too, so "your other sessions" would

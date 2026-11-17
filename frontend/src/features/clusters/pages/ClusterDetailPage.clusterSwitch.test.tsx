@@ -237,7 +237,7 @@ describe("the cluster page when it moves to another cluster: Options, Notes", ()
 
     await user.clear(box);
     await user.type(box, "A draft");
-    await user.click(screen.getByRole("button", { name: "Save Description" }));
+    await user.click(screen.getByRole("button", { name: "Save description" }));
 
     await waitFor(() => {
       expect(api.writes()).toEqual([`PUT ${path(CLUSTER_A, "/description")}`]);
@@ -255,20 +255,20 @@ describe("the cluster page when it moves to another cluster: Options, Notes", ()
     await user.clear(box);
     await user.type(box, "A draft");
     expect(
-      screen.getByRole("button", { name: "Save Description" }),
+      screen.getByRole("button", { name: "Save description" }),
     ).toBeEnabled();
 
     await moveToB("options");
 
     // Press what the page offers for the note, as someone looking at the
     // second cluster would. Nothing is sent: what could be is the draft.
-    await user.click(screen.getByRole("button", { name: "Save Description" }));
+    await user.click(screen.getByRole("button", { name: "Save description" }));
     await settle();
     expect(api.writes()).toEqual([]);
     // The note on screen is the second cluster's own, and there is no draft.
     await notesBox("Notes of cluster02");
     expect(
-      screen.getByRole("button", { name: "Save Description" }),
+      screen.getByRole("button", { name: "Save description" }),
     ).toBeDisabled();
   });
 });

@@ -3,7 +3,7 @@
 Nexara exposes a REST API at `/api/v1`. Every endpoint takes a JWT access token or an `nxra_` API key as a bearer token, except `/healthz`, `/version`, `/changelog` and `/auth/login`, `refresh`, `register`, `logout`, `setup-status`, `sso-status`, `oidc/*` and `totp/verify-login`.
 
 > **The live source of truth is the in-app catalog at `/settings/api-docs`**
-> (**API Keys** in the user menu, then **API reference**), which renders
+> (**API keys** in the user menu, then **API reference**), which renders
 > `GET /api/v1/api-docs`. Its route list is read from the running router, `/api/v1`
 > routes only, so `/healthz` and `/ws*` are not in it. Each entry's description,
 > permission and parameters are that route's registry declaration; the 16 `/api/v1`
@@ -88,7 +88,7 @@ so no browser or proxy cache keeps a token or a read.
    cannot be looked up or ended; none of these costs the sign-in.
 
    A session is created only if the account's sessions have not been ended since
-   the credential was checked. If a password change, *Sign Out All Devices*
+   the credential was checked. If a password change, *Sign out all devices*
    (`POST /auth/logout-all`) or an administrator deactivating the account lands
    after the credential was checked and before the session exists, the sign-in is
    refused: `401`, a message telling the user to sign in again, and no access
@@ -199,8 +199,8 @@ so no browser or proxy cache keeps a token or a read.
    still be active then too.) The cookie is cleared in that response anyway, so a
    browser that simply repeats the request sends no token and is told `200` for
    nothing. A client that sent its refresh token in the request body can retry
-   with it; a browser user can make sure by signing in again and using *Sign Out
-   All Devices* (`POST /auth/logout-all`). Its revoke is held to the same 15
+   with it; a browser user can make sure by signing in again and using *Sign out
+   all devices* (`POST /auth/logout-all`). Its revoke is held to the same 15
    seconds, counted from when the revoke begins, which is after the look at the
    refresh cookie and its own bound of up to 5 seconds: if the revoke does not
    finish in time it returns `503` with the sessions possibly still active and the
@@ -249,7 +249,7 @@ so no browser or proxy cache keeps a token or a read.
    went half-open and that the server has not yet noticed is dead), does the
    response say the change could not be confirmed, which means the new password
    may be in effect with every session signed out: sign in with the new password,
-   and if it is refused the old one still stands. *Sign Out All Devices* makes
+   and if it is refused the old one still stands. *Sign out all devices* makes
    sure either way.
 
    **How long to wait.** The 15 seconds is the bound on the database work that
@@ -287,7 +287,7 @@ Response: { "access_token": "...", "user": {...}, "expires_at": 1767225600, "per
 The pending token remembers the state of the account that the first step's check
 saw, and the session is created against that, not against the account as it is when
 the code is typed. If the account's sessions were ended in between — a password
-change, *Sign Out All Devices*, a deactivation followed by a reactivation — the
+change, *Sign out all devices*, a deactivation followed by a reactivation — the
 second step is refused before the code is looked at, with the answer an expired
 token gets (`401`, "Invalid or expired pending token"): no recovery code is spent,
 no failed attempt is counted, and the pending token is destroyed. A change that lands
@@ -403,7 +403,7 @@ An account that signs in through single sign-on has no password to send to
 Every authenticated request is checked against its sign-in, reads included. An
 access token is signed for its whole lifetime (`ACCESS_TOKEN_TTL`, 15 minutes by
 default), but once its session ends — signed out, revoked from the session list,
-ended by a password change, *Sign Out All Devices* or the account's deactivation
+ended by a password change, *Sign out all devices* or the account's deactivation
 (by an administrator or an LDAP sync), or expired — its next request is refused
 with `401` ("Session has ended"). A client that answers a `401` by refreshing
 finds the session gone and must sign in again. An access token issued before

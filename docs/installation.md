@@ -130,7 +130,7 @@ Open `http://localhost` (or your configured domain) in a browser. On first run, 
 
 ### 2. Add a Proxmox Cluster
 
-1. From the dashboard, click **Add Cluster**
+1. From the dashboard, click **Add cluster**
 2. Enter a display name and the API URL: `https://your-proxmox-host:8006`
 3. Click **Connect**. If the host uses a self-signed certificate, verify the
    fingerprint that appears and accept it
@@ -143,7 +143,7 @@ Open `http://localhost` (or your configured domain) in a browser. On first run, 
    - **I have a token** — paste an existing token id and secret
      (`user@realm!tokenid` + `xxxxxxxx-…`). See
      [Creating a Proxmox API Token](#creating-a-proxmox-api-token) below.
-5. Click **Create Token & Add** (or **Add Cluster**)
+5. Click **Create token and add** (or **Add cluster**)
 
 The collector begins syncing inventory and metrics within seconds. You'll see nodes, VMs, and containers appear on the dashboard.
 
@@ -528,6 +528,6 @@ DELETE FROM totp_recovery_codes
  WHERE user_id = (SELECT id FROM users WHERE email = 'admin@example.com');
 ```
 
-Sign in, change the password on your **Profile** page (user menu, top right) so the temporary one is no longer in your `psql` history, and use **Sign Out All Devices** in the same menu if the old password may have leaked.
+Sign in, change the password on your **Profile** page (user menu, top right) so the temporary one is no longer in your `psql` history, and use **Sign out all devices** in the same menu if the old password may have leaked.
 
 Don't delete rows from `users` to get the first-run setup back. Alert rules, notification channels, reports, rolling update jobs and imports reference the user who created them, so the `DELETE` fails on an install that has any, and on one that has none it takes that user's task history and API keys with it.

@@ -443,7 +443,7 @@ function NotesSection({
             size="sm"
           >
             <Save className="mr-2 h-4 w-4" />
-            {updateDesc.isPending ? "Saving..." : "Save Description"}
+            {updateDesc.isPending ? "Saving..." : "Save description"}
           </Button>
         </SettingsFooter>
       )}
@@ -667,7 +667,7 @@ function GeneralSection({
           size="sm"
         >
           <Save className="mr-2 h-4 w-4" />
-          {updateOpts.isPending ? "Saving..." : "Save Changes"}
+          {updateOpts.isPending ? "Saving..." : "Save changes"}
         </Button>
       )}
     </div>
@@ -1232,7 +1232,7 @@ function TagsSection({
             size="sm"
           >
             <Save className="mr-2 h-4 w-4" />
-            {updateTags.isPending ? "Saving..." : "Save Tags"}
+            {updateTags.isPending ? "Saving..." : "Save tags"}
           </Button>
         </SettingsFooter>
       )}
@@ -1286,12 +1286,12 @@ function JoinInfoSection({
             <DialogTrigger asChild>
               <Button variant="outline" size="sm">
                 <Info className="mr-2 h-4 w-4" />
-                Join Information
+                Join information
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Cluster Join Information</DialogTitle>
+                <DialogTitle>Cluster join information</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
@@ -1300,7 +1300,7 @@ function JoinInfoSection({
                 </p>
 
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">Join Command</Label>
+                  <Label className="text-sm font-medium">Join command</Label>
                   <div className="relative">
                     <pre className="rounded-md bg-muted p-4 text-sm font-mono overflow-x-auto whitespace-pre-wrap break-all">
                       {buildJoinCommand(data)}
@@ -1346,7 +1346,7 @@ function JoinInfoSection({
 
                 {data.config_digest && (
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium">Config Digest</Label>
+                    <Label className="text-sm font-medium">Config digest</Label>
                     <code className="block rounded bg-muted px-3 py-2 text-xs font-mono">
                       {data.config_digest}
                     </code>
@@ -1355,7 +1355,7 @@ function JoinInfoSection({
 
                 {data.nodelist && data.nodelist.length > 0 && (
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium">Peer Nodes</Label>
+                    <Label className="text-sm font-medium">Peer nodes</Label>
                     <Table>
                       <TableHeader>
                         <TableRow>

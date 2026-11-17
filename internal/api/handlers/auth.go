@@ -125,7 +125,7 @@ const releaseTxTimeout = 5 * time.Second
 // message says what is true instead.
 const logoutUnconfirmedMessage = "The sign-out could not be confirmed and the session may still be active. " +
 	"A client that sent its refresh token in the request body can retry with it; " +
-	"otherwise sign in again and use \"Sign Out All Devices\"."
+	"otherwise sign in again and use \"Sign out all devices\"."
 
 // logoutAllUnconfirmedMessage is what LogoutAll says when its revoke could not be
 // completed (the database unreachable, too busy, or out of the bound). Unlike Logout it clears nothing on failure — the caller is still signed
@@ -160,7 +160,7 @@ const (
 	passwordChangedMeanwhileMessage      = "Your password was changed by another request, or your account was removed, while this one was being processed; nothing was changed."
 	passwordAccountRemovedMessage        = "Your account was removed while this request was being processed, so there is no password to change and none to sign in with."
 	passwordChangeUnconfirmedMessage     = "Your password change could not be confirmed: the new password may be in effect, with every session of yours, this one included, signed out. " +
-		"Try signing in with the new password; if it is refused, the old password is still in effect. Use \"Sign Out All Devices\" to be sure."
+		"Try signing in with the new password; if it is refused, the old password is still in effect. Use \"Sign out all devices\" to be sure."
 )
 
 // logoutMatchedPreviousToken is the audit detail a sign-out leaves when it ended

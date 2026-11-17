@@ -1271,7 +1271,7 @@ func (h *ClusterHandler) VerifyCertificate(c fiber.Ctx, p *apischema.Params) err
 	case certVerifyRefuseUnattested:
 		return fiber.NewError(fiber.StatusConflict,
 			"Nexara has no independently observed certificate for this endpoint to check against, "+
-				"so it cannot verify one automatically. Set the fingerprint through Edit Cluster after "+
+				"so it cannot verify one automatically. Set the fingerprint through Edit cluster after "+
 				"confirming it on the node itself.")
 	case certVerifyRefuseMismatch:
 		return fiber.NewError(fiber.StatusConflict,

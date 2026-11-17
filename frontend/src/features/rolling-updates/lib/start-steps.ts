@@ -18,7 +18,7 @@ export type StartStepsJob = Pick<
  * What Start sets going, in the order the orchestrator does it
  * (internal/rolling/orchestrator.go processJob, finishUpgrade and
  * reboot_policy.go decideReboot). Shared by the Start confirmation and the
- * wizard's "Create & Start", so both say the same thing.
+ * wizard's "Create and start", so both say the same thing.
  */
 export function startJobSteps(
   job: StartStepsJob,

@@ -283,7 +283,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
   const defaultTrigger = (
     <Button>
       <Plus className="mr-2 h-4 w-4" />
-      Add Cluster
+      Add cluster
     </Button>
   );
 
@@ -303,7 +303,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
       <DialogTrigger asChild>{trigger ?? defaultTrigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Proxmox Cluster</DialogTitle>
+          <DialogTitle>Add Proxmox cluster</DialogTitle>
           <DialogDescription>
             {unreachable != null
               ? t("clusterAddedDesc")
@@ -387,7 +387,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
         ) : !showFingerprint ? (
           <form onSubmit={handleFetchFingerprintSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="cluster-name">Cluster Name</Label>
+              <Label htmlFor="cluster-name">Cluster name</Label>
               <Input
                 id="cluster-name"
                 placeholder="Production Cluster"
@@ -448,7 +448,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
                   <ShieldAlert className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Self-Signed Certificate</span>
+                  <span className="font-medium">Self-signed certificate</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
                   The server at <strong>{apiUrl}</strong> uses a self-signed
@@ -457,7 +457,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 </p>
                 <div className="rounded-md bg-muted p-3">
                   <p className="text-xs text-muted-foreground mb-1">
-                    SHA-256 Fingerprint
+                    SHA-256 fingerprint
                   </p>
                   <code className="text-xs font-mono break-all select-all">
                     {fingerprint.fingerprint}
@@ -480,7 +480,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 p-4">
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-500">
                   <ShieldCheck className="h-5 w-5 shrink-0" />
-                  <span className="font-medium">Trusted Certificate</span>
+                  <span className="font-medium">Trusted certificate</span>
                 </div>
                 <p className="text-sm text-muted-foreground mt-1">
                   The server at <strong>{apiUrl}</strong> has a valid
@@ -544,7 +544,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="bootstrap-user">Proxmox Username</Label>
+                  <Label htmlFor="bootstrap-user">Proxmox username</Label>
                   <Input
                     id="bootstrap-user"
                     placeholder="root@pam"
@@ -559,7 +559,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="bootstrap-password">Proxmox Password</Label>
+                  <Label htmlFor="bootstrap-password">Proxmox password</Label>
                   <Input
                     id="bootstrap-password"
                     type="password"
@@ -577,7 +577,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
 
                 {otpRequired && (
                   <div className="space-y-2">
-                    <Label htmlFor="bootstrap-otp">One-Time Code</Label>
+                    <Label htmlFor="bootstrap-otp">One-time code</Label>
                     <Input
                       id="bootstrap-otp"
                       inputMode="numeric"
@@ -592,7 +592,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="bootstrap-token-name">Token Name</Label>
+                  <Label htmlFor="bootstrap-token-name">Token name</Label>
                   <Input
                     id="bootstrap-token-name"
                     placeholder="nexara"
@@ -624,7 +624,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                  * keeps the bootstrap username field clean.
                  */}
                 <div className="space-y-2">
-                  <Label htmlFor="token-id">API Token ID</Label>
+                  <Label htmlFor="token-id">API token ID</Label>
                   <Input
                     id="token-id"
                     placeholder="root@pam!nexara"
@@ -638,7 +638,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="token-secret">API Token Secret</Label>
+                  <Label htmlFor="token-secret">API token secret</Label>
                   <Input
                     id="token-secret"
                     type="password"
@@ -684,10 +684,10 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
                 ) : mode === "bootstrap" ? (
                   <>
                     <Wand2 className="mr-2 h-4 w-4" />
-                    Create Token &amp; Add
+                    Create token and add
                   </>
                 ) : (
-                  "Add Cluster"
+                  "Add cluster"
                 )}
               </Button>
             </DialogFooter>

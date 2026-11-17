@@ -181,18 +181,18 @@ export function NodeMetricsPanel({
           />
         </StatStrip>
         <div className="-mt-px border-t px-[18px] pt-4">
-          {focus === "cpu" && chart("CPU Usage", "cpuPercent")}
-          {focus === "memory" && chart("Memory Usage", "memPercent", memDetail)}
+          {focus === "cpu" && chart("CPU usage", "cpuPercent")}
+          {focus === "memory" && chart("Memory usage", "memPercent", memDetail)}
           {focus === "disk" && (
             <div className="grid gap-6 sm:grid-cols-2">
-              {chart("Disk Read", "diskReadBps")}
-              {chart("Disk Write", "diskWriteBps")}
+              {chart("Disk read", "diskReadBps")}
+              {chart("Disk write", "diskWriteBps")}
             </div>
           )}
           {focus === "network" && (
             <div className="grid gap-6 sm:grid-cols-2">
-              {chart("Network In", "netInBps")}
-              {chart("Network Out", "netOutBps")}
+              {chart("Network in", "netInBps")}
+              {chart("Network out", "netOutBps")}
             </div>
           )}
         </div>

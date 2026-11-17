@@ -444,9 +444,9 @@ export function BulkMigrateDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowLeftRight className="h-5 w-5" />
-            {step === "config" && "Bulk Migrate"}
-            {step === "preflight" && "Pre-Flight Checks"}
-            {step === "progress" && "Migration Progress"}
+            {step === "config" && "Bulk migrate"}
+            {step === "preflight" && "Pre-flight checks"}
+            {step === "progress" && "Migration progress"}
           </DialogTitle>
           <DialogDescription>
             Migrate {String(rows.length)} resource
@@ -591,7 +591,7 @@ export function BulkMigrateDialog({
                     t("executeMigrationsAnyway", { count: passingCount })
                   ) : (
                     <>
-                      Execute {String(passingCount)} Migration
+                      Execute {String(passingCount)} migration
                       {passingCount !== 1 ? "s" : ""}
                     </>
                   )}
@@ -763,7 +763,7 @@ function ConfigStep({
     <div className="space-y-4">
       {/* Migration Type */}
       <div className="space-y-2">
-        <Label>Migration Type</Label>
+        <Label>Migration type</Label>
         <Select
           value={migrationType}
           onValueChange={(v) => {
@@ -774,20 +774,16 @@ function ConfigStep({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="intra-cluster">
-              Intra-Cluster (same cluster)
-            </SelectItem>
-            <SelectItem value="cross-cluster">
-              Cross-Cluster (different clusters)
-            </SelectItem>
+            <SelectItem value="intra-cluster">Within this cluster</SelectItem>
+            <SelectItem value="cross-cluster">To another cluster</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {/* Migration Mode (intra-cluster only) */}
+      {/* What to move (intra-cluster only) */}
       {migrationType === "intra-cluster" && (
         <div className="space-y-2">
-          <Label>Migration Mode</Label>
+          <Label>What to move</Label>
           <Select
             value={migrationMode}
             onValueChange={(v) => {
@@ -798,20 +794,20 @@ function ConfigStep({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="live">Live (move to another node)</SelectItem>
+              <SelectItem value="live">The guests, to another node</SelectItem>
               <SelectItem value="storage">
-                Storage (move disks to another storage)
+                Their disks, to another storage
               </SelectItem>
-              <SelectItem value="both">Both (move VM + move disks)</SelectItem>
+              <SelectItem value="both">The guests and their disks</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">
             {migrationMode === "live" &&
-              "Moves VMs to a different node (memory migration)"}
+              "Moves the guests to a different node."}
             {migrationMode === "storage" &&
-              "Moves all VM disks to a different storage on the same node"}
+              "Moves all of the guests' disks to a different storage on the same node."}
             {migrationMode === "both" &&
-              "Moves VMs to another node and all disks to a different storage"}
+              "Moves the guests to another node and all of their disks to a different storage."}
           </p>
         </div>
       )}
@@ -819,7 +815,7 @@ function ConfigStep({
       {/* Target Cluster (cross-cluster) */}
       {migrationType === "cross-cluster" && (
         <div className="space-y-2">
-          <Label>Target Cluster</Label>
+          <Label>Target cluster</Label>
           <Select
             value={targetClusterId}
             onValueChange={(v) => {
@@ -845,7 +841,7 @@ function ConfigStep({
       {/* Target Node */}
       {!(migrationType === "intra-cluster" && migrationMode === "storage") && (
         <div className="space-y-2">
-          <Label>Target Node</Label>
+          <Label>Target node</Label>
           <Select value={targetNode} onValueChange={setTargetNode}>
             <SelectTrigger>
               <SelectValue placeholder="Select target node" />
@@ -880,7 +876,7 @@ function ConfigStep({
             </SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground">
-            Auto-selects the least loaded node
+            The least loaded node is picked for you.
           </p>
         </div>
       )}
@@ -889,7 +885,7 @@ function ConfigStep({
       {migrationType === "intra-cluster" &&
         (migrationMode === "storage" || migrationMode === "both") && (
           <div className="space-y-2">
-            <Label>Target Storage</Label>
+            <Label>Target storage</Label>
             <Select value={targetStorage} onValueChange={setTargetStorage}>
               <SelectTrigger>
                 <SelectValue placeholder="Select target storage" />
@@ -903,7 +899,7 @@ function ConfigStep({
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground">
-              All VM disks will be moved to this storage
+              All of the guests' disks are moved to this storage.
             </p>
           </div>
         )}
@@ -913,7 +909,7 @@ function ConfigStep({
         targetClusterId.length > 0 &&
         uniqueSourceStorage.length > 0 && (
           <div className="space-y-2">
-            <Label>Storage Mapping</Label>
+            <Label>Storage mapping</Label>
             <div className="space-y-2 rounded-md border p-3">
               {uniqueSourceStorage.map((src) => (
                 <div
@@ -955,7 +951,7 @@ function ConfigStep({
         sourceBridges &&
         sourceBridges.length > 0 && (
           <div className="space-y-2">
-            <Label>Network Mapping</Label>
+            <Label>Network mapping</Label>
             <div className="space-y-2 rounded-md border p-3">
               {sourceBridges.map((src) => (
                 <div
@@ -996,7 +992,7 @@ function ConfigStep({
           migrationType === "intra-cluster" && migrationMode === "storage"
         ) && (
           <div className="flex items-center justify-between">
-            <Label>Live Migration</Label>
+            <Label>Live migration</Label>
             <Switch checked={online} onCheckedChange={setOnline} />
           </div>
         )}
@@ -1010,7 +1006,7 @@ function ConfigStep({
           onBwlimitChange={setBwlimit}
           deleteSource={deleteSource}
           onDeleteSourceChange={setDeleteSource}
-          deleteSourceLabel="Delete Source After Migration"
+          deleteSourceLabel="Delete source after migration"
           hideDeleteSource={!showDeleteSource}
           {...(movesStorage
             ? {
@@ -1049,7 +1045,7 @@ function ConfigStep({
         {isCreating ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Creating Jobs & Running Checks...
+            Creating jobs and running checks...
           </>
         ) : (
           "Run pre-flight checks"

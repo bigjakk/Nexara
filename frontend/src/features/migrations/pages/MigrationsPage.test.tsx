@@ -46,7 +46,7 @@ describe("MigrationsPage", () => {
 
   it("shows new migration button", () => {
     renderPage();
-    expect(screen.getByText("New Migration")).toBeInTheDocument();
+    expect(screen.getByText("New migration")).toBeInTheDocument();
   });
 
   it("shows empty state when no jobs", () => {

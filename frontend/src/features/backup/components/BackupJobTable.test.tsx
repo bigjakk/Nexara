@@ -82,7 +82,7 @@ function renderTable(jobs: BackupJob[]) {
 }
 
 async function openConfirm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Run Now" }));
+  await user.click(screen.getByRole("button", { name: "Run now" }));
   return screen.findByRole("alertdialog");
 }
 
@@ -115,13 +115,13 @@ describe("BackupJobTable — permissions", () => {
     [["view:backup"], []],
     [
       ["view:backup", "manage:backup"],
-      ["Run Now", "Edit"],
+      ["Run now", "Edit"],
     ],
     [["view:backup", "delete:backup"], ["Delete"]],
   ])("with %j offers %j", (permissions, offered) => {
     useAuthStore.setState({ permissions });
     renderTable([job()]);
-    for (const name of ["Run Now", "Edit", "Delete"]) {
+    for (const name of ["Run now", "Edit", "Delete"]) {
       expect(screen.queryAllByRole("button", { name })).toHaveLength(
         offered.includes(name) ? 1 : 0,
       );
@@ -204,7 +204,7 @@ describe("BackupJobTable — Run now", () => {
       expect(sent).toEqual([RUN_PATH]);
     });
 
-    const button = screen.getByRole("button", { name: "Run Now" });
+    const button = screen.getByRole("button", { name: "Run now" });
     expect(button).toBeDisabled();
     await user.click(button);
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
@@ -412,7 +412,7 @@ describe("BackupJobTable — Run now", () => {
     // absent toasts below are absent because they were not raised, not
     // because the answer had not arrived yet.
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Run Now" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Run now" })).toBeEnabled();
     });
     for (const [level, want] of [
       ["success", tc.success],

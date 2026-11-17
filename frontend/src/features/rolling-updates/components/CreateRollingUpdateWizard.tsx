@@ -52,7 +52,7 @@ interface CreateRollingUpdateWizardProps {
   clusterId: string;
   /** Named on every step, so the cluster the job acts on is never a guess. */
   clusterName?: string | undefined;
-  /** Called once a "Create & Start" job has started, to open its view. */
+  /** Called once a "Create and start" job has started, to open its view. */
   onStarted?: (job: RollingUpdateJob) => void;
 }
 
@@ -249,9 +249,9 @@ export function CreateRollingUpdateWizard({
     (preflightReport !== null && !preflightReport.has_errors);
 
   const stepTitle = {
-    nodes: "Select Nodes",
-    ha_review: "HA Constraint Check",
-    configure: "Configure Update",
+    nodes: "Select nodes",
+    ha_review: "HA constraint check",
+    configure: "Configure update",
   };
 
   return (
@@ -316,7 +316,7 @@ export function CreateRollingUpdateWizard({
                 {/* Upgrade order — reorderable list */}
                 {selectedNodes.length > 1 && (
                   <div>
-                    <p className="mb-2 text-sm font-medium">Upgrade Order</p>
+                    <p className="mb-2 text-sm font-medium">Upgrade order</p>
                     <p className="mb-2 text-xs text-muted-foreground">
                       Nodes will be updated top to bottom. Use arrows to
                       reorder.
@@ -462,7 +462,7 @@ export function CreateRollingUpdateWizard({
             {preflightReport !== null &&
               preflightReport.conflicts.length > 0 && (
                 <div className="space-y-2">
-                  <Label>Conflict Policy</Label>
+                  <Label>Conflict policy</Label>
                   <div className="flex gap-2">
                     <Button
                       variant={haPolicy === "warn" ? "default" : "outline"}
@@ -471,7 +471,7 @@ export function CreateRollingUpdateWizard({
                         setHaPolicy("warn");
                       }}
                     >
-                      Warn &amp; Proceed
+                      Warn and proceed
                     </Button>
                     <Button
                       variant={haPolicy === "strict" ? "default" : "outline"}
@@ -656,7 +656,7 @@ export function CreateRollingUpdateWizard({
               {selectedNodes.join(" → ")}
             </p>
 
-            {/* What "Create & Start" sets going: the Start confirmation's own
+            {/* What "Create and start" sets going: the Start confirmation's own
                 text, since this button starts the job without that dialog. */}
             {startImmediately && (
               <p className="text-sm">
@@ -690,7 +690,7 @@ export function CreateRollingUpdateWizard({
                 {createJob.isPending && (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 )}
-                {startImmediately ? "Create & Start" : "Create Job"}
+                {startImmediately ? "Create and start" : "Create job"}
               </Button>
             </div>
           </div>

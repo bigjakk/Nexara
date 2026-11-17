@@ -259,11 +259,11 @@ describe("VMDetailPage", () => {
   // The strip is the chart's selector: one measure is drawn large at a time.
   it("draws the measure picked in the performance strip", async () => {
     renderPage();
-    expect(screen.getByText("CPU Usage")).toBeInTheDocument();
+    expect(screen.getByText("CPU usage")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /^Network/ }));
-    expect(screen.queryByText("CPU Usage")).toBeNull();
-    expect(screen.getByText("Network In")).toBeInTheDocument();
-    expect(screen.getByText("Network Out")).toBeInTheDocument();
+    expect(screen.queryByText("CPU usage")).toBeNull();
+    expect(screen.getByText("Network in")).toBeInTheDocument();
+    expect(screen.getByText("Network out")).toBeInTheDocument();
   });
 
   it("renders overview tab with resource info", () => {
@@ -340,7 +340,7 @@ describe("VMDetailPage", () => {
   // guest's OS is classified — VMGuestToolsCard trusts the gate rather than
   // re-deriving it. Drop the gate and every Linux VM's page fires a
   // cluster-wide guest-tools request, and 403s it without view:guest_tools.
-  it("hides the Guest Tools tab for a non-Windows guest", () => {
+  it("hides the Guest tools tab for a non-Windows guest", () => {
     renderPage();
     expect(
       screen.queryByRole("tab", { name: /guest tools/i }),
@@ -353,7 +353,7 @@ describe("VMDetailPage", () => {
   // Stopped so the Overview guest-agent panel — the one other guest-tools
   // reader — stays unmounted and no query fires.
   it.each([{ config_ostype: "win11" }, { ostype: "mswindows" }])(
-    "shows the Guest Tools tab for a Windows guest (%o)",
+    "shows the Guest tools tab for a Windows guest (%o)",
     (os) => {
       renderPage("vm", { ...os, status: "stopped" });
       expect(

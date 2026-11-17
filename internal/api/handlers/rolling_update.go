@@ -509,7 +509,7 @@ func (h *RollingUpdateHandler) requireNodesReachableBySSH(ctx context.Context, c
 		return nil
 	}
 	return fiber.NewError(fiber.StatusBadRequest, "Automated upgrade cannot reach "+strings.Join(unreachable, ", ")+
-		" over SSH. Pin missing host keys under Security → Rolling Updates → SSH Credentials, or turn off Automated upgrade.")
+		" over SSH. Pin missing host keys under Security → Rolling updates → SSH access, or turn off Automated upgrade.")
 }
 
 // GetJob returns a single rolling update job with node counts.

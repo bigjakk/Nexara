@@ -120,14 +120,14 @@ export const lifecycleActions: ActionConfig[] = [
 export const managementActions: ManagementActionConfig[] = [
   {
     action: "snapshot",
-    label: "Take Snapshot",
+    label: "Take snapshot",
     icon: <Camera className="h-4 w-4" />,
     variant: "outline",
     showWhen: (_s, _k, template) => !template,
   },
   {
     action: "deploy",
-    label: "Deploy from Template",
+    label: "Deploy from template",
     icon: <Rocket className="h-4 w-4" />,
     variant: "outline",
     showWhen: (_s, _k, template) => template === true,
@@ -141,7 +141,7 @@ export const managementActions: ManagementActionConfig[] = [
   },
   {
     action: "clone-to-template",
-    label: "Clone to Template",
+    label: "Clone to template",
     icon: <FileBox className="h-4 w-4" />,
     variant: "outline",
     showWhen: (_s, _k, template) => !template,
@@ -155,7 +155,7 @@ export const managementActions: ManagementActionConfig[] = [
   },
   {
     action: "convert-to-template",
-    label: "Convert to Template",
+    label: "Convert to template",
     icon: <FileBox className="h-4 w-4" />,
     variant: "outline",
     showWhen: (s, _k, template) => s === "stopped" && !template,

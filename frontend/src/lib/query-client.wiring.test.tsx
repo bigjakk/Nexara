@@ -168,7 +168,7 @@ const SHOWN_IN_PLACE: [
       />
     ),
     async (u) => {
-      await u.click(screen.getByRole("button", { name: "Save Changes" }));
+      await u.click(screen.getByRole("button", { name: "Save changes" }));
     },
   ],
   [
