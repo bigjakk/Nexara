@@ -315,3 +315,27 @@ func TestCephReadMovesOnFromANodeTheEndpointCannotReach(t *testing.T) {
 		t.Errorf("Proxmox was asked %q, want %q", got, want)
 	}
 }
+
+// A compute-only node behind the API address answers the cluster route with
+// "binary not installed"; the page's status comes from a member that runs Ceph.
+func TestCephStatusComesFromANodeThatRunsCeph(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api2/json/nodes":
+			_, _ = w.Write([]byte(`{"data":[{"node":"pve-01","status":"online"},{"node":"pve-02","status":"online"}]}`))
+		case "/api2/json/nodes/pve-02/ceph/status":
+			_, _ = w.Write([]byte(`{"data":` + cephStatusFixture + `}`))
+		default:
+			http.Error(w, `{"data":null,"message":"binary not installed: /usr/bin/ceph-mon\n"}`, http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	app, clusterID := cephReadApp(t, srv.URL, []db.Node{{Name: "pve-01", Status: "online"}}, nil)
+
+	status, body := cephCall(t, app, http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/ceph/status")
+	if status != http.StatusOK || !strings.Contains(body, `"num_pgs":97`) {
+		t.Errorf("status = %d %s, want 200 with the member's status", status, body)
+	}
+}

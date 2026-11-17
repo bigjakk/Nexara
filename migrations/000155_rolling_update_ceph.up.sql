@@ -15,6 +15,8 @@
 --                        released, 'already_set' set before the job looked
 --                        (the operator's, never cleared), 'not_held' could
 --                        not be set, 'released' cleared at the job's end.
+--   ceph_noout_reason    why noout is not held, or could not be cleared yet;
+--                        fixed sentences, never Proxmox's error text.
 --   pause_reason         why the engine paused the job itself; '' when an
 --                        operator paused it or it is not paused.
 -- Per node, ceph_wait_reason and ceph_wait_started_at say what the node is
@@ -32,6 +34,7 @@ ALTER TABLE rolling_update_jobs
     ADD COLUMN IF NOT EXISTS ceph_osds_baseline INTEGER NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS ceph_noout_state TEXT NOT NULL DEFAULT ''
         CHECK (ceph_noout_state IN ('', 'held', 'already_set', 'not_held', 'released')),
+    ADD COLUMN IF NOT EXISTS ceph_noout_reason TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS pause_reason TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE rolling_update_nodes

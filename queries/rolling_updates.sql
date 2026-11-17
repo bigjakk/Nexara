@@ -356,7 +356,7 @@ WHERE id = sqlc.arg(id);
 -- they are disabled; see holdNoout.
 -- name: SetJobCephNooutState :exec
 UPDATE rolling_update_jobs
-SET ceph_noout_state = sqlc.arg(ceph_noout_state), updated_at = now()
+SET ceph_noout_state = sqlc.arg(ceph_noout_state), ceph_noout_reason = sqlc.arg(ceph_noout_reason), updated_at = now()
 WHERE id = sqlc.arg(id);
 
 -- The wait's start is kept across ticks (COALESCE) for the time limit.

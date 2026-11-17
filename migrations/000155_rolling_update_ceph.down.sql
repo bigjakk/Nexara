@@ -1,9 +1,11 @@
+-- Rolling back while a job holds Ceph's noout leaves the flag set with no record of it.
 ALTER TABLE rolling_update_nodes
     DROP COLUMN IF EXISTS ceph_wait_started_at,
     DROP COLUMN IF EXISTS ceph_wait_reason;
 
 ALTER TABLE rolling_update_jobs
     DROP COLUMN IF EXISTS pause_reason,
+    DROP COLUMN IF EXISTS ceph_noout_reason,
     DROP COLUMN IF EXISTS ceph_noout_state,
     DROP COLUMN IF EXISTS ceph_osds_baseline,
     DROP COLUMN IF EXISTS ceph_present,

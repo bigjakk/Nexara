@@ -78,6 +78,8 @@ type rollingUpdateJobResponse struct {
 	CephNoout      bool   `json:"ceph_noout"`
 	CephPresent    *bool  `json:"ceph_present"`
 	CephNooutState string `json:"ceph_noout_state"`
+	// CephNooutReason says why noout is not held, or could not be cleared yet.
+	CephNooutReason string `json:"ceph_noout_reason,omitempty"`
 	// PauseReason says why the engine paused the job itself; "" otherwise.
 	PauseReason string `json:"pause_reason"`
 }
@@ -136,6 +138,7 @@ func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 		CephWait:          j.CephWait,
 		CephNoout:         j.CephNoout,
 		CephNooutState:    j.CephNooutState,
+		CephNooutReason:   j.CephNooutReason,
 		PauseReason:       j.PauseReason,
 		FailureReason:     j.FailureReason,
 		CreatedBy:         j.CreatedBy.String(),

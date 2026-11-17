@@ -273,6 +273,7 @@ func (o *Orchestrator) advanceNode(ctx context.Context, client *proxmox.Client, 
 		o.advanceRebooting(ctx, client, job, node)
 	case "health_check":
 		if o.cephAllowsHealthy(ctx, client, &job, node) {
+			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
 			o.advanceHealthCheck(ctx, client, job, node)
 		}
 	case "restoring":
@@ -1328,7 +1329,7 @@ func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJo
 				o.logger.Error("failed to set node upgrade completed (reboot pending)", "node_id", node.ID, "error", err)
 				return
 			}
-			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check")
 			return
 		case rebootFail:
 			o.failNode(ctx, job, node, fmt.Sprintf("refusing to reboot: running guests present on node: %s", formatGuestList(violations)))
@@ -1358,7 +1359,7 @@ func (o *Orchestrator) finishUpgrade(ctx context.Context, job db.RollingUpdateJo
 			return
 		}
 
-		o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+		o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check")
 		o.logger.Info("automated upgrade completed, no reboot needed", "node", node.NodeName)
 	}
 }
@@ -1453,7 +1454,7 @@ func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Cli
 		o.logger.Error("failed to set node health check passed", "node_id", node.ID, "error", err)
 		return
 	}
-	o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+	o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check")
 	o.logger.Info("node back online after reboot",
 		"node", node.NodeName, "uptime_s", status.Uptime, "elapsed_s", int64(elapsed.Seconds()))
 }
@@ -1693,7 +1694,7 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 			if err := o.queries.SetNodeUpgradeCompletedRebootPending(ctx, node.ID); err != nil {
 				return fmt.Errorf("confirm node upgrade (reboot pending): %w", err)
 			}
-			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+			o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check")
 			return nil
 		case rebootFail:
 			return fmt.Errorf("node has running guests, refusing to reboot: %s — migrate them off and confirm again", formatGuestList(violations))
@@ -1734,7 +1735,7 @@ func (o *Orchestrator) ConfirmUpgrade(ctx context.Context, job db.RollingUpdateJ
 			return fmt.Errorf("set health check: %w", err)
 		}
 
-		o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check_passed")
+		o.publishEvent(ctx, job.ClusterID, job.ID, "node_health_check")
 		o.logger.Info("upgrade confirmed, no reboot", "node", node.NodeName)
 	}
 

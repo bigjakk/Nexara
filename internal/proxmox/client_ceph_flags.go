@@ -61,19 +61,83 @@ func (c *Client) SetCephFlag(ctx context.Context, flag string, value bool) error
 	return nil
 }
 
-// IsCephNotConfigured reports whether a Ceph read failed because the answering
-// node has no Ceph, rather than because the read could not be made. The
-// sentences are pve-manager PVE/Ceph/Tools.pm's check_ceph_installed,
-// check_ceph_inited and check_ceph_configured, which the Ceph routes call first.
-func IsCephNotConfigured(err error) bool {
-	if err == nil {
-		return false
+// IsCephNotInitialized reports pve-manager's "pveceph configuration not
+// initialized" (PVE/Ceph/Tools.pm check_ceph_inited): /etc/pve/ceph.conf, or
+// /etc/pve/ceph, is missing. Both live in /etc/pve, the cluster's shared
+// filesystem, so every node gives the same answer: the cluster has no Ceph.
+func IsCephNotInitialized(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "pveceph configuration not initialized")
+}
+
+// isCephNotInstalled reports check_ceph_installed's "binary not installed": the
+// node that answered has no ceph-mon. That node alone; another may run Ceph.
+// Not ErrNotFound: checkStatus drops a 404's body, and a proxy's 404 would read
+// as an answer (see IsHARulesUnsupportedError).
+func isCephNotInstalled(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "binary not installed")
+}
+
+// CephPresence is what ReadCephStatus learned about whether the cluster runs Ceph.
+type CephPresence int
+
+const (
+	// CephPresenceUnknown: a read failed, or a member could not be asked.
+	CephPresenceUnknown CephPresence = iota
+	CephPresent
+	CephAbsent
+)
+
+// ReadCephStatus reads the cluster's Ceph status from a node that runs Ceph.
+// GET /cluster/ceph/status has no proxyto, so it is answered by the node the
+// client is connected to; on a cluster where that node has no Ceph (a
+// compute-only member behind the API address, or the one a failover reached) it
+// says "binary not installed" though the other members run Ceph. On that answer
+// each member is asked in turn through GET /nodes/{node}/ceph/status, which
+// pveproxy forwards (proxyto => 'node'). The cluster is absent only when every
+// member says it has no Ceph, or one says the cluster-wide configuration is
+// missing; a member that could not be asked leaves it unknown. err is set
+// whenever status is nil, with the absent answer itself when absent.
+func (c *Client) ReadCephStatus(ctx context.Context) (*CephStatus, CephPresence, error) {
+	status, err := c.GetClusterCephStatus(ctx)
+	switch {
+	case err == nil:
+		return status, CephPresent, nil
+	case IsCephNotInitialized(err):
+		return nil, CephAbsent, err
+	case !isCephNotInstalled(err):
+		return nil, CephPresenceUnknown, err
 	}
-	if errors.Is(err, ErrNotFound) {
-		return true
+	nodes, lerr := c.GetNodes(ctx)
+	if lerr != nil {
+		return nil, CephPresenceUnknown, lerr
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "binary not installed") ||
-		strings.Contains(msg, "pveceph configuration not initialized") ||
-		strings.Contains(msg, "ceph not fully configured")
+	presence, lastErr := CephAbsent, err
+	for _, n := range nodes {
+		s, nerr := c.GetCephStatus(ctx, n.Node)
+		switch {
+		case nerr == nil:
+			return s, CephPresent, nil
+		case IsCephNotInitialized(nerr):
+			return nil, CephAbsent, nerr
+		case isCephNotInstalled(nerr):
+		default:
+			presence, lastErr = CephPresenceUnknown, nerr
+		}
+	}
+	return nil, presence, lastErr
+}
+
+// CephFlagReason says, in words the job view can show, why a Ceph flag could
+// not be read or changed. Proxmox has the flag routes only under /cluster/ceph
+// (pve-manager PVE/API2/Cluster/Ceph.pm; PVE/API2/Ceph.pm, the node routes, has
+// none), answered by the node behind the API address with no proxyto, so one
+// without Ceph cannot change them.
+func CephFlagReason(err error) string {
+	switch {
+	case isCephNotInstalled(err):
+		return "the node behind the cluster's API address has no Ceph, and Proxmox changes Ceph flags only through it"
+	case errors.Is(err, ErrForbidden):
+		return "the cluster's API token lacks Sys.Modify on /"
+	}
+	return "Proxmox did not answer"
 }

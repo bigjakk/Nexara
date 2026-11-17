@@ -105,8 +105,8 @@ type CephPreflight struct {
 // and warnings (never errors: warn and confirm, not block) for a Ceph that is
 // not clean or could not be read, and for more than one node down at a time.
 func AnalyzeCeph(ctx context.Context, client *proxmox.Client, parallelism int32) (CephPreflight, []HAConflict) {
-	status, err := client.GetClusterCephStatus(ctx)
-	if proxmox.IsCephNotConfigured(err) {
+	status, presence, err := client.ReadCephStatus(ctx)
+	if presence == proxmox.CephAbsent {
 		return CephPreflight{Status: "absent"}, []HAConflict{}
 	}
 	check := cephCheck(status, err, 0)

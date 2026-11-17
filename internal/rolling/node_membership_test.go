@@ -47,9 +47,10 @@ type memberDB struct {
 
 	// accept answers each write it names with that many rows and records it
 	// in writes.
-	accept map[string]int64
-	writes []string
-	values []string // "Name=value" for each accepted write whose first argument is a string
+	accept  map[string]int64
+	writes  []string
+	values  []string // "Name=first argument" for each accepted write, beside writes
+	reasons []string // its second argument when a string, beside writes
 	// rowFor answers each single-row query it names with that value's fields.
 	rowFor map[string]any
 	// jobStatus, when set, answers GetRollingUpdateJob with a job in it.
@@ -143,11 +144,16 @@ func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Comm
 	if n, ok := d.accept[name]; ok {
 		d.mu.Lock()
 		d.writes = append(d.writes, name)
-		if len(args) > 0 {
-			if v, ok := args[0].(string); ok {
-				d.values = append(d.values, name+"="+v)
-			}
+		var first, second any
+		if len(args) > 1 {
+			second = args[1]
 		}
+		if len(args) > 0 {
+			first = args[0]
+		}
+		d.values = append(d.values, fmt.Sprintf("%s=%v", name, first))
+		reason, _ := second.(string)
+		d.reasons = append(d.reasons, reason)
 		d.mu.Unlock()
 		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
 	}

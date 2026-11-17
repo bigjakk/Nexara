@@ -299,7 +299,7 @@ func (q *Queries) GetNextPendingNode(ctx context.Context, jobID uuid.UUID) (Roll
 }
 
 const getRollingUpdateJob = `-- name: GetRollingUpdateJob :one
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason FROM rolling_update_jobs WHERE id = $1
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason FROM rolling_update_jobs WHERE id = $1
 `
 
 func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (RollingUpdateJob, error) {
@@ -336,6 +336,7 @@ func (q *Queries) GetRollingUpdateJob(ctx context.Context, id uuid.UUID) (Rollin
 		&i.CephPresent,
 		&i.CephOsdsBaseline,
 		&i.CephNooutState,
+		&i.CephNooutReason,
 		&i.PauseReason,
 	)
 	return i, err
@@ -411,7 +412,7 @@ func (q *Queries) IncrementJobCleanupAttempts(ctx context.Context, id uuid.UUID)
 const insertRollingUpdateJob = `-- name: InsertRollingUpdateJob :one
 INSERT INTO rolling_update_jobs (cluster_id, parallelism, reboot_after_update, auto_restore_guests, package_excludes, ha_policy, ha_warnings, auto_upgrade, created_by, notify_channel_id, drain_guests, ceph_wait, ceph_noout, ceph_present)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason
+RETURNING id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason
 `
 
 type InsertRollingUpdateJobParams struct {
@@ -480,6 +481,7 @@ func (q *Queries) InsertRollingUpdateJob(ctx context.Context, arg InsertRollingU
 		&i.CephPresent,
 		&i.CephOsdsBaseline,
 		&i.CephNooutState,
+		&i.CephNooutReason,
 		&i.PauseReason,
 	)
 	return i, err
@@ -539,7 +541,7 @@ func (q *Queries) InsertRollingUpdateNode(ctx context.Context, arg InsertRolling
 }
 
 const listCleanupPendingJobsForCluster = `-- name: ListCleanupPendingJobsForCluster :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason FROM rolling_update_jobs
 WHERE cluster_id = $1
   AND cleanup_pending = true
   AND status IN ('completed', 'failed', 'cancelled')
@@ -586,6 +588,7 @@ func (q *Queries) ListCleanupPendingJobsForCluster(ctx context.Context, clusterI
 			&i.CephPresent,
 			&i.CephOsdsBaseline,
 			&i.CephNooutState,
+			&i.CephNooutReason,
 			&i.PauseReason,
 		); err != nil {
 			return nil, err
@@ -599,7 +602,7 @@ func (q *Queries) ListCleanupPendingJobsForCluster(ctx context.Context, clusterI
 }
 
 const listRollingUpdateJobs = `-- name: ListRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason FROM rolling_update_jobs
 WHERE cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -651,6 +654,7 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 			&i.CephPresent,
 			&i.CephOsdsBaseline,
 			&i.CephNooutState,
+			&i.CephNooutReason,
 			&i.PauseReason,
 		); err != nil {
 			return nil, err
@@ -664,7 +668,7 @@ func (q *Queries) ListRollingUpdateJobs(ctx context.Context, arg ListRollingUpda
 }
 
 const listRollingUpdateJobsNeedingCleanup = `-- name: ListRollingUpdateJobsNeedingCleanup :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason FROM rolling_update_jobs
 WHERE cleanup_pending = true
   AND status IN ('completed', 'failed', 'cancelled')
 ORDER BY updated_at
@@ -711,6 +715,7 @@ func (q *Queries) ListRollingUpdateJobsNeedingCleanup(ctx context.Context) ([]Ro
 			&i.CephPresent,
 			&i.CephOsdsBaseline,
 			&i.CephNooutState,
+			&i.CephNooutReason,
 			&i.PauseReason,
 		); err != nil {
 			return nil, err
@@ -778,7 +783,7 @@ func (q *Queries) ListRollingUpdateNodes(ctx context.Context, jobID uuid.UUID) (
 }
 
 const listRunningRollingUpdateJobs = `-- name: ListRunningRollingUpdateJobs :many
-SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, pause_reason FROM rolling_update_jobs
+SELECT id, cluster_id, status, parallelism, reboot_after_update, auto_restore_guests, package_excludes, failure_reason, created_by, started_at, completed_at, created_at, updated_at, ha_policy, ha_warnings, auto_upgrade, drs_was_enabled, notify_channel_id, native_crs_paused, saved_crs_config, disabled_ha_rules, cleanup_pending, cleanup_attempts, drain_guests, resumed_at, ceph_wait, ceph_noout, ceph_present, ceph_osds_baseline, ceph_noout_state, ceph_noout_reason, pause_reason FROM rolling_update_jobs
 WHERE status = 'running'
 ORDER BY created_at
 `
@@ -823,6 +828,7 @@ func (q *Queries) ListRunningRollingUpdateJobs(ctx context.Context) ([]RollingUp
 			&i.CephPresent,
 			&i.CephOsdsBaseline,
 			&i.CephNooutState,
+			&i.CephNooutReason,
 			&i.PauseReason,
 		); err != nil {
 			return nil, err
@@ -881,19 +887,20 @@ func (q *Queries) ResumeRollingUpdateJob(ctx context.Context, id uuid.UUID) erro
 
 const setJobCephNooutState = `-- name: SetJobCephNooutState :exec
 UPDATE rolling_update_jobs
-SET ceph_noout_state = $1, updated_at = now()
-WHERE id = $2
+SET ceph_noout_state = $1, ceph_noout_reason = $2, updated_at = now()
+WHERE id = $3
 `
 
 type SetJobCephNooutStateParams struct {
-	CephNooutState string    `json:"ceph_noout_state"`
-	ID             uuid.UUID `json:"id"`
+	CephNooutState  string    `json:"ceph_noout_state"`
+	CephNooutReason string    `json:"ceph_noout_reason"`
+	ID              uuid.UUID `json:"id"`
 }
 
 // 'held' is written before noout is set, as the HA rules are recorded before
 // they are disabled; see holdNoout.
 func (q *Queries) SetJobCephNooutState(ctx context.Context, arg SetJobCephNooutStateParams) error {
-	_, err := q.db.Exec(ctx, setJobCephNooutState, arg.CephNooutState, arg.ID)
+	_, err := q.db.Exec(ctx, setJobCephNooutState, arg.CephNooutState, arg.CephNooutReason, arg.ID)
 	return err
 }
 

@@ -839,7 +839,7 @@ func (h *ClusterHandler) Delete(c fiber.Ctx, p *apischema.Params) error {
 		for i, pj := range pending {
 			ids[i] = pj.ID.String()
 		}
-		auditFields["warning"] = "deleted with unreleased rolling-update state; CRS pause / HA-rule disables may persist on the Proxmox cluster"
+		auditFields["warning"] = "deleted with unreleased rolling-update state; CRS pause / HA-rule disables / Ceph noout may persist on the Proxmox cluster"
 		auditFields["cleanup_pending_job_ids"] = ids
 	}
 

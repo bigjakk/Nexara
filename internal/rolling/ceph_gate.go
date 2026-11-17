@@ -18,23 +18,24 @@ import (
 const cephWaitLimit = 30 * time.Minute
 
 // cephPresent reads the cluster's Ceph status for a job that has a Ceph option
-// on, and decides once per job whether the cluster runs Ceph: the first answer,
-// the create's (DetectCeph) or else the engine's own, is remembered in ceph_present, and a cluster remembered without Ceph is never
-// read again, so it pays one status read per job and logs nothing. A cluster
-// that gains Ceph mid-job is not waited for. One remembered with Ceph that then
-// answers "not configured" reads as could-not-look: its nodes keep waiting until
-// the time limit pauses the job. A read that fails before the first answer is
+// on, from a node that runs Ceph (proxmox.ReadCephStatus), and decides once per
+// job whether the cluster runs Ceph: the first answer, the create's
+// (DetectCeph) or else the engine's own, is remembered in ceph_present, and a
+// cluster remembered without Ceph is never read again. A cluster that gains
+// Ceph mid-job is not waited for. One remembered with Ceph that then reads as
+// absent is could-not-look: its nodes wait until the time limit pauses the
+// job. A read that fails, or a member that could not be asked, is
 // could-not-look too, so a job on an unreachable cluster starts no node.
 func (o *Orchestrator) cephPresent(ctx context.Context, client *proxmox.Client, job *db.RollingUpdateJob) (present bool, status *proxmox.CephStatus, readErr error) {
 	if job.CephPresent.Valid && !job.CephPresent.Bool {
 		return false, nil, nil
 	}
-	status, err := client.GetClusterCephStatus(ctx)
-	if err != nil && !job.CephPresent.Valid && proxmox.IsCephNotConfigured(err) {
+	status, presence, err := client.ReadCephStatus(ctx)
+	switch {
+	case presence == proxmox.CephAbsent && !job.CephPresent.Valid:
 		o.remember(ctx, job, false)
 		return false, nil, nil
-	}
-	if err != nil {
+	case status == nil:
 		o.logger.Warn("rolling update: could not read the Ceph status, waiting",
 			"job_id", job.ID, "cluster_id", job.ClusterID, "error", err)
 		return true, nil, err
@@ -47,13 +48,12 @@ func (o *Orchestrator) cephPresent(ctx context.Context, client *proxmox.Client, 
 
 // DetectCeph is the create's look at whether the cluster runs Ceph, which the
 // job then keeps (ceph_present): valid when Proxmox answered either way, NULL
-// when the read failed, for the engine to decide on its first look.
+// when it could not tell, for the engine to decide on its first look.
 func DetectCeph(ctx context.Context, client *proxmox.Client) pgtype.Bool {
-	_, err := client.GetClusterCephStatus(ctx)
-	switch {
-	case err == nil:
+	switch _, presence, _ := client.ReadCephStatus(ctx); presence {
+	case proxmox.CephPresent:
 		return pgtype.Bool{Bool: true, Valid: true}
-	case proxmox.IsCephNotConfigured(err):
+	case proxmox.CephAbsent:
 		return pgtype.Bool{Bool: false, Valid: true}
 	}
 	return pgtype.Bool{}
@@ -128,8 +128,15 @@ func (o *Orchestrator) cephAllowsHealthy(ctx context.Context, client *proxmox.Cl
 // of the wait's start and the job's last resume, so a resume restarts the clock.
 func (o *Orchestrator) cephWaiting(ctx context.Context, job db.RollingUpdateJob, node db.RollingUpdateNode, check CephCheck) {
 	if node.CephWaitStartedAt.Valid && stepElapsed(job, node.CephWaitStartedAt.Time) > cephWaitLimit {
+		mins := int(cephWaitLimit.Minutes())
 		reason := fmt.Sprintf("Paused by Nexara: %s waited more than %d minutes for Ceph (%s). Resume checks Ceph again and waits up to %d more minutes.",
-			node.NodeName, int(cephWaitLimit.Minutes()), check.Reason, int(cephWaitLimit.Minutes()))
+			node.NodeName, mins, check.Reason, mins)
+		if check.Outcome == CephUnknown {
+			// Not Ceph being slow: nothing answered. A token without Sys.Audit
+			// or Datastore.Audit on /, or no member running Ceph, reads so.
+			reason = fmt.Sprintf("Paused by Nexara: for more than %d minutes the Ceph status could not be read while %s waited. Check that the cluster's API token has Sys.Audit on / and that a node running Ceph answers. Resume tries again for up to %d more minutes.",
+				mins, node.NodeName, mins)
+		}
 		rows, err := o.queries.PauseRollingUpdateJobWithReason(ctx, db.PauseRollingUpdateJobWithReasonParams{ID: job.ID, PauseReason: reason})
 		if err != nil || rows == 0 {
 			if err != nil {

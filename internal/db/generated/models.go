@@ -1096,6 +1096,7 @@ type RollingUpdateJob struct {
 	CephPresent      pgtype.Bool        `json:"ceph_present"`
 	CephOsdsBaseline int32              `json:"ceph_osds_baseline"`
 	CephNooutState   string             `json:"ceph_noout_state"`
+	CephNooutReason  string             `json:"ceph_noout_reason"`
 	PauseReason      string             `json:"pause_reason"`
 }
 

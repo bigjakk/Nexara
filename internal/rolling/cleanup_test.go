@@ -3,6 +3,7 @@ package rolling
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -387,22 +388,31 @@ func TestGuestStatusOnNode(t *testing.T) {
 	}
 }
 
-// TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt: noout is recorded before it is
-// set and cleared when the job ends; one the operator set first is never
-// recorded as the job's and never cleared; a set Proxmox refuses leaves the job
-// going without it, the job view told.
+// TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt: noout is recorded before and
+// after it is set and cleared when the job ends; one the operator set first is
+// never the job's; a set Proxmox refuses leaves the job going without it, with
+// the reason; a release the endpoint cannot make keeps the record for the sweep.
+// "raced" is a release that ran during the set and wrote 'released': the record
+// written after the set puts 'held' back.
 func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 	t.Parallel()
+	const notInstalled = `{"data":null,"message":"binary not installed: /usr/bin/ceph-mon\n"}`
 	for _, tt := range []struct {
-		name       string
-		alreadySet bool
-		refuseSet  bool
-		wantState  string
-		wantPuts   []string
+		name         string
+		alreadySet   bool
+		refuseSet    bool
+		refuseUnset  bool
+		raced        bool
+		wantState    string
+		wantReleased bool
+		wantPuts     []string
 	}{
-		{"held and released", false, false, nooutHeld, []string{"value=1", "value=0"}},
-		{"already set by the operator, never cleared", true, false, nooutAlreadySet, nil},
-		{"a refused set is not held", false, true, nooutNotHeld, []string{"value=1"}},
+		{name: "held and released", wantState: nooutHeld + "/", wantReleased: true, wantPuts: []string{"value=1", "value=0"}},
+		{name: "already set by the operator, never cleared", alreadySet: true, wantState: nooutAlreadySet + "/", wantReleased: true},
+		{name: "a refused set is not held", refuseSet: true,
+			wantState: nooutNotHeld + "/noout is not held: the cluster's API token lacks Sys.Modify on /.", wantReleased: true, wantPuts: []string{"value=1"}},
+		{name: "an endpoint without Ceph keeps it held", refuseUnset: true, wantState: nooutHeld + "/", wantPuts: []string{"value=1", "value=0"}},
+		{name: "raced", raced: true, wantState: nooutHeld + "/", wantReleased: true, wantPuts: []string{"value=1", "value=0"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -418,11 +428,19 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				if r.Method == http.MethodPut {
 					_ = r.ParseForm()
+					value := r.PostForm.Get("value")
 					mu.Lock()
-					puts = append(puts, "value="+r.PostForm.Get("value"))
+					puts = append(puts, "value="+value)
 					mu.Unlock()
-					if tt.refuseSet {
+					switch {
+					case tt.raced:
+						// The other release, between the record and the set.
+						_, _ = d.Exec(context.Background(), "-- name: SetJobCephNooutState", nooutReleased, "", uuid.Nil)
+					case tt.refuseSet && value == "1":
 						http.Error(w, `{"data":null,"message":"Permission check failed (/, Sys.Modify)\n"}`, http.StatusForbidden)
+						return
+					case tt.refuseUnset && value == "0":
+						http.Error(w, notInstalled, http.StatusInternalServerError)
 						return
 					}
 					_, _ = w.Write([]byte(`{"data":null}`))
@@ -434,14 +452,13 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 				CephPresent: pgtype.Bool{Bool: true, Valid: true}}
 
 			o.holdNoout(context.Background(), client, job)
-			states := d.values
-			if len(states) == 0 || states[len(states)-1] != "SetJobCephNooutState="+tt.wantState {
-				t.Fatalf("noout states written %v, want it to end %q", states, tt.wantState)
+			if got := lastNooutState(d); got != tt.wantState {
+				t.Fatalf("noout state after the hold = %q, want %q", got, tt.wantState)
 			}
 			// The job ends: release reads the state holdNoout left.
-			job.CephNooutState = tt.wantState
-			if !o.releaseHeldNoout(context.Background(), client, job, true) {
-				t.Error("release = false")
+			job.CephNooutState, _, _ = strings.Cut(tt.wantState, "/")
+			if released := o.releaseHeldNoout(context.Background(), client, job, true); released != tt.wantReleased {
+				t.Errorf("released = %v, want %v (state %q)", released, tt.wantReleased, lastNooutState(d))
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -450,4 +467,62 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 			}
 		})
 	}
+}
+
+// lastNooutState is the last SetJobCephNooutState memberDB took, "state/reason".
+func lastNooutState(d *memberDB) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i := len(d.writes) - 1; i >= 0; i-- {
+		if d.writes[i] == "SetJobCephNooutState" {
+			return strings.TrimPrefix(d.values[i], "SetJobCephNooutState=") + "/" + d.reasons[i]
+		}
+	}
+	return ""
+}
+
+// TestNoout_WiredIntoTheJob: startNode sets noout before the node goes down
+// (here, an in-place upgrade), and releaseJobState counts a held noout as state
+// still to release when it cannot reach the cluster.
+func TestNoout_WiredIntoTheJob(t *testing.T) {
+	t.Parallel()
+	t.Run("set before the node goes down", func(t *testing.T) {
+		t.Parallel()
+		cluster := uuid.New()
+		d := &memberDB{t: t, cluster: cluster, members: []string{"pve-01"}, audits: true, jobStatus: "running",
+			accept: map[string]int64{"SetJobCephNooutState": 1, "ArmJobCleanupPending": 0, "SetNodeInPlaceUpgradeManual": 1}}
+		var setFirst atomic.Bool
+		o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api2/json/cluster/ceph/flags/noout" {
+				http.Error(w, "unexpected", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPut {
+				d.mu.Lock()
+				setFirst.Store(!slices.Contains(d.writes, "SetNodeInPlaceUpgradeManual"))
+				d.mu.Unlock()
+				_, _ = w.Write([]byte(`{"data":null}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":0}`))
+		})
+		job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: cluster, Status: "running", CephNoout: true,
+			CephPresent: pgtype.Bool{Bool: true, Valid: true}}
+		o.startNode(context.Background(), client, job, db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01", Step: "pending"})
+		if !setFirst.Load() || !slices.Contains(d.writes, "SetNodeInPlaceUpgradeManual") {
+			t.Errorf("noout set before the upgrade = %v (wrote %v)", setFirst.Load(), d.writes)
+		}
+	})
+	t.Run("held and unreachable is not released", func(t *testing.T) {
+		t.Parallel()
+		jobID := uuid.New()
+		d := &memberDB{t: t, audits: true, clusterErr: errors.New("gone"),
+			rowFor:  map[string]any{"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, Status: "cancelled", CephNooutState: nooutHeld}},
+			rowsFor: map[string][][]any{"ListRollingUpdateNodes": {}}}
+		o, _, _ := engineOn(t, d, nil)
+		if released, didWork := o.releaseJobState(context.Background(), jobID, true); released || !didWork {
+			t.Errorf("releaseJobState = %v, %v; want false, true", released, didWork)
+		}
+	})
 }
