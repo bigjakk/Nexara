@@ -22,7 +22,9 @@ func registerSearchEndpoints(reg *Registry, h *handlers.SearchHandler) {
 		Description: "Search guests, nodes, storage pools and clusters by name, and guests by VMID as " +
 			"well; and, for a holder of global view:ups, UPS devices (type ups) by name, description, " +
 			"model or NUT server, a row naming its server and no cluster (cluster_id and cluster_name " +
-			"empty). A term shorter than two characters returns an empty list rather than everything, and " +
+			"empty). A guest row's status is its power state (with run_state for a running VM's halted " +
+			"QEMU state) and a node row's online, offline or unknown, both as last collected. A term " +
+			"shorter than two characters returns an empty list rather than everything, and " +
 			"the result set stops at roughly 100 entries.",
 		Group: "Settings",
 		Permissions: Permissions{Advisory: &AdvisoryCheck{

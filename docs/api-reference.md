@@ -2522,7 +2522,7 @@ and re-run. The CSV and syslog forms are line-based and carry no such marker.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/search` | Global search across clusters, VMs, nodes, storage, and, with a global `view:ups`, UPS devices (`type: ups`, with their `server` and no cluster) |
+| GET | `/search` | Global search across clusters, VMs, nodes, storage, and, with a global `view:ups`, UPS devices (`type: ups`, with their `server` and no cluster). A guest's `status` is its power state, with `run_state` for a running VM's halted QEMU state, and a node's `status` is `online`, `offline` or `unknown`, both as last collected |
 
 ### API Documentation
 
