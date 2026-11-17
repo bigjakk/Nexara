@@ -2160,16 +2160,16 @@ Failed notification deliveries land here for inspection, retry, or dismissal.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/rolling-updates` | List rolling update jobs |
-| POST | `/clusters/:id/rolling-updates` | Create job |
+| POST | `/clusters/:id/rolling-updates` | Create job. `reboot_after_update` (default `false`): `true` reboots every node after its upgrade; `false` reboots one only when its upgrade installs a kernel or, for an automated upgrade, leaves `/var/run/reboot-required`. `ceph_wait` and `ceph_noout` (both default `true`, ignored on a cluster without Ceph): wait for every PG `active+clean` and the OSDs up before a node is taken down and before it is called healthy (a wait over 30 minutes pauses the job), and hold Ceph's `noout` flag while the job runs (a flag already set is left alone; the token needs `Sys.Modify` on `/`). A job carries `ceph_wait`, `ceph_noout`, `ceph_present` (`null` until Proxmox answered), `ceph_noout_state` (`""`, `held`, `already_set`, `not_held`, `released`) and `pause_reason` (why Nexara paused it itself) |
 | GET | `/clusters/:id/rolling-updates/:id` | Get job details |
 | POST | `/clusters/:id/rolling-updates/:id/start` | Start job |
 | POST | `/clusters/:id/rolling-updates/:id/cancel` | Cancel job |
-| POST | `/clusters/:id/rolling-updates/:id/pause` | Pause job |
+| POST | `/clusters/:id/rolling-updates/:id/pause` | Pause job. What the job holds (DRS and CRS pauses, disabled HA rules, Ceph's `noout`) stays held |
 | POST | `/clusters/:id/rolling-updates/:id/resume` | Resume job |
-| GET | `/clusters/:id/rolling-updates/:id/nodes` | List node statuses |
+| GET | `/clusters/:id/rolling-updates/:id/nodes` | List node statuses. A node waiting for Ceph carries `ceph_wait_reason` and `ceph_wait_started_at` |
 | POST | `/clusters/:id/rolling-updates/:id/nodes/:nid/confirm-upgrade` | Confirm upgrade |
 | POST | `/clusters/:id/rolling-updates/:id/nodes/:nid/skip` | Skip node |
-| POST | `/clusters/:id/rolling-updates/preflight-ha` | Pre-flight HA check |
+| POST | `/clusters/:id/rolling-updates/preflight-ha` | Pre-flight HA check. `ceph` says whether the cluster runs Ceph (`status`: `absent`, `clean`, `not_clean`, `unknown`) with `reason`, `pgs_not_clean`, `pgs_total`, `osds_up` and `osds_total`; Ceph not clean or unreadable, and `parallelism` above 1 on a Ceph cluster, add `warning` conflicts with `source` `ceph`, which never set `has_errors` |
 
 ### SSH Credentials
 
