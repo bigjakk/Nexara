@@ -127,3 +127,41 @@ describe("RollingUpdateProgress — Cancel asks first", () => {
     });
   });
 });
+
+describe("RollingUpdateProgress — held-back packages", () => {
+  // A package the job holds back is listed with the node's updates; it is
+  // marked, and not counted among those to be installed.
+  it("marks the job's package excludes and leaves them out of the count", async () => {
+    const pkg = (Package: string) => ({
+      Package,
+      OldVersion: "1",
+      Version: "2",
+    });
+    stubApi({
+      [JOB_PATH]: { ...JOB, package_excludes: ["proxmox-default-kernel"] },
+      [`${JOB_PATH}/nodes`]: listOf([
+        {
+          id: "n0",
+          job_id: "j1",
+          node_name: "pve-01",
+          node_order: 0,
+          step: "pending",
+          failure_reason: "",
+          packages_json: [pkg("proxmox-default-kernel"), pkg("pve-manager")],
+        },
+      ]),
+    });
+    const user = setupUser();
+    renderWithProviders(
+      <RollingUpdateProgress clusterId="c1" jobId="j1" canManage />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "pve-01" }));
+    expect(screen.getByText("Packages (1)")).toBeInTheDocument();
+    const held = screen.getByRole("row", { name: /proxmox-default-kernel/ });
+    expect(held).toHaveTextContent("Held back");
+    expect(
+      screen.getByRole("row", { name: /pve-manager/ }),
+    ).not.toHaveTextContent("Held back");
+  });
+});

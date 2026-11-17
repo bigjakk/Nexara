@@ -135,13 +135,17 @@ function NodeRow({
   jobId,
   jobRunning,
   canManage,
+  heldBack,
 }: {
   node: RollingUpdateNode;
   clusterId: string;
   jobId: string;
   jobRunning: boolean;
   canManage: boolean;
+  /** The job's package_excludes: listed, but not installed. */
+  heldBack: readonly string[];
 }) {
+  const { t } = useTranslation("security");
   const [expanded, setExpanded] = useState(false);
   const confirmUpgrade = useConfirmNodeUpgrade();
   const skipNode = useSkipNode();
@@ -149,6 +153,7 @@ function NodeRow({
   const packages = parseJsonField<AptPackage>(node.packages_json);
   const guests = parseJsonField<GuestSnapshot>(node.guests_json);
   const times = nodeTimes(node);
+  const heldCount = packages.filter((p) => heldBack.includes(p.Package)).length;
 
   return (
     <li>
@@ -265,10 +270,15 @@ function NodeRow({
           {packages.length > 0 && (
             <div>
               <p className="mb-1 text-[12.5px] font-medium text-muted-foreground">
-                Packages ({packages.length})
+                Packages ({packages.length - heldCount})
+                {heldCount > 0 && (
+                  <span className="ml-2 font-normal">
+                    {t("packagesHeldBack", { count: heldCount })}
+                  </span>
+                )}
               </p>
               <div className="-mx-[18px]">
-                <PackagePreviewTable packages={packages} />
+                <PackagePreviewTable packages={packages} heldBack={heldBack} />
               </div>
             </div>
           )}
@@ -570,6 +580,7 @@ export function RollingUpdateProgress({
                 jobId={jobId}
                 jobRunning={job.status === "running"}
                 canManage={canManage}
+                heldBack={job.package_excludes}
               />
             ))}
           </ul>
