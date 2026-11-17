@@ -46,8 +46,6 @@ var recordedNodeTaskUPIDs = []struct{ name, upid string }{
 // cases below lean on: without it, a stand-in server that answered nothing
 // would make every refusal look like a success.
 func TestNodeTaskCallsSendEveryRecordedUPIDUnchanged(t *testing.T) {
-	const node = "pve-01"
-
 	// One golden literal. Every expectation below is built with the same
 	// url.PathEscape the production code uses, which pins "escaped once" but
 	// would follow an encoder swap without complaining; this pins what actually
@@ -60,6 +58,11 @@ func TestNodeTaskCallsSendEveryRecordedUPIDUnchanged(t *testing.T) {
 	}
 
 	for _, tc := range recordedNodeTaskUPIDs {
+		// Each is sent to the node it names, the only one the client dials.
+		node, err := TaskNode(tc.upid)
+		if err != nil {
+			t.Fatalf("TaskNode(%q): %v", tc.upid, err)
+		}
 		escaped := url.PathEscape(tc.upid)
 		base := "/api2/json/nodes/" + node + "/tasks/" + escaped
 
@@ -125,6 +128,10 @@ func TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment(t *testing.T) {
 		{"a NUL", "A\x00b"},
 		{"an ANSI escape", "A\x1b[2Kb"},
 		{"a leading absolute slash", "/cluster/log"},
+		// Whole segments, refused because the client dials only the node a
+		// UPID names (TaskNode), and these name another node or none.
+		{"a task on another node", "UPID:pve-02:0000A1B2:00000001:6A8CE407:imgcopy::root@pam:"},
+		{"a UPID naming no node", "UPID:192.0.2.10:0000A1B2:00000001:6A8CE407:qmstart:100:root@pam:"},
 	}
 
 	for _, tc := range cases {

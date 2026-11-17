@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -70,11 +71,53 @@ func validateTaskUPID(upid string) error {
 	return validatePathSegment("UPID", upid)
 }
 
-func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*TaskStatus, error) {
+// upidNodePattern is a UPID's node field as pve-common's PVE::UPID::decode
+// matches it: "UPID:([a-zA-Z0-9]([a-zA-Z0-9\-]*[a-zA-Z0-9])?):…".
+var upidNodePattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$`)
+
+// TaskNode is the node a UPID names, the one that ran the task. Only that node
+// holds the task's status and log: decode puts both under the node-local
+// /var/log/pve/tasks, and pve-manager's Tasks.pm answers "no such task" for a
+// UPID whose file is not there. It is not always the node the request was
+// sent for: pve-storage's upload (Status.pm) has no proxyto, so its imgcopy
+// worker runs where the request landed and scp's the file to the target.
+//
+// Only the node field is read, not the whole shape (see validateTaskUPID for
+// why a full-shape pattern would be too strict).
+func TaskNode(upid string) (string, error) {
+	rest, ok := strings.CutPrefix(upid, "UPID:")
+	node, _, terminated := strings.Cut(rest, ":")
+	if !ok || !terminated || !upidNodePattern.MatchString(node) {
+		return "", fmt.Errorf("%w: the UPID names no node", ErrInvalidInput)
+	}
+	return node, nil
+}
+
+// validateTaskRequest guards the node-task calls: node and upid as path
+// segments, and node as the one TaskNode reads from upid. It is a check, not
+// a substitution: the client dials only the node its caller passed, so the
+// caller's membership check on that node (nodemember) still covers what is
+// dialled, and a caller that passes another node is refused here, before any
+// request, instead of being answered "no such task" by Proxmox.
+func validateTaskRequest(node, upid string) error {
 	if err := validateNodeName(node); err != nil {
-		return nil, err
+		return err
 	}
 	if err := validateTaskUPID(upid); err != nil {
+		return err
+	}
+	taskNode, err := TaskNode(upid)
+	if err != nil {
+		return err
+	}
+	if taskNode != node {
+		return fmt.Errorf("%w: the task ran on node %q, not %q, and only that node holds it", ErrInvalidInput, taskNode, node)
+	}
+	return nil
+}
+
+func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*TaskStatus, error) {
+	if err := validateTaskRequest(node, upid); err != nil {
 		return nil, err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/status"
@@ -90,10 +133,7 @@ func (c *Client) GetTaskStatus(ctx context.Context, node string, upid string) (*
 const TaskLogPageLines = 5000
 
 func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start int) ([]TaskLogEntry, error) {
-	if err := validateNodeName(node); err != nil {
-		return nil, err
-	}
-	if err := validateTaskUPID(upid); err != nil {
+	if err := validateTaskRequest(node, upid); err != nil {
 		return nil, err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid) + "/log?start=" + strconv.Itoa(start) +
@@ -109,10 +149,7 @@ func (c *Client) GetTaskLog(ctx context.Context, node string, upid string, start
 // returns an error if the task can't be signalled (e.g. already finished). Does not
 // return a UPID.
 func (c *Client) StopNodeTask(ctx context.Context, node string, upid string) error {
-	if err := validateNodeName(node); err != nil {
-		return err
-	}
-	if err := validateTaskUPID(upid); err != nil {
+	if err := validateTaskRequest(node, upid); err != nil {
 		return err
 	}
 	path := "/nodes/" + url.PathEscape(node) + "/tasks/" + url.PathEscape(upid)
@@ -145,10 +182,7 @@ func (c *Client) GetNodeTasks(ctx context.Context, node string, since int64, lim
 // second and type the UPID carries. nil, nil when the list holds no such task
 // or the UPID does not carry them.
 func (c *Client) FindNodeTask(ctx context.Context, node, upid string) (*NodeTask, error) {
-	if err := validateNodeName(node); err != nil {
-		return nil, err
-	}
-	if err := validateTaskUPID(upid); err != nil {
+	if err := validateTaskRequest(node, upid); err != nil {
 		return nil, err
 	}
 	parts := strings.Split(upid, ":")
