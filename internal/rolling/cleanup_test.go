@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/proxmox"
 
@@ -380,5 +384,70 @@ func TestGuestStatusOnNode(t *testing.T) {
 	_, _, err = o.guestStatusOnNode(context.Background(), client, "down-node", GuestSnapshot{VMID: 100, Type: "qemu"})
 	if err == nil {
 		t.Error("listing failure returned nil error — release path would wrongly prune the record entry")
+	}
+}
+
+// TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt: noout is recorded before it is
+// set and cleared when the job ends; one the operator set first is never
+// recorded as the job's and never cleared; a set Proxmox refuses leaves the job
+// going without it, the job view told.
+func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		alreadySet bool
+		refuseSet  bool
+		wantState  string
+		wantPuts   []string
+	}{
+		{"held and released", false, false, nooutHeld, []string{"value=1", "value=0"}},
+		{"already set by the operator, never cleared", true, false, nooutAlreadySet, nil},
+		{"a refused set is not held", false, true, nooutNotHeld, []string{"value=1"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			var puts []string
+			d := &memberDB{t: t, audits: true, jobStatus: "running",
+				accept: map[string]int64{"SetJobCephNooutState": 1, "ArmJobCleanupPending": 0}}
+			o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api2/json/cluster/ceph/flags/noout" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodPut {
+					_ = r.ParseForm()
+					mu.Lock()
+					puts = append(puts, "value="+r.PostForm.Get("value"))
+					mu.Unlock()
+					if tt.refuseSet {
+						http.Error(w, `{"data":null,"message":"Permission check failed (/, Sys.Modify)\n"}`, http.StatusForbidden)
+						return
+					}
+					_, _ = w.Write([]byte(`{"data":null}`))
+					return
+				}
+				_, _ = w.Write([]byte(map[bool]string{true: `{"data":1}`, false: `{"data":0}`}[tt.alreadySet]))
+			})
+			job := db.RollingUpdateJob{ID: uuid.New(), Status: "running", CephNoout: true,
+				CephPresent: pgtype.Bool{Bool: true, Valid: true}}
+
+			o.holdNoout(context.Background(), client, job)
+			states := d.values
+			if len(states) == 0 || states[len(states)-1] != "SetJobCephNooutState="+tt.wantState {
+				t.Fatalf("noout states written %v, want it to end %q", states, tt.wantState)
+			}
+			// The job ends: release reads the state holdNoout left.
+			job.CephNooutState = tt.wantState
+			if !o.releaseHeldNoout(context.Background(), client, job, true) {
+				t.Error("release = false")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !slices.Equal(puts, tt.wantPuts) {
+				t.Errorf("sent %v to the noout flag, want %v", puts, tt.wantPuts)
+			}
+		})
 	}
 }

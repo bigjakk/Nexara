@@ -400,6 +400,9 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 		return
 	}
 
+	// The node is about to go down, drained or upgraded in place.
+	o.holdNoout(ctx, client, job)
+
 	// In-place job: upgrade this node without moving anything off it.
 	//
 	// Branches here, ahead of the guest snapshot rather than just ahead of the
@@ -1904,7 +1907,8 @@ func (o *Orchestrator) releaseDRSPause(ctx context.Context, job db.RollingUpdate
 }
 
 // releaseJobState re-reads the job and releases everything it may still
-// hold: the DRS pause (DB-only), the native CRS pause (Proxmox), disabled HA
+// hold: the DRS pause (DB-only), the native CRS pause and Ceph's noout flag
+// when the job set it (Proxmox), disabled HA
 // rules (the job-level record plus legacy per-node records written by
 // pre-000073 versions), and passthrough guests the drain shut down that
 // haven't been confirmed running again. Each marker is cleared only once its
@@ -1942,7 +1946,8 @@ func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, aud
 	}
 
 	released = true
-	didWork = job.DrsWasEnabled || job.NativeCrsPaused ||
+	nooutHeldByJob := job.CephNooutState == nooutHeld
+	didWork = job.DrsWasEnabled || job.NativeCrsPaused || nooutHeldByJob ||
 		len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0
 
 	// 1. Nexara DRS — DB-only, no client needed.
@@ -1951,7 +1956,7 @@ func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, aud
 	}
 
 	// The rest needs a Proxmox client.
-	if job.NativeCrsPaused || len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0 {
+	if job.NativeCrsPaused || nooutHeldByJob || len(jobRules) > 0 || len(nodesWithRules) > 0 || len(nodesWithStopped) > 0 {
 		client, cerr := o.createClient(ctx, job.ClusterID)
 		if cerr != nil {
 			o.logger.Error("rolling: failed to build client to release job state; will retry via cleanup sweep",
@@ -1965,6 +1970,11 @@ func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, aud
 
 		// 2. Native CRS auto-rebalance.
 		if job.NativeCrsPaused && !o.restoreNativeCRS(ctx, client, job, auditFailures) {
+			released = false
+		}
+
+		// 2b. Ceph noout, when this job set it.
+		if !o.releaseHeldNoout(ctx, client, job, auditFailures) {
 			released = false
 		}
 
@@ -2836,7 +2846,7 @@ func (o *Orchestrator) failJob(ctx context.Context, job db.RollingUpdateJob, rea
 }
 
 // CleanupCancelledJob releases everything a cancelled job may still hold:
-// the DRS pause, the native CRS pause, disabled HA rules, and passthrough
+// the DRS pause, the native CRS pause, Ceph's noout, disabled HA rules, and passthrough
 // guests the drain shut down. Cancelled jobs drop out of the running-jobs
 // tick; this inline attempt covers the common case immediately and the
 // cleanup sweep retries anything it couldn't release.

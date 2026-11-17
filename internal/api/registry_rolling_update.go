@@ -228,7 +228,8 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 		Method: fiber.MethodPost,
 		Path:   rollingScope + "/:id/cancel",
 		Description: "Cancel a rolling update job and release everything it still holds — the DRS pause, " +
-			"the native CRS pause, and the HA rules disabled for in-flight nodes. Guests already migrated " +
+			"the native CRS pause, Ceph's noout flag when the job set it, and the HA rules disabled for " +
+			"in-flight nodes. Guests already migrated " +
 			"away are NOT migrated back. A job belonging to another cluster answers 404.",
 		Group:       "Rolling Updates",
 		Permissions: rollingManage(),
@@ -244,8 +245,10 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 			"without its reboot, and a reboot already sent goes ahead. A drain that ends during the pause " +
 			"moves its node on to upgrading (awaiting_upgrade for a manual job), where nothing runs until the " +
 			"resume. Resume carries each node on from " +
-			"where it stopped. Cluster state the job holds — the DRS and CRS pauses, disabled HA rules — " +
-			"stays held. A job belonging to another cluster answers 404.",
+			"where it stopped. Cluster state the job holds — the DRS and CRS pauses, disabled HA rules, " +
+			"Ceph's noout flag — stays held. A job waiting for Ceph longer than 30 minutes pauses itself, " +
+			"with the reason in pause_reason; a resume checks Ceph again. A job belonging to another " +
+			"cluster answers 404.",
 		Group:       "Rolling Updates",
 		Permissions: rollingManage(),
 		Parameters:  rollingJobParams(nil),
