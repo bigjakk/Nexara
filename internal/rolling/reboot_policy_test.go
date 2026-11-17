@@ -123,13 +123,18 @@ func TestRebootOwed(t *testing.T) {
 }
 
 // A Proxmox kernel's postinst never writes /var/run/reboot-required, so a
-// kernel among the node's recorded updates is what says a reboot is owed. A
-// series package the automated upgrade holds is not installed; a new build is
-// never held, and a manual upgrade ignores the excludes.
+// kernel among the node's recorded updates is what says a reboot is owed. An
+// automated upgrade counts only kernels it upgrades and does not hold: the new build a held package would pull in is still listed. A manual
+// upgrade ignores the excludes.
 func TestUpgradeInstallsKernel(t *testing.T) {
 	t.Parallel()
 	const series = `{"Package":"proxmox-kernel-6.17","OldVersion":"6.17.2-1","Version":"6.17.2-2"}`
-	auto := db.RollingUpdateJob{AutoUpgrade: true, PackageExcludes: []string{"proxmox-kernel-6.17", "proxmox-kernel-6.17.2-2-pve-signed"}}
+	const build = `{"Package":"proxmox-kernel-6.17.2-2-pve-signed"}`
+	const toNewSeries = `[{"Package":"proxmox-default-kernel","OldVersion":"2.0.0"},{"Package":"proxmox-kernel-6.18"}]`
+	excluding := func(names ...string) db.RollingUpdateJob {
+		return db.RollingUpdateJob{AutoUpgrade: true, PackageExcludes: names}
+	}
+	auto := excluding("proxmox-kernel-6.17", "proxmox-default-kernel")
 	tests := []struct {
 		name string
 		job  db.RollingUpdateJob
@@ -138,13 +143,15 @@ func TestUpgradeInstallsKernel(t *testing.T) {
 	}{
 		{"nothing recorded", db.RollingUpdateJob{}, "", false},
 		{"userland only", db.RollingUpdateJob{}, `[{"Package":"pve-manager","OldVersion":"9.0.1"}]`, false},
-		{"series package upgraded", db.RollingUpdateJob{}, `[` + series + `]`, true},
+		{"automated, no excludes: series upgrade and new build", excluding(), `[` + series + `,` + build + `]`, true},
 		{"new build pulled in", db.RollingUpdateJob{}, `[{"Package":"proxmox-kernel-6.17.2-2-pve-signed"}]`, true},
 		{"Debian kernel", db.RollingUpdateJob{}, `[{"Package":"linux-image-amd64","OldVersion":"6.1.1"}]`, true},
 		{"the boot tool is no kernel", db.RollingUpdateJob{}, `[{"Package":"proxmox-kernel-helper","OldVersion":"9.0.1"}]`, false},
-		{"series held by the automated upgrade", auto, `[` + series + `]`, false},
-		{"excluded, but a manual upgrade", db.RollingUpdateJob{PackageExcludes: auto.PackageExcludes}, `[` + series + `]`, true},
-		{"excluded new build is not held", auto, `[{"Package":"proxmox-kernel-6.17.2-2-pve-signed"}]`, true},
+		{"unrelated exclude, series upgrade and new build", excluding("pve-manager"), `[` + series + `,` + build + `]`, true},
+		{"series held, its new build listed", auto, `[{"Package":"pve-manager","OldVersion":"9.0.1"},` + series + `,` + build + `]`, false},
+		{"default kernel held, its new series listed", excluding("proxmox-default-kernel"), toNewSeries, false},
+		{"default kernel not held, bringing a new series", excluding("pve-manager"), toNewSeries, true},
+		{"excluded, but a manual upgrade", db.RollingUpdateJob{PackageExcludes: auto.PackageExcludes}, `[` + series + `,` + build + `]`, true},
 		{"unreadable list", db.RollingUpdateJob{}, `{`, true},
 	}
 	for _, tt := range tests {
