@@ -89,7 +89,7 @@ describe("CreateRollingUpdateWizard", () => {
 
     const steps = await screen.findByText(/Each node is drained first/);
     expect(steps).toHaveTextContent(
-      "Nexara waits for the node to come back healthy",
+      "Nexara waits for the node to answer again",
     );
     await user.click(screen.getByRole("switch", { name: "Start immediately" }));
     expect(
@@ -148,6 +148,62 @@ describe("CreateRollingUpdateWizard", () => {
         expect(postMock).toHaveBeenCalledWith(
           CREATE_PATH,
           expect.objectContaining({ auto_upgrade: automated }),
+        );
+      });
+    },
+  );
+
+  // The Ceph options are offered only when the pre-flight says the cluster
+  // runs Ceph, and what they are set to is what the create sends.
+  it.each([
+    { cluster: "a Ceph cluster", ceph: { status: "clean" }, offered: true },
+    {
+      cluster: "a cluster without Ceph",
+      ceph: { status: "absent" },
+      offered: false,
+    },
+  ])(
+    "offers the Ceph options on $cluster: $offered",
+    async ({ ceph, offered }) => {
+      postMock.mockImplementation((path: string) =>
+        Promise.resolve(
+          path === PREFLIGHT_PATH
+            ? {
+                conflicts: [],
+                has_errors: false,
+                ceph: {
+                  ...ceph,
+                  pgs_not_clean: 0,
+                  pgs_total: 128,
+                  osds_up: 3,
+                  osds_total: 3,
+                },
+              }
+            : { id: "j1" },
+        ),
+      );
+      const user = userEvent.setup({ delay: null });
+      renderWithProviders(<CreateRollingUpdateWizard clusterId={CLUSTER} />);
+      await openWithBothNodes(user);
+      await user.click(screen.getByRole("button", { name: "Next" }));
+      await user.click(await screen.findByRole("button", { name: "Next" }));
+
+      await screen.findByRole("switch", { name: "Reboot after update" });
+      const noout = screen.queryByRole("switch", { name: "Hold noout" });
+      expect(noout !== null).toBe(offered);
+      expect(
+        screen.queryByRole("switch", { name: "Wait for Ceph" }) !== null,
+      ).toBe(offered);
+      if (noout) await user.click(noout);
+      await user.click(
+        screen.getByRole("switch", { name: "Start immediately" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Create Job" }));
+
+      await waitFor(() => {
+        expect(postMock).toHaveBeenCalledWith(
+          CREATE_PATH,
+          expect.objectContaining({ ceph_wait: true, ceph_noout: !offered }),
         );
       });
     },

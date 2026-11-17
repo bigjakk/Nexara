@@ -20,6 +20,8 @@
     "osd_start": "OSD started",
     "osd_stop": "OSD stopped",
     "osd_restart": "OSD restarted",
+    "osd_flag_set": "OSD flag set",
+    "osd_flag_unset": "OSD flag cleared",
     "osd_create": "OSD created",
     "osd_destroy": "OSD destroyed",
     "create": "Pool created",

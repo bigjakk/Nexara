@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   Loader2,
   Pause,
@@ -186,6 +187,11 @@ function NodeRow({
           className="min-w-[9.5rem]"
         />
         <StepIndicator node={node} />
+        {node.ceph_wait_reason && (
+          <span className="text-[12.5px] text-amber-700 dark:text-amber-400">
+            {t("nodeWaitingForCeph")}
+          </span>
+        )}
 
         <div className="ml-auto flex items-center gap-2">
           {/* A failed, cancelled or paused job leaves its awaiting node as it
@@ -234,6 +240,13 @@ function NodeRow({
           )}
           {node.skip_reason && (
             <p className="text-muted-foreground">Skipped: {node.skip_reason}</p>
+          )}
+          {node.ceph_wait_reason && (
+            <p className="text-amber-700 dark:text-amber-400">
+              {t("nodeWaitingForCephReason", {
+                reason: node.ceph_wait_reason,
+              })}
+            </p>
           )}
 
           {guests.length > 0 && (
@@ -306,6 +319,7 @@ function NodeRow({
 
           {!node.failure_reason &&
             !node.skip_reason &&
+            !node.ceph_wait_reason &&
             guests.length === 0 &&
             packages.length === 0 &&
             !node.upgrade_output &&
@@ -402,6 +416,16 @@ function HAWarningsPanel({
   );
 }
 
+/** The job's two Ceph options and what became of noout, in a few words. */
+function cephSummary(job: RollingUpdateJob, t: TFunction<"security">): string {
+  const noout = !job.ceph_noout
+    ? t("nooutState.off")
+    : job.ceph_noout_state === ""
+      ? t("nooutState.pending")
+      : t(`nooutState.${job.ceph_noout_state}`);
+  return `${job.ceph_wait ? t("cephWaits") : t("cephNoWait")}, ${noout}`;
+}
+
 /** The dot StatusFact draws for a job's state, and the word beside it. */
 const JOB_STATE: Record<
   RollingUpdateJob["status"],
@@ -493,6 +517,10 @@ export function RollingUpdateProgress({
             </Fact>
             <Fact label="At a time">{String(job.parallelism)}</Fact>
             <Fact label="Reboot">{job.reboot_after_update ? "yes" : "no"}</Fact>
+            {/* Null is a cluster Proxmox has not answered for yet. */}
+            {job.ceph_present !== false && (
+              <Fact label={t("cephFact")}>{cephSummary(job, t)}</Fact>
+            )}
             <Fact label="Created">
               <DateTime value={job.created_at} />
             </Fact>
@@ -554,9 +582,28 @@ export function RollingUpdateProgress({
       />
 
       <div className="space-y-4">
+        {job.status === "paused" && job.pause_reason && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            {job.pause_reason}
+          </p>
+        )}
         {job.status === "paused" && (
           <p className="text-sm text-muted-foreground">{t("jobPausedNote")}</p>
         )}
+        {job.status === "running" &&
+          nodes
+            .filter((n) => n.ceph_wait_reason)
+            .map((n) => (
+              <p
+                key={n.id}
+                className="text-sm text-amber-700 dark:text-amber-400"
+              >
+                {t("jobWaitingForCeph", {
+                  node: n.node_name,
+                  reason: n.ceph_wait_reason,
+                })}
+              </p>
+            ))}
 
         {job.failure_reason && (
           <Panel title="Why it failed">

@@ -923,6 +923,17 @@ export interface RollingUpdateJob {
   /** False means the job upgrades each node in place, leaving its guests
    * running. Lets the progress view explain why a node shows no drain. */
   drain_guests: boolean;
+  /** Wait for Ceph before a node goes down and before it is called healthy. */
+  ceph_wait: boolean;
+  /** Hold Ceph's noout flag while the job runs. */
+  ceph_noout: boolean;
+  /** Whether the cluster runs Ceph; null until Proxmox has answered. */
+  ceph_present: boolean | null;
+  /** What became of noout: "" not looked at yet, "already_set" is the
+   * operator's and is left alone, "not_held" could not be set. */
+  ceph_noout_state: "" | "held" | "already_set" | "not_held" | "released";
+  /** Why Nexara paused the job itself; "" otherwise. */
+  pause_reason: string;
   failure_reason: string;
   notify_channel_id?: string;
   created_by: string;
@@ -966,6 +977,9 @@ export interface RollingUpdateNode {
   health_check_at?: string;
   restore_started_at?: string;
   restore_completed_at?: string;
+  /** What the node waits for in Ceph, since ceph_wait_started_at. */
+  ceph_wait_reason?: string;
+  ceph_wait_started_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1006,6 +1020,9 @@ export interface CreateRollingUpdateRequest {
    * that existed before: a job that drains each node before touching it.
    */
   drain_guests?: boolean | undefined;
+  /** Both default to true on the server, and only act on a Ceph cluster. */
+  ceph_wait?: boolean | undefined;
+  ceph_noout?: boolean | undefined;
 }
 
 export interface SSHCredential {
@@ -1067,6 +1084,17 @@ export interface HAConflict {
 export interface HAPreFlightReport {
   conflicts: HAConflict[];
   has_errors: boolean;
+  /** The pre-flight route's Ceph part. */
+  ceph?: CephPreflight;
+}
+
+export interface CephPreflight {
+  status: "absent" | "clean" | "not_clean" | "unknown";
+  reason?: string;
+  pgs_not_clean: number;
+  pgs_total: number;
+  osds_up: number;
+  osds_total: number;
 }
 
 // API Key types

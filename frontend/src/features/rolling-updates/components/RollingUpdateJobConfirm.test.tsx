@@ -165,3 +165,38 @@ describe("RollingUpdateProgress — held-back packages", () => {
     ).not.toHaveTextContent("Held back");
   });
 });
+
+describe("RollingUpdateProgress — waiting for Ceph", () => {
+  // A node held by the Ceph gate says so, and why, on the job and the node.
+  it("names the node that waits for Ceph and the reason", async () => {
+    const reason = "28 of 128 placement groups are not active+clean";
+    stubApi({
+      [JOB_PATH]: {
+        ...JOB,
+        status: "running",
+        ceph_present: true,
+        ceph_noout_state: "held",
+      },
+      [`${JOB_PATH}/nodes`]: listOf([
+        {
+          id: "n0",
+          job_id: "j1",
+          node_name: "pve-01",
+          node_order: 0,
+          step: "health_check",
+          failure_reason: "",
+          ceph_wait_reason: reason,
+        },
+      ]),
+    });
+    renderWithProviders(
+      <RollingUpdateProgress clusterId="c1" jobId="j1" canManage />,
+    );
+
+    expect(
+      await screen.findByText(`pve-01 is waiting for Ceph: ${reason}`),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Waiting for Ceph")).toBeInTheDocument();
+    expect(screen.getByText("waits, noout held")).toBeInTheDocument();
+  });
+});

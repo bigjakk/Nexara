@@ -103,6 +103,8 @@ export function CreateRollingUpdateWizard({
     useState<HAPreFlightReport | null>(null);
   const [notifyChannelId, setNotifyChannelId] = useState<string>("none");
   const [startImmediately, setStartImmediately] = useState(true);
+  const [cephWait, setCephWait] = useState(true);
+  const [cephNoout, setCephNoout] = useState(true);
 
   const { data: nodes, isLoading: nodesLoading } = useClusterNodes(clusterId);
   const ssh = useSSHConfigured(clusterId);
@@ -125,6 +127,12 @@ export function CreateRollingUpdateWizard({
     parallelism,
     Math.max(1, selectedNodes.length),
   );
+  // Whether the cluster runs Ceph, from the pre-flight; null when it did not
+  // say. The Ceph options are offered only when it said yes.
+  const cephPresent =
+    preflightReport?.ceph === undefined
+      ? null
+      : preflightReport.ceph.status !== "absent";
 
   const reset = () => {
     setStep("nodes");
@@ -138,6 +146,8 @@ export function CreateRollingUpdateWizard({
     setPreflightReport(null);
     setNotifyChannelId("none");
     setStartImmediately(true);
+    setCephWait(true);
+    setCephNoout(true);
   };
 
   // Run preflight when entering HA review step. Its capacity check depends on
@@ -180,6 +190,8 @@ export function CreateRollingUpdateWizard({
         package_excludes: effectiveAutoUpgrade ? excludes : [],
         ha_policy: haPolicy,
         auto_upgrade: effectiveAutoUpgrade,
+        ceph_wait: cephWait,
+        ceph_noout: cephNoout,
         notify_channel_id:
           notifyChannelId !== "none" ? notifyChannelId : undefined,
       },
@@ -508,8 +520,8 @@ export function CreateRollingUpdateWizard({
                 <Label htmlFor="reboot">Reboot after update</Label>
                 <p className="text-xs text-muted-foreground">
                   {rebootAfterUpdate
-                    ? "Always reboot after upgrade"
-                    : "Auto-detect: reboot only if kernel/critical updates require it"}
+                    ? t("rebootAlwaysHelp")
+                    : t("rebootAutoHelp")}
                 </p>
               </div>
               <Switch
@@ -527,6 +539,37 @@ export function CreateRollingUpdateWizard({
                 onCheckedChange={setAutoRestoreGuests}
               />
             </div>
+
+            {cephPresent === true && (
+              <>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="ceph-wait">{t("cephWaitLabel")}</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("cephWaitHelp")}
+                    </p>
+                  </div>
+                  <Switch
+                    id="ceph-wait"
+                    checked={cephWait}
+                    onCheckedChange={setCephWait}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="ceph-noout">{t("cephNooutLabel")}</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("cephNooutHelp")}
+                    </p>
+                  </div>
+                  <Switch
+                    id="ceph-noout"
+                    checked={cephNoout}
+                    onCheckedChange={setCephNoout}
+                  />
+                </div>
+              </>
+            )}
 
             <div className="flex items-center justify-between">
               <div>
@@ -624,6 +667,9 @@ export function CreateRollingUpdateWizard({
                     auto_upgrade: effectiveAutoUpgrade,
                     reboot_after_update: rebootAfterUpdate,
                     auto_restore_guests: autoRestoreGuests,
+                    ceph_wait: cephWait,
+                    ceph_noout: cephNoout,
+                    ceph_present: cephPresent,
                   },
                   t,
                 )}
