@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -95,4 +96,93 @@ func cephReadOrder(nodes []db.Node) []db.Node {
 func cephNodeUnreachable(err error) bool {
 	var apiErr *proxmox.APIError
 	return errors.As(err, &apiErr) && (apiErr.StatusCode == 595 || apiErr.StatusCode == 596)
+}
+
+// noCephMemoWindow is how long the status read trusts a member walk that found
+// no member running Ceph: during it, the endpoint's own "binary not installed"
+// is the answer, one request a poll instead of one per member.
+const noCephMemoWindow = 10 * time.Minute
+
+// noCephMemo remembers, per cluster and in this process, when a walk found no
+// member running Ceph. One entry per cluster, expired entries pruned on write.
+type noCephMemo struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	until map[uuid.UUID]time.Time
+}
+
+func newNoCephMemo(now func() time.Time) *noCephMemo {
+	return &noCephMemo{now: now, until: map[uuid.UUID]time.Time{}}
+}
+
+func (m *noCephMemo) holds(cluster uuid.UUID) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.now().Before(m.until[cluster])
+}
+
+func (m *noCephMemo) set(cluster uuid.UUID, absent bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now()
+	for id, t := range m.until {
+		if !now.Before(t) {
+			delete(m.until, id)
+		}
+	}
+	if absent {
+		m.until[cluster] = now.Add(noCephMemoWindow)
+	} else {
+		delete(m.until, cluster)
+	}
+}
+
+// readCephStatus is the Ceph page's status read: the cluster route, and on the
+// endpoint's "binary not installed" the members' node routes
+// (proxmox.ReadCephStatusDetail), once per request, with cephRead's attempt
+// bound and its one refetch through the cache after a lost connection. A walk
+// that finds no member with Ceph, the rest only unreachable, answers with the
+// endpoint's "binary not installed", so the page reads "no Ceph" while a node is
+// down; one that asked every member is remembered for noCephMemoWindow.
+func (h *CephHandler) readCephStatus(c fiber.Ctx, clusterID uuid.UUID) (*proxmox.CephStatus, error) {
+	px, err := h.createProxmoxClient(c, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	for attempt := 0; ; attempt++ {
+		ctx, cancel := context.WithTimeout(c.Context(), cephReadAttemptTimeout)
+		status, rerr := h.cephStatusOnce(ctx, px, clusterID)
+		cancel()
+		if rerr == nil {
+			return status, nil
+		}
+		if !errors.Is(rerr, proxmox.ErrConnectionFailed) || attempt > 0 {
+			return nil, mapProxmoxError(rerr)
+		}
+		if px, err = h.createProxmoxClient(c, clusterID); err != nil {
+			return nil, mapProxmoxError(rerr)
+		}
+	}
+}
+
+func (h *CephHandler) cephStatusOnce(ctx context.Context, px *proxmox.Client, clusterID uuid.UUID) (*proxmox.CephStatus, error) {
+	if h.noCeph.holds(clusterID) {
+		status, err := px.GetClusterCephStatus(ctx)
+		if err == nil {
+			h.noCeph.set(clusterID, false)
+		}
+		return status, err
+	}
+	r := px.ReadCephStatusDetail(ctx)
+	switch {
+	case r.Status != nil:
+		h.noCeph.set(clusterID, false)
+		return r.Status, nil
+	case r.NotInstalled != nil && r.Presence == proxmox.CephAbsent:
+		h.noCeph.set(clusterID, true)
+		return nil, r.NotInstalled
+	case r.NotInstalled != nil && r.Failed == 0:
+		return nil, r.NotInstalled
+	}
+	return nil, r.Err
 }

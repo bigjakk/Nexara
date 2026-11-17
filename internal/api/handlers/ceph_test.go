@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,6 +195,12 @@ func cephMember(t *testing.T, srv *httptest.Server, reply map[string]string) *pr
 // fresh client cache for a cluster at apiURL.
 func cephReadApp(t *testing.T, apiURL string, nodes []db.Node, endpoints []db.ListNodeEndpointsRow) (*fiber.App, uuid.UUID) {
 	t.Helper()
+	return cephReadAppWith(t, apiURL, nodes, endpoints, nil)
+}
+
+// cephReadAppWith is cephReadApp with a chance to adjust the handler first.
+func cephReadAppWith(t *testing.T, apiURL string, nodes []db.Node, endpoints []db.ListNodeEndpointsRow, tweak func(*CephHandler)) (*fiber.App, uuid.UUID) {
+	t.Helper()
 	encrypted, err := crypto.Encrypt("token-secret-value", pathParamEncKey)
 	if err != nil {
 		t.Fatalf("Encrypt: %v", err)
@@ -203,6 +210,9 @@ func cephReadApp(t *testing.T, apiURL string, nodes []db.Node, endpoints []db.Li
 	cache := proxmox.NewClientCache(cephCacheQueries{pathParamCacheQueries{cluster: cluster}, endpoints},
 		pathParamEncKey, nil, nil)
 	h := NewCephHandler(db.New(cephNodesDBTX{nodes: nodes}), pathParamEncKey, nil)
+	if tweak != nil {
+		tweak(h)
+	}
 
 	clusterOnly := apischema.Properties{"cluster_id": apischema.StdOption("cluster-id")}
 	app := fiber.New()
@@ -337,5 +347,63 @@ func TestCephStatusComesFromANodeThatRunsCeph(t *testing.T) {
 	status, body := cephCall(t, app, http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/ceph/status")
 	if status != http.StatusOK || !strings.Contains(body, `"num_pgs":97`) {
 		t.Errorf("status = %d %s, want 200 with the member's status", status, body)
+	}
+}
+
+// noCephCluster is a stand-in Proxmox whose three nodes run no Ceph, pve-03
+// down when down is set, counting the requests it gets.
+func noCephCluster(t *testing.T, down bool) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api2/json/nodes":
+			_, _ = w.Write([]byte(`{"data":[{"node":"pve-01"},{"node":"pve-02"},{"node":"pve-03"}]}`))
+		case down && r.URL.Path == "/api2/json/nodes/pve-03/ceph/status":
+			w.WriteHeader(595)
+		default:
+			http.Error(w, `{"data":null,"message":"binary not installed: /usr/bin/ceph-mon\n"}`, http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &n
+}
+
+var threeNodes = []db.Node{{Name: "pve-01", Status: "online"}, {Name: "pve-02", Status: "online"}, {Name: "pve-03", Status: "online"}}
+
+// On a cluster without Ceph with a node down, the page still reads "no Ceph",
+// and one poll walks the members once: the cluster route, /nodes, three nodes.
+func TestCephStatusWithoutCephAndANodeDown(t *testing.T) {
+	t.Parallel()
+	srv, requests := noCephCluster(t, true)
+	app, clusterID := cephReadApp(t, srv.URL, threeNodes, nil)
+	status, body := cephCall(t, app, http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/ceph/status")
+	if !strings.Contains(body, "binary not installed") || requests.Load() != 5 {
+		t.Errorf("status = %d %s after %d requests, want the not-installed answer after 5", status, body, requests.Load())
+	}
+}
+
+// A walk that found no member running Ceph is trusted for ten minutes: a poll
+// inside the window asks the endpoint alone, one after it walks again.
+func TestCephStatusRemembersAClusterWithoutCeph(t *testing.T) {
+	t.Parallel()
+	srv, requests := noCephCluster(t, false)
+	var now atomic.Int64
+	now.Store(time.Now().UnixNano())
+	app, clusterID := cephReadAppWith(t, srv.URL, threeNodes, nil, func(h *CephHandler) {
+		h.noCeph = newNoCephMemo(func() time.Time { return time.Unix(0, now.Load()) })
+	})
+	target := "/api/v1/clusters/" + clusterID.String() + "/ceph/status"
+	for _, want := range []struct {
+		after    time.Duration
+		requests int32
+	}{{0, 5}, {time.Minute, 1}, {11 * time.Minute, 5}} {
+		now.Add(int64(want.after))
+		requests.Store(0)
+		if _, body := cephCall(t, app, http.MethodGet, target); !strings.Contains(body, "binary not installed") || requests.Load() != want.requests {
+			t.Errorf("after %v: %s in %d requests, want not installed in %d", want.after, body, requests.Load(), want.requests)
+		}
 	}
 }

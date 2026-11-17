@@ -37,6 +37,7 @@ func TestReadCephStatus(t *testing.T) {
 			map[string]reply{"pve-01": {500, notInstalled}, "pve-02": {500, notInstalled}}, CephAbsent},
 		{"a member that cannot be asked", reply{500, notInstalled},
 			map[string]reply{"pve-01": {500, notInstalled}, "pve-02": {595, `{"data":null}`}}, CephPresenceUnknown},
+		{"an empty member list", reply{500, notInstalled}, nil, CephPresenceUnknown},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -48,6 +49,9 @@ func TestReadCephStatus(t *testing.T) {
 					rep = tt.cluster
 				case "/api2/json/nodes":
 					rep = reply{200, `{"data":[{"node":"pve-01","status":"online"},{"node":"pve-02","status":"online"}]}`}
+					if tt.members == nil {
+						rep = reply{200, `{"data":[]}`}
+					}
 				case "/api2/json/nodes/pve-01/ceph/status":
 					rep = tt.members["pve-01"]
 				case "/api2/json/nodes/pve-02/ceph/status":

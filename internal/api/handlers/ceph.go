@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -19,11 +18,12 @@ type CephHandler struct {
 	queries       *db.Queries
 	encryptionKey string
 	eventPub      *events.Publisher
+	noCeph        *noCephMemo
 }
 
 // NewCephHandler creates a new Ceph handler.
 func NewCephHandler(queries *db.Queries, encryptionKey string, eventPub *events.Publisher) *CephHandler {
-	return &CephHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub}
+	return &CephHandler{queries: queries, encryptionKey: encryptionKey, eventPub: eventPub, noCeph: newNoCephMemo(time.Now)}
 }
 
 // --- Response types ---
@@ -133,14 +133,7 @@ func (h *CephHandler) GetStatus(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	// The cluster-level route, so the answer does not hang on the node the
-	// database picked, and on the node routes when the endpoint has no Ceph of
-	// its own (ReadCephStatus); if the endpoint is gone, cephRead asks again
-	// through the client the cache rebuilds.
-	status, err := cephRead(h, c, clusterID, func(px *proxmox.Client, ctx context.Context, _ string) (*proxmox.CephStatus, error) {
-		s, _, rerr := px.ReadCephStatus(ctx)
-		return s, rerr
-	})
+	status, err := h.readCephStatus(c, clusterID)
 	if err != nil {
 		return err
 	}
