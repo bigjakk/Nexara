@@ -42,6 +42,14 @@ describe("the placement groups stat", () => {
       want: "All active+clean",
     },
     {
+      name: "degraded beside clean",
+      pgs: [
+        { state_name: "active+clean", count: 81 },
+        { state_name: "active+undersized+degraded", count: 16 },
+      ],
+      want: "16 active+undersized+degraded, 81 active+clean",
+    },
+    {
       name: "mixed",
       pgs: [
         { state_name: "active+clean", count: 19 },
