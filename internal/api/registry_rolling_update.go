@@ -500,16 +500,17 @@ func createRollingUpdateParams() apischema.Properties {
 			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",
 			Description: "On a Ceph cluster, wait until every placement group is active+clean, and as many " +
 				"OSDs are up as before, before taking a node down and before calling a node healthy and " +
-				"moving its guests back. A wait longer than 30 minutes pauses the job. Ignored on a cluster " +
-				"without Ceph.",
+				"moving its guests back, and take the nodes one at a time whatever parallelism says. A wait " +
+				"longer than 30 minutes pauses the job. Ignored on a cluster without Ceph.",
 		},
 		"ceph_noout": {
 			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",
 			Description: "On a Ceph cluster, set Ceph's noout flag before the first node goes down and clear " +
 				"it when the job ends, however it ends, so a rebooting node's OSDs are not marked out and " +
 				"re-replicated. A flag already set is left as it is and never cleared. Needs Sys.Modify on / " +
-				"for the cluster's API token; without it the job goes on without noout. Ignored on a " +
-				"cluster without Ceph.",
+				"for the cluster's API token, and Proxmox sets flags only through the node behind the API " +
+				"address, so one without Ceph cannot; either way the job goes on without noout and says why. " +
+				"Ignored on a cluster without Ceph.",
 		},
 		"auto_restore_guests": {
 			Type: apischema.Boolean, Optional: true, Default: true, Typetext: "<boolean>",
