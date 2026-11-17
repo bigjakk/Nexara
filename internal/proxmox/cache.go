@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +50,15 @@ const cacheTTL = 10 * time.Minute
 // 60s fallback timeout instead, which made it three times too small.
 const CachedClientTimeout = 5 * time.Minute
 
+// unreachableWindow is how long an endpoint that could not be connected to is
+// treated as offline when the cache picks one, whatever the database says. It
+// covers the collector's lag: a rebooting node reads offline in the node table
+// 20 to 25 s after it stops answering, so by the end of the window the
+// database normally has evidence of its own, and SelectClusterEndpoint goes on
+// choosing the same alternate from it. A minute also bounds how long a
+// primary that answers again is passed over on the strength of one failure.
+const unreachableWindow = time.Minute
+
 // CacheKind identifies which sub-cache an invalidation message targets.
 type CacheKind string
 
@@ -87,24 +97,33 @@ func NewClientForCluster(ctx context.Context, q CacheQueries, encryptionKey stri
 	if err != nil {
 		return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 	}
-	return newClientForClusterRow(cluster, clusterEndpoint(ctx, q, cluster), encryptionKey, timeout)
+	return newClientForClusterRow(cluster, clusterEndpoint(ctx, q, cluster, nil), encryptionKey, timeout)
 }
 
 // clusterEndpoint picks the member this client should talk to. A failed or
 // empty endpoint list yields the configured api_url, so losing this lookup
 // degrades to exactly the previous behaviour rather than breaking the client.
-func clusterEndpoint(ctx context.Context, q CacheQueries, cluster db.Cluster) ClusterEndpoint {
+//
+// unreachable holds the lowercased hosts a cached client just failed to
+// connect to (ClientCache.endpointUnreachable). A member at one of them is
+// handed to SelectClusterEndpoint as offline — the evidence it already acts
+// on — so the choice that follows is its own, guards and all.
+func clusterEndpoint(ctx context.Context, q CacheQueries, cluster db.Cluster, unreachable map[string]bool) ClusterEndpoint {
 	rows, err := q.ListNodeEndpoints(ctx, cluster.ID)
 	if err != nil {
 		return ClusterEndpoint{BaseURL: cluster.ApiUrl, TLSFingerprint: cluster.TlsFingerprint}
 	}
 	endpoints := make([]NodeEndpoint, 0, len(rows))
 	for _, r := range rows {
+		status := r.Status
+		if unreachable[strings.ToLower(r.Address)] {
+			status = "offline"
+		}
 		endpoints = append(endpoints, NodeEndpoint{
 			Name:           r.Name,
 			Address:        r.Address,
 			SSLFingerprint: r.SslFingerprint,
-			Status:         r.Status,
+			Status:         status,
 		})
 	}
 	return SelectClusterEndpoint(cluster.ApiUrl, cluster.TlsFingerprint, endpoints)
@@ -132,11 +151,14 @@ func newClientForClusterRow(cluster db.Cluster, endpoint ClusterEndpoint, encryp
 }
 
 // pveEntry is a cached PVE client with the credential signature we built
-// it from and the build timestamp (for TTL checks).
+// it from and the build timestamp (for TTL checks). until, when set, ends the
+// entry earlier: it was built while an endpoint was held unreachable, and is
+// rebuilt when that hold lapses, so the database decides again.
 type pveEntry struct {
 	client    *Client
 	signature string
 	builtAt   time.Time
+	until     time.Time
 }
 
 // pbsEntry mirrors pveEntry for PBS.
@@ -169,6 +191,14 @@ type ClientCache struct {
 
 	sf singleflight.Group
 
+	// unreachable is, per cluster, each endpoint host a cached client failed
+	// to connect to and when; an entry counts for unreachableWindow. Guarded
+	// by mu. PVE only: PBS clients get no failover.
+	unreachable map[uuid.UUID]map[string]time.Time
+	// now is the clock the PVE entries' TTL and the unreachable window read;
+	// tests replace it.
+	now func() time.Time
+
 	subOnce   sync.Once
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -190,6 +220,9 @@ func NewClientCache(queries CacheQueries, encryptionKey string, rdb *redis.Clien
 		pve:     make(map[uuid.UUID]*pveEntry),
 		pbs:     make(map[uuid.UUID]*pbsEntry),
 		closed:  make(chan struct{}),
+
+		unreachable: make(map[uuid.UUID]map[string]time.Time),
+		now:         time.Now,
 	}
 }
 
@@ -252,7 +285,7 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 	c.mu.RLock()
 	entry, ok := c.pve[clusterID]
 	c.mu.RUnlock()
-	if ok && time.Since(entry.builtAt) < cacheTTL {
+	if ok && c.fresh(entry) {
 		return entry.client, nil
 	}
 
@@ -262,7 +295,7 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		c.mu.RLock()
 		entry, ok := c.pve[clusterID]
 		c.mu.RUnlock()
-		if ok && time.Since(entry.builtAt) < cacheTTL {
+		if ok && c.fresh(entry) {
 			return entry.client, nil
 		}
 
@@ -270,11 +303,17 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 		if err != nil {
 			return nil, fmt.Errorf("get cluster %s: %w", clusterID, err)
 		}
-		endpoint := clusterEndpoint(ctx, c.queries, cluster)
+		unreachable, until := c.heldUnreachable(clusterID)
+		endpoint := clusterEndpoint(ctx, c.queries, cluster, unreachable)
 		client, err := newClientForClusterRow(cluster, endpoint, c.encKey, CachedClientTimeout)
 		if err != nil {
 			return nil, err
 		}
+		// Set before the client is handed to anyone, and never again, so
+		// requests read it without a lock. Every request through a cached
+		// client reports here; no caller opts in.
+		host := strings.ToLower(APIURLHost(endpoint.BaseURL))
+		client.onUnreachable = func() { c.endpointUnreachable(clusterID, client, host) }
 		if endpoint.ViaNode != "" && c.logger != nil {
 			c.logger.Warn("proxmox: configured endpoint unusable, client built against failover member",
 				"cluster_id", cluster.ID,
@@ -292,7 +331,8 @@ func (c *ClientCache) Get(ctx context.Context, clusterID uuid.UUID) (*Client, er
 			// cluster update publishes, which is what makes re-pinning a
 			// rotated certificate take effect immediately.
 			signature: pveSignature(cluster) + "|" + endpoint.BaseURL + "|" + endpoint.TLSFingerprint,
-			builtAt:   time.Now(),
+			builtAt:   c.now(),
+			until:     until,
 		}
 		c.mu.Lock()
 		// If something else slotted an entry while we were building, prefer
@@ -390,6 +430,61 @@ func (c *ClientCache) Invalidate(clusterID uuid.UUID) {
 		delete(c.pve, clusterID)
 	}
 	c.mu.Unlock()
+}
+
+// fresh reports whether a PVE entry may still be served.
+func (c *ClientCache) fresh(e *pveEntry) bool {
+	now := c.now()
+	return now.Sub(e.builtAt) < cacheTTL && (e.until.IsZero() || now.Before(e.until))
+}
+
+// endpointUnreachable is what a cached PVE client calls when a request could
+// not connect to host. It holds host unreachable for unreachableWindow and
+// drops the entry, if it still holds that client, so the next Get builds
+// again — and picks an alternate only as SelectClusterEndpoint would for an
+// offline primary. Nothing is dialled here; the request that failed still
+// fails, and the next one goes wherever the rebuild points.
+func (c *ClientCache) endpointUnreachable(clusterID uuid.UUID, client *Client, host string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if host != "" {
+		if c.unreachable[clusterID] == nil {
+			c.unreachable[clusterID] = make(map[string]time.Time)
+		}
+		c.unreachable[clusterID][host] = c.now()
+	}
+	if entry, ok := c.pve[clusterID]; ok && entry.client == client {
+		delete(c.pve, clusterID)
+		closeIdleClient(client)
+		c.logger.Warn("proxmox: endpoint unreachable, cached client dropped",
+			"cluster_id", clusterID, "host", host, "hold", unreachableWindow)
+	}
+}
+
+// heldUnreachable returns the hosts of clusterID still held unreachable, and
+// when the first of those holds lapses (zero when there are none). Lapsed
+// holds are forgotten.
+func (c *ClientCache) heldUnreachable(clusterID uuid.UUID) (map[string]bool, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	var held map[string]bool
+	var until time.Time
+	for host, at := range c.unreachable[clusterID] {
+		end := at.Add(unreachableWindow)
+		if !now.Before(end) {
+			delete(c.unreachable[clusterID], host)
+			continue
+		}
+		if held == nil {
+			held = make(map[string]bool)
+		}
+		held[host] = true
+		if until.IsZero() || end.Before(until) {
+			until = end
+		}
+	}
+	return held, until
 }
 
 // InvalidatePBS drops the cached PBS client for pbsID.

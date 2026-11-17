@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -562,7 +564,7 @@ func TestClientCache_FailsOverToHealthyMember(t *testing.T) {
 		// keeping the cluster's pin would fail every handshake in production
 		// and still pass an assertion on baseURL. The pin lives inside a
 		// VerifyPeerCertificate closure, so check the selection that fed it.
-		chosen := clusterEndpoint(context.Background(), q, cluster)
+		chosen := clusterEndpoint(context.Background(), q, cluster, nil)
 		if chosen.TLSFingerprint != "CC:DD" {
 			t.Errorf("TLSFingerprint = %q, want the member's own CC:DD", chosen.TLSFingerprint)
 		}
@@ -584,6 +586,118 @@ func TestClientCache_FailsOverToHealthyMember(t *testing.T) {
 		}
 		if got := client.baseURL; got != "https://10.0.0.1:8006" {
 			t.Errorf("baseURL = %q, want the configured endpoint", got)
+		}
+	})
+}
+
+// TestClientCache_UnreachableEndpointIsReplaced pins the live failover: a
+// request through a cached client that cannot connect drops the entry, and the
+// next Get treats that endpoint as offline for unreachableWindow, choosing
+// exactly what SelectClusterEndpoint chooses for an offline primary.
+func TestClientCache_UnreachableEndpointIsReplaced(t *testing.T) {
+	t.Parallel()
+	// 127.0.0.3:8006 and 127.0.0.4:8006 refuse; 192.0.2.x is never dialled.
+	for _, addr := range []string{"127.0.0.3:8006", "127.0.0.4:8006"} {
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			_ = conn.Close()
+			t.Skipf("something listens on %s", addr)
+		}
+	}
+	const primary = "https://127.0.0.3:8006"
+	member := func(name, addr, fp, status string) db.ListNodeEndpointsRow {
+		return db.ListNodeEndpointsRow{Name: name, Address: addr, SslFingerprint: fp, Status: status}
+	}
+	setup := func(t *testing.T, apiURL string, eps ...db.ListNodeEndpointsRow) (*ClientCache, uuid.UUID, *time.Time) {
+		cluster := makeTestCluster(t, apiURL)
+		cluster.TlsFingerprint = "AA:AA"
+		q := newFakeQueries()
+		q.setCluster(cluster)
+		q.endpoints = map[uuid.UUID][]db.ListNodeEndpointsRow{cluster.ID: eps}
+		cache := NewClientCache(q, testCacheEncryptionKey, nil, quietLogger())
+		now := time.Unix(1_700_000_000, 0)
+		cache.now = func() time.Time { return now }
+		t.Cleanup(cache.Close)
+		return cache, cluster.ID, &now
+	}
+	// getAndFail returns where the next Get points (base URL, pin) and sends a
+	// request through that client when it points at a refusing loopback
+	// address; a 192.0.2.x one is never dialled.
+	getAndFail := func(t *testing.T, cache *ClientCache, id uuid.UUID) (string, string) {
+		t.Helper()
+		client, err := cache.Get(context.Background(), id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		cache.mu.RLock()
+		sig := strings.Split(cache.pve[id].signature, "|")
+		cache.mu.RUnlock()
+		if strings.HasPrefix(sig[1], "https://127.") {
+			_ = client.do(context.Background(), "/version", nil)
+		}
+		return sig[1], sig[2]
+	}
+
+	t.Run("selection after a refused request", func(t *testing.T) {
+		for _, tt := range []struct {
+			name, apiURL string
+			eps          []db.ListNodeEndpointsRow
+			want         []string // base URL, pin of each successive Get
+		}{
+			{"refused member primary, then a refused alternate", primary, []db.ListNodeEndpointsRow{
+				member("pve-01", "127.0.0.3", "AA:AA", "online"),
+				member("pve-02", "127.0.0.4", "BB:BB", "online"),
+				member("pve-03", "192.0.2.13", "CC:CC", "online"),
+			}, []string{primary, "AA:AA", "https://127.0.0.4:8006", "BB:BB", "https://192.0.2.13:8006", "CC:CC"}},
+			{"a VIP is not a member", "https://127.0.0.3:8006", []db.ListNodeEndpointsRow{
+				member("pve-02", "192.0.2.12", "BB:BB", "online"),
+			}, []string{primary, "AA:AA", primary, "AA:AA"}},
+			{"no alternate without a pin, nor one not online", primary, []db.ListNodeEndpointsRow{
+				member("pve-01", "127.0.0.3", "AA:AA", "online"),
+				member("pve-02", "192.0.2.12", "", "online"),
+				member("pve-03", "192.0.2.13", "CC:CC", "unknown"),
+			}, []string{primary, "AA:AA", primary, "AA:AA"}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				cache, id, _ := setup(t, tt.apiURL, tt.eps...)
+				for i := 0; i < len(tt.want); i += 2 {
+					if base, pin := getAndFail(t, cache, id); base != tt.want[i] || pin != tt.want[i+1] {
+						t.Errorf("Get %d = %s pinned %s, want %s pinned %s", i/2+1, base, pin, tt.want[i], tt.want[i+1])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("after the window the database decides again", func(t *testing.T) {
+		cache, id, now := setup(t, primary,
+			member("pve-01", "127.0.0.3", "AA:AA", "online"), member("pve-02", "192.0.2.12", "BB:BB", "online"))
+		getAndFail(t, cache, id)
+		if base, _ := getAndFail(t, cache, id); base != "https://192.0.2.12:8006" {
+			t.Fatalf("inside the window Get = %s, want the alternate", base)
+		}
+		*now = now.Add(unreachableWindow)
+		if base, _ := getAndFail(t, cache, id); base != primary {
+			t.Errorf("after the window Get = %s, want the primary the database calls online", base)
+		}
+	})
+
+	t.Run("an answer is not unreachable", func(t *testing.T) {
+		for name, srv := range map[string]*httptest.Server{
+			// The pin set below is not this server's certificate.
+			"certificate mismatch": httptest.NewTLSServer(http.NotFoundHandler()),
+			"HTTP 503": httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			})),
+		} {
+			t.Cleanup(srv.Close)
+			cache, id, _ := setup(t, srv.URL)
+			first, _ := cache.Get(context.Background(), id)
+			if err := first.do(context.Background(), "/version", nil); err == nil {
+				t.Fatalf("%s: the request succeeded", name)
+			}
+			if again, _ := cache.Get(context.Background(), id); again != first || len(cache.unreachable) != 0 {
+				t.Errorf("%s dropped the cached client or held its endpoint unreachable", name)
+			}
 		}
 	})
 }

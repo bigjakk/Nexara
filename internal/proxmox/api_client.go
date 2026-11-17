@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -57,6 +58,12 @@ type apiClient struct {
 	// directly). applyAuth falls back to authHeader in that case, so the
 	// zero value behaves like the token auth this package has always used.
 	auth requestAuth
+
+	// onUnreachable is called when a request could not be connected at all
+	// (dialFailed). ClientCache sets it on the PVE clients it builds, before
+	// handing them out, so it can stop serving a client whose endpoint went
+	// away; every other client leaves it nil and nothing changes for it.
+	onUnreachable func()
 }
 
 // applyAuth attaches credentials to req. See apiClient.auth for why the nil
@@ -539,7 +546,22 @@ func (a *apiClient) readBody(resp *http.Response, sent url.Values) ([]byte, erro
 // net/http's text can carry what the peer chose — the Location of a refused
 // redirect, a malformed status line — so it is cleaned like an answer's.
 func (a *apiClient) connectionFailed(err error, sent url.Values) error {
+	if a.onUnreachable != nil && dialFailed(err) {
+		a.onUnreachable()
+	}
 	return fmt.Errorf("%w: %s", ErrConnectionFailed, cleanErrorText(err.Error(), a.requestSecrets(sent)))
+}
+
+// dialFailed reports whether a request failed to connect to the endpoint at
+// all: refused, no route, a dial that timed out. A certificate that fails the
+// pin fails after the dial, in the handshake, and an HTTP answer of any status
+// is not an error here, so neither counts; nor does a caller that cancelled.
+func dialFailed(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 // extraSecretFormKeys are the credential-bearing parameters this package sends
