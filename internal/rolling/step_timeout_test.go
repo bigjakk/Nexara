@@ -83,3 +83,36 @@ func TestStepTimeouts_CountFromTheLastResume(t *testing.T) {
 		})
 	}
 }
+
+// TestDrain_CarriesOnRightAfterAResume: a pause stops the drain loop, and a
+// resume used to wait out the two-minute stall check from the node's last write
+// before the drain went on. A resume since that write carries it on at once; one
+// from before it leaves a drain that is writing alone.
+func TestDrain_CarriesOnRightAfterAResume(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		resumed    pgtype.Timestamptz
+		wantResume bool
+	}{
+		{"resumed since the last write", ago(10 * time.Second), true},
+		{"resumed before the last write", ago(time.Minute), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			d := &memberDB{t: t, accept: map[string]int64{"TouchRollingUpdateNode": 1}}
+			// Every Proxmox read fails: the guest counts as still on the node.
+			o, client, _ := engineOn(t, d, nil)
+			job := db.RollingUpdateJob{ID: uuid.New(), Status: "running", ResumedAt: tt.resumed}
+			node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01", Step: "draining",
+				DrainStartedAt: ago(5 * time.Minute), UpdatedAt: time.Now().Add(-30 * time.Second),
+				GuestsJson: []byte(`[{"vmid":101,"name":"linux01","type":"qemu"}]`)}
+
+			o.advanceDraining(context.Background(), client, job, node)
+
+			if resumed := slices.Contains(d.writes, "TouchRollingUpdateNode"); resumed != tt.wantResume {
+				t.Errorf("drain carried on = %v, want %v (wrote %v)", resumed, tt.wantResume, d.writes)
+			}
+		})
+	}
+}

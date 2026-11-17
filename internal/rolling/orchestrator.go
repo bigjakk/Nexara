@@ -580,9 +580,9 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 	// Passthrough guests (PCI/USB) cannot be live-migrated — shut them down
 	// in-place and restart them on the same node after the update completes.
 	for _, guest := range guests {
-		// Check for cancellation between each guest operation.
+		// Check for a cancel or a pause between each guest operation.
 		if o.isJobCancelled(ctx, job.ID) {
-			o.logger.Info("job cancelled during drain, stopping migrations", "node", node.NodeName)
+			o.logger.Info("job paused or cancelled during drain, not moving more guests off", "node", node.NodeName)
 			return
 		}
 
@@ -789,7 +789,7 @@ func (o *Orchestrator) beginUpgrade(ctx context.Context, job db.RollingUpdateJob
 			return
 		}
 		o.publishEvent(ctx, job.ClusterID, job.ID, "node_upgrading")
-		o.logger.Info("node ready, starting automated upgrade", "node", node.NodeName, "drained", drained)
+		o.logger.Info("node ready for its automated upgrade, which a running job starts on its next tick", "node", node.NodeName, "drained", drained)
 	} else {
 		// Manual mode: pause for admin confirmation.
 		var err error
@@ -1012,6 +1012,19 @@ const upgradeAbsoluteTimeout = 60 * time.Minute
 // heartbeat ticks every 30s, so 3 minutes catches a dead goroutine
 // quickly while tolerating transient DB hiccups.
 const upgradeHeartbeatStale = 3 * time.Minute
+
+// stepInProgress reports whether a drain or restore whose node row was last
+// written at updated may still be running, so the tick leaves it alone. Two
+// minutes of silence say it died with its container. A resume since that write
+// says it stopped for the pause: both loops run inside the tick and return at
+// their next status check, so nothing else is moving the node's guests, and
+// waiting out the two minutes only held the resumed drain still.
+func stepInProgress(job db.RollingUpdateJob, updated time.Time) bool {
+	if updated.IsZero() || (job.ResumedAt.Valid && job.ResumedAt.Time.After(updated)) {
+		return false
+	}
+	return time.Since(updated) < 2*time.Minute
+}
 
 // stepElapsed is how long a node has been in the step that started at started,
 // as that step's timeout counts it: from the later of the start and the job's
@@ -1346,8 +1359,9 @@ func (o *Orchestrator) advanceDraining(ctx context.Context, client *proxmox.Clie
 	}
 
 	// Resilience: if the drain hasn't progressed in 2 minutes (e.g. container
-	// restart killed the goroutine), check Proxmox and resume or complete.
-	if !node.UpdatedAt.IsZero() && time.Since(node.UpdatedAt) < 2*time.Minute {
+	// restart killed the goroutine), or a pause stopped it, check Proxmox and
+	// resume or complete.
+	if stepInProgress(job, node.UpdatedAt) {
 		return // Drain is actively progressing.
 	}
 
@@ -1600,8 +1614,9 @@ func (o *Orchestrator) advanceRestoring(ctx context.Context, client *proxmox.Cli
 		return
 	}
 
-	// Resilience: if restore hasn't progressed in 2 minutes, re-trigger.
-	if !node.UpdatedAt.IsZero() && time.Since(node.UpdatedAt) < 2*time.Minute {
+	// Resilience: if restore hasn't progressed in 2 minutes, or a pause
+	// stopped it, re-trigger.
+	if stepInProgress(job, node.UpdatedAt) {
 		return
 	}
 

@@ -238,9 +238,14 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   rollingScope + "/:id/pause",
-		Description: "Pause a running rolling update job. The node in flight finishes its current step; " +
-			"nothing new is started. Cluster state the job holds — a CRS pause, disabled HA rules — stays " +
-			"held. A job belonging to another cluster answers 404.",
+		Description: "Pause a running rolling update job. While it is paused no node is advanced and no new " +
+			"node is started. Work already under way runs to its own end and the node then waits: a drain " +
+			"or a restore stops after the guest it is moving, an automated upgrade already running finishes " +
+			"without its reboot, and a reboot already sent goes ahead. A drain that ends during the pause " +
+			"moves its node on to upgrading (awaiting_upgrade for a manual job), where nothing runs until the " +
+			"resume. Resume carries each node on from " +
+			"where it stopped. Cluster state the job holds — the DRS and CRS pauses, disabled HA rules — " +
+			"stays held. A job belonging to another cluster answers 404.",
 		Group:       "Rolling Updates",
 		Permissions: rollingManage(),
 		Parameters:  rollingJobParams(nil),
