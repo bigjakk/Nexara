@@ -53,7 +53,7 @@ const ACME_KEY = ["clusters", CLUSTER, "nodes", NODE, "acme-config"];
 // gated field.
 const CURRENT = "pve-manager/9.2.20/0123abcd";
 
-const DIALOG = `Edit Options - ${NODE}`;
+const DIALOG = `Edit options - ${NODE}`;
 const MAC = "02:00:00:00:00:01";
 const MAC_2 = "02:00:00:00:00:02";
 

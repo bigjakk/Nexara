@@ -68,7 +68,7 @@ describe("HARuleForm", () => {
     );
 
     // Node-affinity-specific
-    expect(screen.getByText(/Nodes & Priorities/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nodes and priorities/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Strict/i)).toBeInTheDocument();
     // Resource-affinity-specific should NOT be present
     expect(
@@ -94,14 +94,14 @@ describe("HARuleForm", () => {
     if (!typeTrigger) throw new Error("Type select not rendered");
     await user.click(typeTrigger);
     await user.click(
-      screen.getByRole("option", { name: /Resource Affinity/i }),
+      screen.getByRole("option", { name: /Resource affinity/i }),
     );
 
     // Now resource-affinity-specific should appear and node-affinity should disappear
     expect(
       screen.getAllByText(/Positive \(keep together\)/i).length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByText(/Nodes & Priorities/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Nodes and priorities/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Strict/i)).not.toBeInTheDocument();
   });
 

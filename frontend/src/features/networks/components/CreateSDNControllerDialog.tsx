@@ -160,7 +160,7 @@ export function CreateSDNControllerDialog({
         ) : (
           <Button size="sm">
             <Plus className="h-4 w-4" />
-            Create Controller
+            Create controller
           </Button>
         )}
       </DialogTrigger>

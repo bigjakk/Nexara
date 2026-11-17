@@ -11,8 +11,8 @@ import { VMTree } from "./VMTree";
 
 /** The label is the grouping; the hover hint says what it holds. */
 const PERSPECTIVES: SegmentedOption<TreePerspective>[] = [
-  { value: "hosts", label: "Hosts", title: "Hosts & VMs" },
-  { value: "vms", label: "Folders", title: "VMs & Templates" },
+  { value: "hosts", label: "Hosts", title: "Hosts and VMs" },
+  { value: "vms", label: "Folders", title: "VMs and templates" },
   { value: "storage", label: "Storage", title: "Storage" },
 ];
 

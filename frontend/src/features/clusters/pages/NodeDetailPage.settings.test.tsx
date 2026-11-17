@@ -179,17 +179,17 @@ const MOVES: [
   [
     "DNS",
     EDIT_DNS,
-    "Edit DNS Configuration - pve-01",
-    "Edit DNS Configuration - pve-02",
-    "Search Domain",
+    "Edit DNS configuration - pve-01",
+    "Edit DNS configuration - pve-02",
+    "Search domain",
     "live.example.com",
     "other.example.com",
   ],
   [
     "timezone",
     EDIT_TIMEZONE,
-    "Edit Timezone - pve-01",
-    "Edit Timezone - pve-02",
+    "Edit timezone - pve-01",
+    "Edit timezone - pve-02",
     "Timezone",
     "Europe/London",
     "Etc/UTC",
@@ -300,7 +300,7 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
 
     await user.click(await screen.findByRole("button", EDIT_TIMEZONE));
     const timezone = await screen.findByRole("dialog", {
-      name: "Edit Timezone - pve-01",
+      name: "Edit timezone - pve-01",
     });
     expect(within(timezone).getByLabelText("Timezone")).toHaveValue(
       "Europe/London",
@@ -314,18 +314,18 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
 
     await user.click(await screen.findByRole("button", EDIT_DNS));
     const dialog = await screen.findByRole("dialog", {
-      name: "Edit DNS Configuration - pve-01",
+      name: "Edit DNS configuration - pve-01",
     });
-    expect(within(dialog).getByLabelText("Search Domain")).toHaveValue(
+    expect(within(dialog).getByLabelText("Search domain")).toHaveValue(
       "live.example.com",
     );
-    expect(within(dialog).getByLabelText("DNS Server 1")).toHaveValue(
+    expect(within(dialog).getByLabelText("DNS server 1")).toHaveValue(
       "192.0.2.53",
     );
-    expect(within(dialog).getByLabelText("DNS Server 2")).toHaveValue(
+    expect(within(dialog).getByLabelText("DNS server 2")).toHaveValue(
       "192.0.2.54",
     );
-    expect(within(dialog).getByLabelText("DNS Server 3")).toHaveValue(
+    expect(within(dialog).getByLabelText("DNS server 3")).toHaveValue(
       "192.0.2.55",
     );
   });
@@ -341,9 +341,9 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
 
     await user.click(await screen.findByRole("button", EDIT_DNS));
     const dnsDialog = await screen.findByRole("dialog", {
-      name: "Edit DNS Configuration - pve-01",
+      name: "Edit DNS configuration - pve-01",
     });
-    const search = within(dnsDialog).getByLabelText("Search Domain");
+    const search = within(dnsDialog).getByLabelText("Search domain");
     await user.clear(search);
     await user.type(search, "new.example.com");
     await user.click(within(dnsDialog).getByRole("button", { name: "Save" }));
@@ -353,7 +353,7 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
 
     await user.click(await screen.findByRole("button", EDIT_TIMEZONE));
     const timezoneDialog = await screen.findByRole("dialog", {
-      name: "Edit Timezone - pve-01",
+      name: "Edit timezone - pve-01",
     });
     await user.click(
       within(timezoneDialog).getByRole("button", { name: "Save" }),
@@ -393,9 +393,9 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
     renderPage();
     await user.click(await screen.findByRole("button", EDIT_DNS));
     const dialog = await screen.findByRole("dialog", {
-      name: "Edit DNS Configuration - pve-01",
+      name: "Edit DNS configuration - pve-01",
     });
-    const search = within(dialog).getByLabelText("Search Domain");
+    const search = within(dialog).getByLabelText("Search domain");
     await user.clear(search);
     await user.type(search, "typed.example.com");
 
@@ -417,9 +417,9 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
     // Opened again, it is drawn from the node and not from what was typed.
     await user.click(edit);
     const again = await screen.findByRole("dialog", {
-      name: "Edit DNS Configuration - pve-01",
+      name: "Edit DNS configuration - pve-01",
     });
-    expect(within(again).getByLabelText("Search Domain")).toHaveValue(
+    expect(within(again).getByLabelText("Search domain")).toHaveValue(
       "live.example.com",
     );
     expect(api.writes()).toEqual([]);
@@ -449,7 +449,7 @@ describe("NodeDetailPage timezone and DNS dialogs", () => {
     renderPage("n1");
     await user.click(await screen.findByRole("button", EDIT_DNS));
     const dialog = await screen.findByRole("dialog", {
-      name: "Edit DNS Configuration - pve-01",
+      name: "Edit DNS configuration - pve-01",
     });
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => {

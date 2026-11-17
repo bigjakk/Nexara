@@ -618,7 +618,9 @@ export function VMTree({ filter = "" }: { filter?: string }) {
 
   return (
     <div>
-      <TreeHeading>{t("vms", { defaultValue: "VMs & Templates" })}</TreeHeading>
+      <TreeHeading>
+        {t("vms", { defaultValue: "VMs and templates" })}
+      </TreeHeading>
 
       {isLoading && <TreeSkeleton />}
 

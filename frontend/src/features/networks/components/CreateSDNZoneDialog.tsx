@@ -175,7 +175,7 @@ export function CreateSDNZoneDialog({
         ) : (
           <Button size="sm">
             <Plus className="h-4 w-4" />
-            Create Zone
+            Create zone
           </Button>
         )}
       </DialogTrigger>
@@ -315,7 +315,7 @@ export function CreateSDNZoneDialog({
                     }}
                   />
                   <Label htmlFor="advertise-subnets" className="cursor-pointer">
-                    Advertise Subnets
+                    Advertise subnets
                   </Label>
                 </div>
                 <div className="flex items-center gap-2">
@@ -330,7 +330,7 @@ export function CreateSDNZoneDialog({
                     htmlFor="disable-arp-nd-suppression"
                     className="cursor-pointer"
                   >
-                    Disable ARP ND Suppression
+                    Disable ARP ND suppression
                   </Label>
                 </div>
               </div>

@@ -21,7 +21,7 @@ function useFavoriteAction(target: FavoriteTarget) {
 
   return {
     isFavorite,
-    label: isFavorite ? "Remove from Favorites" : "Add to Favorites",
+    label: isFavorite ? "Remove from favorites" : "Add to favorites",
     Icon: isFavorite ? StarOff : Star,
     disabled: toggle.isPending,
     run: () => {

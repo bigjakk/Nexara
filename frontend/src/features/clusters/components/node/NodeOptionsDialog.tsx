@@ -251,7 +251,7 @@ export function EditNodeOptionsDialog({
     >
       <DialogContent className="max-w-xl" fallbackFocus={fallbackFocus}>
         <DialogHeader>
-          <DialogTitle>Edit Options - {nodeName}</DialogTitle>
+          <DialogTitle>Edit options - {nodeName}</DialogTitle>
           <DialogDescription>
             Empty settings use Proxmox's defaults.
           </DialogDescription>

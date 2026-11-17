@@ -134,7 +134,7 @@ describe("ContainerResourcesPanel between a Save's result and the reload after i
     });
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete and Save" }),
+      within(dialog).getByRole("button", { name: "Delete and save" }),
     );
     await screen.findByText("Saved");
     // Past the window: the populate effect has cleared what was sent.

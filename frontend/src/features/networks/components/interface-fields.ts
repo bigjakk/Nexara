@@ -14,11 +14,11 @@ import type {
  *  rest describe interfaces that already exist (a physical NIC, an OVS port
  *  implied by its bridge) rather than ones an operator creates by hand. */
 export const CREATABLE_INTERFACE_TYPES = [
-  { value: "bridge", label: "Linux Bridge", namePrefix: "vmbr" },
-  { value: "bond", label: "Linux Bond", namePrefix: "bond" },
+  { value: "bridge", label: "Linux bridge", namePrefix: "vmbr" },
+  { value: "bond", label: "Linux bond", namePrefix: "bond" },
   { value: "vlan", label: "Linux VLAN", namePrefix: "" },
-  { value: "OVSBridge", label: "OVS Bridge", namePrefix: "vmbr" },
-  { value: "OVSBond", label: "OVS Bond", namePrefix: "bond" },
+  { value: "OVSBridge", label: "OVS bridge", namePrefix: "vmbr" },
+  { value: "OVSBond", label: "OVS bond", namePrefix: "bond" },
   { value: "OVSIntPort", label: "OVS IntPort", namePrefix: "" },
 ] as const;
 
@@ -26,9 +26,9 @@ const TYPE_LABELS: Record<string, string> = {
   ...Object.fromEntries(
     CREATABLE_INTERFACE_TYPES.map((t) => [t.value, t.label]),
   ),
-  eth: "Network Device",
+  eth: "Network device",
   alias: "Alias",
-  OVSPort: "OVS Port",
+  OVSPort: "OVS port",
   vnet: "VNet",
   fabric: "Fabric",
   unknown: "Unknown",

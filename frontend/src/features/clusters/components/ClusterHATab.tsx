@@ -585,12 +585,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                 <DialogTrigger asChild>
                   <Button size="sm">
                     <Plus className="mr-2 h-4 w-4" />
-                    Add Resource
+                    Add resource
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle>Add HA Resource</DialogTitle>
+                    <DialogTitle>Add HA resource</DialogTitle>
                   </DialogHeader>
                   <HAResourceForm
                     mode="create"
@@ -626,7 +626,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                     <TableHead>State</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Group</TableHead>
-                    <TableHead>Restart / Relocate</TableHead>
+                    <TableHead>Restart / relocate</TableHead>
                     {resourceFailback && <TableHead>Failback</TableHead>}
                     <TableHead>Comment</TableHead>
                     {canManage("ha") && (
@@ -756,7 +756,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         >
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>Edit HA Resource</DialogTitle>
+              <DialogTitle>Edit HA resource</DialogTitle>
             </DialogHeader>
             {resEditing && (
               <HAResourceForm
@@ -790,12 +790,12 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                 <DialogTrigger asChild>
                   <Button size="sm">
                     <Plus className="mr-2 h-4 w-4" />
-                    Add Rule
+                    Add rule
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-lg">
                   <DialogHeader>
-                    <DialogTitle>Create HA Rule</DialogTitle>
+                    <DialogTitle>Create HA rule</DialogTitle>
                   </DialogHeader>
                   <HARuleForm
                     mode="create"
@@ -831,7 +831,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                     <TableHead>Rule</TableHead>
                     <TableHead>Type</TableHead>
                     <TableHead>Resources</TableHead>
-                    <TableHead>Nodes / Affinity</TableHead>
+                    <TableHead>Nodes / affinity</TableHead>
                     <TableHead>Strict</TableHead>
                     <TableHead>Comment</TableHead>
                     <TableHead>Enabled</TableHead>
@@ -946,7 +946,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         >
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Edit HA Rule</DialogTitle>
+              <DialogTitle>Edit HA rule</DialogTitle>
             </DialogHeader>
             {ruleEditing && (
               <HARuleForm
@@ -994,16 +994,16 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                   <DialogTrigger asChild>
                     <Button size="sm">
                       <Plus className="mr-2 h-4 w-4" />
-                      Add Group
+                      Add group
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-sm">
                     <DialogHeader>
-                      <DialogTitle>Create HA Group</DialogTitle>
+                      <DialogTitle>Create HA group</DialogTitle>
                     </DialogHeader>
                     <form onSubmit={handleCreateGroup} className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Group Name</Label>
+                        <Label>Group name</Label>
                         <Input
                           value={grpName}
                           onChange={(e) => {
@@ -1056,7 +1056,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
               <p className="flex items-start gap-2 px-[18px] pb-3 text-[12.5px] text-amber-700 dark:text-amber-400">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  Proxmox VE 9 migrated HA Groups to <strong>HA Rules</strong>{" "}
+                  Proxmox VE 9 migrated HA groups to <strong>HA rules</strong>{" "}
                   (node affinity). Creating or editing groups is disabled; use
                   the <strong>Rules</strong> section above. Any existing groups
                   are shown read-only.
@@ -1169,7 +1169,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
         >
           <DialogContent className="max-w-sm">
             <DialogHeader>
-              <DialogTitle>Edit HA Group</DialogTitle>
+              <DialogTitle>Edit HA group</DialogTitle>
             </DialogHeader>
             {grpEditing && (
               <form onSubmit={handleUpdateGroup} className="space-y-4">

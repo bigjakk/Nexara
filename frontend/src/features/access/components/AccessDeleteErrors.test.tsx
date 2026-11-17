@@ -81,7 +81,7 @@ describe("a failed group delete", () => {
     const ask = await screen.findByRole("alertdialog", {
       name: `Delete group ${GROUP}?`,
     });
-    await user.click(within(ask).getByRole("button", { name: "Delete Group" }));
+    await user.click(within(ask).getByRole("button", { name: "Delete group" }));
 
     await waitFor(() => {
       expect(mockedToastError).toHaveBeenCalledWith(
@@ -120,7 +120,7 @@ describe("a failed role delete", () => {
     const ask = await screen.findByRole("alertdialog", {
       name: `Delete role ${ROLE}?`,
     });
-    await user.click(within(ask).getByRole("button", { name: "Delete Role" }));
+    await user.click(within(ask).getByRole("button", { name: "Delete role" }));
 
     await waitFor(() => {
       expect(mockedToastError).toHaveBeenCalledWith(

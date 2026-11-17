@@ -81,7 +81,7 @@
   },
   "filed": "Filed",
   "filedBy": "Filed by {{user}}",
-  "taskLog": "Task Log",
+  "taskLog": "Task log",
   "inProgress": "In progress...",
   "taskCompletedSuccessfully": "Task completed successfully.",
   "taskFailed": "Task failed",

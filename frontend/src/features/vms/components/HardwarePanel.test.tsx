@@ -816,7 +816,7 @@ describe("HardwarePanel dirty check", () => {
         () => control(document.body, "BIOS"),
         "ovmf2",
         "seabios",
-        "SeaBIOS (Legacy)",
+        "SeaBIOS (legacy)",
       ],
       [
         "audio device",
@@ -1416,7 +1416,7 @@ describe("HardwarePanel PCI devices", () => {
 
     // The machine type is saved in the same write as a device added now, so
     // PCIe follows the staged one, not the one Proxmox has.
-    fill(screen.getByDisplayValue("i440fx (Default)"), "q35");
+    fill(screen.getByDisplayValue("i440fx (default)"), "q35");
     await user.click(screen.getByRole("button", { name: /add device/i }));
     await user.click(
       await screen.findByRole("menuitem", { name: /pci device/i }),

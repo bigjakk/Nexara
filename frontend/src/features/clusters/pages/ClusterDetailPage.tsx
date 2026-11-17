@@ -782,7 +782,7 @@ function NodeRow({
             variant="ghost"
             size="sm"
             className="h-7 gap-1 px-2 text-xs"
-            title="Open Shell"
+            title="Open shell"
             onClick={onShell}
           >
             <Terminal className="h-3.5 w-3.5" />

@@ -351,7 +351,7 @@ export function HARuleForm(props: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Rule Name</Label>
+        <Label>Rule name</Label>
         <Input
           value={name}
           onChange={(e) => {
@@ -383,8 +383,8 @@ export function HARuleForm(props: Props) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="node-affinity">Node Affinity</SelectItem>
-            <SelectItem value="resource-affinity">Resource Affinity</SelectItem>
+            <SelectItem value="node-affinity">Node affinity</SelectItem>
+            <SelectItem value="resource-affinity">Resource affinity</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -475,7 +475,7 @@ export function HARuleForm(props: Props) {
               <div className="space-y-3 rounded-md border bg-background p-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Requested State</Label>
+                    <Label className="text-xs">Requested state</Label>
                     <Select value={resState} onValueChange={setResState}>
                       <SelectTrigger className="h-8">
                         <SelectValue />
@@ -510,7 +510,7 @@ export function HARuleForm(props: Props) {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="auto-max-restart" className="text-xs">
-                      Max Restart
+                      Max restart
                     </Label>
                     <Input
                       id="auto-max-restart"
@@ -526,7 +526,7 @@ export function HARuleForm(props: Props) {
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="auto-max-relocate" className="text-xs">
-                      Max Relocate
+                      Max relocate
                     </Label>
                     <Input
                       id="auto-max-relocate"
@@ -579,7 +579,7 @@ export function HARuleForm(props: Props) {
       {type === "node-affinity" && (
         <>
           <div className="space-y-2">
-            <Label>Nodes & Priorities</Label>
+            <Label>Nodes and priorities</Label>
             <p className="text-xs text-muted-foreground">
               Higher priority wins. Leave at 0 for equal weight.
             </p>

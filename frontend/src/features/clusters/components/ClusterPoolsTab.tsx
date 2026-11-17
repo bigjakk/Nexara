@@ -150,12 +150,12 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                 <DialogTrigger asChild>
                   <Button size="sm">
                     <Plus className="mr-2 h-4 w-4" />
-                    Create Pool
+                    Create pool
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-sm">
                   <DialogHeader>
-                    <DialogTitle>Create Resource Pool</DialogTitle>
+                    <DialogTitle>Create resource pool</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleCreate} className="space-y-4">
                     <div>
@@ -344,7 +344,7 @@ export function ClusterPoolsTab({ clusterId }: ClusterPoolsTabProps) {
                 });
               }}
             >
-              {deletePool.isPending ? "Deleting..." : "Delete Pool"}
+              {deletePool.isPending ? "Deleting..." : "Delete pool"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -398,7 +398,7 @@ function EditCommentDialog({
     >
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Edit Pool: {poolId}</DialogTitle>
+          <DialogTitle>Edit pool: {poolId}</DialogTitle>
         </DialogHeader>
         {poolQuery.isLoading ? (
           <Skeleton className="h-20 w-full" />
@@ -652,12 +652,12 @@ function AddStorageDialog({
       <DialogTrigger asChild>
         <Button size="sm" variant="outline">
           <Database className="mr-2 h-4 w-4" />
-          Add Storage
+          Add storage
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add Storage to {poolId}</DialogTitle>
+          <DialogTitle>Add storage to {poolId}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <Popover open={pickerOpen} onOpenChange={setPickerOpen}>

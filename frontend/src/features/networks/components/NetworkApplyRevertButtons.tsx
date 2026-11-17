@@ -48,7 +48,7 @@ export function NetworkApplyRevertButtons({
         disabled={apply.isPending}
       >
         <Check className="h-4 w-4" />
-        Apply Config
+        Apply config
       </Button>
       <ConfirmDeleteDialog
         target={pending}
@@ -70,7 +70,7 @@ export function NetworkApplyRevertButtons({
             : `Proxmox discards every pending change to the network configuration of ${nodeName}, including any made outside Nexara. The running network does not change. Discarded changes cannot be got back: to redo one, make it again.`
         }
         confirmLabel={(change) =>
-          change === "apply" ? "Apply Config" : "Revert"
+          change === "apply" ? "Apply config" : "Revert"
         }
       />
     </>

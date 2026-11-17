@@ -33,7 +33,7 @@ const NODE = "pve-01";
 const NOTES_URL = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/notes`;
 const OPTIONS_URL = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/options`;
 const NOTES_KEY = ["clusters", CLUSTER, "nodes", NODE, "notes"];
-const DIALOG = `Edit Notes - ${NODE}`;
+const DIALOG = `Edit notes - ${NODE}`;
 const STALE =
   "The node's configuration changed since it was read — reload and try again.";
 const CHANGED = "This node's configuration changed while this dialog was open.";

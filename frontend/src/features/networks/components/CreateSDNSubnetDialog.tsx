@@ -119,7 +119,7 @@ export function CreateSDNSubnetDialog({
         ) : (
           <Button variant="outline" size="sm">
             <Plus className="h-4 w-4" />
-            Add Subnet
+            Add subnet
           </Button>
         )}
       </DialogTrigger>

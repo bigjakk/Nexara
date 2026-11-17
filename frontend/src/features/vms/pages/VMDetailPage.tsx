@@ -180,7 +180,7 @@ export function VMDetailPage() {
           {error?.message ?? "Resource not found"}
         </p>
         <Button variant="link" asChild className="mt-2 px-0">
-          <Link to="/inventory">Back to Inventory</Link>
+          <Link to="/inventory">Back to inventory</Link>
         </Button>
       </div>
     );

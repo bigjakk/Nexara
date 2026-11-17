@@ -96,7 +96,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
       button: "Delete alias net02",
       heading: "Delete alias net02?",
       text: "Proxmox removes the alias net02 (192.0.2.128/25) from the cluster firewall at once, without checking whether a rule or IP set still refers to it.",
-      confirm: "Delete Alias",
+      confirm: "Delete alias",
       request: `DELETE ${FW}/aliases/net02`,
     });
   });
@@ -107,7 +107,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
       button: "Delete IPSet set02",
       heading: "Delete IP set set02?",
       text: "Proxmox deletes the IP set set02 only if it has no entries left",
-      confirm: "Delete IP Set",
+      confirm: "Delete IP set",
       request: `DELETE ${FW}/ipset/set02`,
       // Neither the button nor the dialog's own clicks select the row they
       // sit over (a row click opens its entries card, as the next test
@@ -125,7 +125,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
       button: "Delete entry 192.0.2.0/24",
       heading: "Remove 192.0.2.0/24 from IP set set02?",
       text: "Proxmox removes 192.0.2.0/24 from the IP set set02 at once; unless another entry of the set covers them, its addresses stop matching the set",
-      confirm: "Remove Entry",
+      confirm: "Remove entry",
       request: `DELETE ${FW}/ipset/set02/entries/192.0.2.0%2F24`,
       invariant: () => {
         expect(screen.queryByText(/lifts the exclusion/)).toBeNull();
@@ -141,7 +141,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
       button: "Delete entry 192.0.2.77",
       heading: "Remove !192.0.2.77 from IP set set02?",
       text: "This is a nomatch entry: it excludes 192.0.2.77 from the IP set set02. Proxmox removes it at once, which lifts the exclusion — addresses in 192.0.2.77 that another entry of the set covers start matching the set, and rules that use the set start applying to them",
-      confirm: "Remove Entry",
+      confirm: "Remove entry",
       request: `DELETE ${FW}/ipset/set02/entries/192.0.2.77`,
       invariant: () => {
         expect(screen.queryByText(/stop matching/)).not.toBeInTheDocument();
@@ -155,7 +155,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
       button: "Delete security group grp02",
       heading: "Delete security group grp02?",
       text: "Proxmox deletes the security group grp02 only if it has no rules left — delete its rules first. It does not check whether any rule still refers to the group.",
-      confirm: "Delete Group",
+      confirm: "Delete group",
       request: `DELETE ${FW}/groups/grp02`,
     });
   });
@@ -188,7 +188,7 @@ describe("ClusterFirewallTab — focus after a delete", () => {
     const dialog = await screen.findByRole("alertdialog");
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Alias" }),
+      within(dialog).getByRole("button", { name: "Delete alias" }),
     );
 
     await waitFor(() => {

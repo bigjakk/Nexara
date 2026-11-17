@@ -209,7 +209,7 @@ describe("ClusterACMETab domain save", () => {
     renderTab();
     await openCertificatesTab(user);
 
-    await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+    await user.click(screen.getByRole("button", { name: /Add domain/ }));
     await typeDomainAndSave(user, "node1.example.com");
 
     await waitFor(() => {
@@ -238,7 +238,7 @@ describe("ClusterACMETab domain save", () => {
     renderTab();
     await openCertificatesTab(user);
 
-    await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+    await user.click(screen.getByRole("button", { name: /Add domain/ }));
     expect(await screen.findByText("node2.example.com")).toBeInTheDocument();
     await typeDomainAndSave(user, "node3.example.com");
 
@@ -284,7 +284,7 @@ describe("ClusterACMETab domain save", () => {
     renderTab();
     await openCertificatesTab(user);
 
-    await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+    await user.click(screen.getByRole("button", { name: /Add domain/ }));
     await user.type(
       screen.getByPlaceholderText("node1.example.com"),
       "node1.example.com",
@@ -304,7 +304,7 @@ describe("ClusterACMETab domain save", () => {
     renderTab();
     await openCertificatesTab(user);
 
-    await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+    await user.click(screen.getByRole("button", { name: /Add domain/ }));
     await typeDomainAndSave(user, "node1.example.com");
 
     expect(
@@ -379,7 +379,7 @@ describe("ClusterACMETab domain save", () => {
       "an add",
       [{ digest: "d1" }, { digest: "d2" }, { digest: "d3" }],
       async (user) => {
-        await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+        await user.click(screen.getByRole("button", { name: /Add domain/ }));
         await typeDomainAndSave(user, "node1.example.com");
       },
       3,
@@ -1047,7 +1047,7 @@ describe("a dialog whose node stops being the one shown", () => {
     [
       "an add",
       async (user) => {
-        await user.click(screen.getByRole("button", { name: /Add Domain/ }));
+        await user.click(screen.getByRole("button", { name: /Add domain/ }));
         await user.type(
           screen.getByPlaceholderText("node1.example.com"),
           "node3.example.com",
@@ -1309,7 +1309,7 @@ describe("ClusterACMETab Order Certificate and Renew", () => {
 
   it.each([
     {
-      button: "Order Certificate",
+      button: "Order certificate",
       title: `Order a certificate for ${NODE}?`,
       mock: () => postMock,
       sends: [`${CERTS}/order`, {}],

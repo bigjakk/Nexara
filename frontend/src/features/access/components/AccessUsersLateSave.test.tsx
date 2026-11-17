@@ -146,8 +146,8 @@ afterEach(() => {
 // ── Create user ─────────────────────────────────────────────────────────────
 
 async function openCreateUser(user: UserEvent): Promise<HTMLElement> {
-  await user.click(await screen.findByRole("button", { name: "Create User" }));
-  return screen.findByRole("dialog", { name: "Create Proxmox User" });
+  await user.click(await screen.findByRole("button", { name: "Create user" }));
+  return screen.findByRole("dialog", { name: "Create Proxmox user" });
 }
 
 /** The id is typed with a space either side, as a pasted one is: the request and the toast carry it trimmed. */
@@ -200,7 +200,7 @@ async function expandAlice(user: UserEvent): Promise<void> {
 async function createNewToken(user: UserEvent): Promise<void> {
   await expandAlice(user);
   await user.type(screen.getByLabelText("New token name"), ` ${NEW_TOKEN} `);
-  await user.click(screen.getByRole("button", { name: "Create Token" }));
+  await user.click(screen.getByRole("button", { name: "Create token" }));
   expect(
     await screen.findByRole("button", { name: "Creating..." }),
   ).toBeDisabled();
@@ -218,7 +218,7 @@ function expectSecretInNoToast(): void {
   }
 }
 
-const SECRET_DIALOG = { name: "API Token Created" };
+const SECRET_DIALOG = { name: "API token created" };
 
 // The secret dialog is drawn from state of the row that asked for it: with the
 // row collapsed or the page left there is nothing to draw it, so what is told
@@ -314,7 +314,7 @@ async function deleteAlice(user: UserEvent): Promise<HTMLElement> {
   const ask = await screen.findByRole("alertdialog", {
     name: `Delete ${ALICE}?`,
   });
-  await user.click(within(ask).getByRole("button", { name: "Delete User" }));
+  await user.click(within(ask).getByRole("button", { name: "Delete user" }));
   expect(
     await within(ask).findByRole("button", { name: "Deleting..." }),
   ).toBeDisabled();
@@ -363,7 +363,7 @@ const CONFIRMATIONS: {
   {
     name: "token revoke",
     request: mockedDelete,
-    send: tokenAction("Revoke", "Revoke Token", "Revoking..."),
+    send: tokenAction("Revoke", "Revoke token", "Revoking..."),
     action: `Revoking token ${FULL_TOKEN}`,
     sent: [[TOKEN_URL]],
     late: "nothing",

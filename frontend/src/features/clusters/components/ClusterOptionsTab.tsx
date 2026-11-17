@@ -690,7 +690,7 @@ function GeneralSection({
             },
             "Default",
             [
-              ["applet", "Java Applet (deprecated)"],
+              ["applet", "Java applet (deprecated)"],
               ["vv", "SPICE (virt-viewer)"],
               ["html5", "HTML5 (noVNC)"],
               ["xtermjs", "xterm.js"],

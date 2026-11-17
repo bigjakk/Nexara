@@ -212,7 +212,7 @@ export function FolderDetailPage() {
       <div>
         <p className="text-destructive">Folder not found</p>
         <Button variant="link" asChild className="mt-2 px-0">
-          <Link to={`/clusters/${clusterId}`}>Back to Cluster</Link>
+          <Link to={`/clusters/${clusterId}`}>Back to cluster</Link>
         </Button>
       </div>
     );

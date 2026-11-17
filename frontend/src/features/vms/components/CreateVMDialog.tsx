@@ -341,7 +341,7 @@ export function CreateVMDialog({
   const machineOptions = useMemo(() => {
     if (!rawMachineTypes || rawMachineTypes.length === 0) {
       return [
-        { value: "pc", label: "i440fx (Default)" },
+        { value: "pc", label: "i440fx (default)" },
         { value: "q35", label: "q35" },
       ];
     }
@@ -354,7 +354,7 @@ export function CreateVMDialog({
     const q35pve = pveTypes.find((mt) => mt.id.includes("q35"));
     const i440pve = pveTypes.find((mt) => mt.id.includes("i440fx"));
     if (q35pve)
-      result.push({ value: q35pve.id, label: `${q35pve.id} (Recommended)` });
+      result.push({ value: q35pve.id, label: `${q35pve.id} (recommended)` });
     if (i440pve) result.push({ value: i440pve.id, label: i440pve.id });
     // Add all +pve variants
     for (const mt of pveTypes) {
@@ -1156,7 +1156,7 @@ export function CreateVMDialog({
                         }
                       }}
                     >
-                      <option value="seabios">SeaBIOS (Default)</option>
+                      <option value="seabios">SeaBIOS (default)</option>
                       <option value="ovmf">OVMF (UEFI)</option>
                     </NativeSelect>
                   </Field>

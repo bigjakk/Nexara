@@ -49,7 +49,7 @@ export function CreateResourceDialogs() {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Select Cluster</DialogTitle>
+            <DialogTitle>Select cluster</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
             <Label>Choose which cluster to {verb}</Label>

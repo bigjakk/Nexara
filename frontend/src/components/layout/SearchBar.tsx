@@ -92,7 +92,7 @@ const GLOBAL_PAGES: PageEntry[] = [
   {
     keywords: ["inventory", "vms", "containers", "virtual machines"],
     label: "Inventory",
-    description: "All VMs & containers",
+    description: "All VMs and containers",
     icon: <Monitor className="h-4 w-4" />,
     path: "/inventory",
     pinned: true,
@@ -124,7 +124,7 @@ const GLOBAL_PAGES: PageEntry[] = [
   {
     keywords: ["alerts", "notifications", "rules", "channels"],
     label: "Alerts",
-    description: "Alert rules & history",
+    description: "Alert rules and history",
     icon: <Bell className="h-4 w-4" />,
     path: "/alerts",
     requiredPermission: "view:alert",
@@ -166,7 +166,7 @@ const GLOBAL_PAGES: PageEntry[] = [
       "update",
     ],
     label: "Security",
-    description: "CVE scanning & rolling updates",
+    description: "CVE scanning and rolling updates",
     icon: <Shield className="h-4 w-4" />,
     path: "/security",
     requiredPermission: "view:cve_scan",
@@ -207,7 +207,7 @@ const GLOBAL_PAGES: PageEntry[] = [
   {
     keywords: ["branding", "logo", "title", "admin"],
     label: "Admin: Branding",
-    description: "App branding & logo",
+    description: "App branding and logo",
     icon: <Palette className="h-4 w-4" />,
     path: "/admin/branding",
     requiredPermission: "manage:user",
@@ -215,7 +215,7 @@ const GLOBAL_PAGES: PageEntry[] = [
   {
     keywords: ["appearance", "theme", "dark", "light", "accent", "color"],
     label: "Settings: Appearance",
-    description: "Theme & display preferences",
+    description: "Theme and display preferences",
     icon: <Palette className="h-4 w-4" />,
     path: "/settings/appearance",
   },
@@ -268,7 +268,7 @@ const CLUSTER_PAGES: PageEntry[] = [
       "config",
     ],
     label: "Options",
-    description: "Datacenter options & notes",
+    description: "Datacenter options and notes",
     icon: <Settings className="h-4 w-4" />,
     clusterPath: "/clusters/{id}?tab=options",
   },
@@ -513,7 +513,7 @@ export function SearchBar() {
       {
         id: "console",
         label: "Open console",
-        description: "Terminal & VNC sessions",
+        description: "Terminal and VNC sessions",
         keywords: ["console", "terminal", "shell", "vnc", "xterm"],
         icon: <TerminalSquare className="h-4 w-4" />,
         perform: () => {

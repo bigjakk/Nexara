@@ -74,7 +74,7 @@ describe("SDNTable — deleting a subnet", () => {
       "Proxmox removes subnet zone01-192.0.2.0-26 from VNet vnet01 in the SDN configuration now.",
     );
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Subnet" }),
+      within(dialog).getByRole("button", { name: "Delete subnet" }),
     );
     await waitFor(() => {
       expect(api.writes()).toEqual([
@@ -98,7 +98,7 @@ describe("SDNTable — deleting a subnet", () => {
     const { user, dialog } = await openDeleteFor(TARGET);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Subnet" }),
+      within(dialog).getByRole("button", { name: "Delete subnet" }),
     );
 
     await waitFor(() => {

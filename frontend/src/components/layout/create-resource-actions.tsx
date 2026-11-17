@@ -21,7 +21,7 @@ interface CreateActionDef {
 const createActions: CreateActionDef[] = [
   {
     kind: "vm",
-    label: "Virtual Machine",
+    label: "Virtual machine",
     contextLabel: "Create VM",
     Icon: Monitor,
   },

@@ -300,17 +300,17 @@ const DNS_KIND: Kind = {
   url: DNS_URL,
   key: DNS_KEY,
   button: "Edit DNS settings",
-  dialog: `Edit DNS Configuration - ${NODE}`,
+  dialog: `Edit DNS configuration - ${NODE}`,
   noteSubject: "this node's DNS settings",
   toastSubject: `the DNS settings of ${NODE}`,
-  field: "DNS Server 1",
+  field: "DNS server 1",
   stored: DNS,
   storedValue: DNS.dns1,
   refreshed: DNS_LATER,
   refreshedValue: DNS_LATER.dns1,
   typed: "192.0.2.77",
   after: (typed) => ({ ...DNS, dns1: typed }),
-  untouched: { field: "Search Domain", value: DNS.search },
+  untouched: { field: "Search domain", value: DNS.search },
 };
 
 const TIMEZONE_KIND: Kind = {
@@ -318,7 +318,7 @@ const TIMEZONE_KIND: Kind = {
   url: TIME_URL,
   key: TIME_KEY,
   button: "Edit timezone",
-  dialog: `Edit Timezone - ${NODE}`,
+  dialog: `Edit timezone - ${NODE}`,
   noteSubject: "this node's timezone",
   toastSubject: `the timezone of ${NODE}`,
   field: "Timezone",
@@ -686,21 +686,21 @@ describe("the DNS dialog", () => {
     [
       "only one setting was changed: all four are sent, the ones left alone as they were read",
       DNS,
-      "Search Domain",
+      "Search domain",
       "new.example.com",
       { ...DNS, search: "new.example.com" },
     ],
     [
       "a resolver was emptied: it is sent as empty, which is how it is removed",
       DNS,
-      "DNS Server 2",
+      "DNS server 2",
       "",
       { ...DNS, dns2: "" },
     ],
     [
       "a node has none of the resolvers: they are sent as empty, beside the one that was added",
       { search: "corp.example.com", dns1: "", dns2: "", dns3: "" },
-      "DNS Server 1",
+      "DNS server 1",
       "192.0.2.53",
       { search: "corp.example.com", dns1: "192.0.2.53", dns2: "", dns3: "" },
     ],
@@ -713,10 +713,10 @@ describe("the DNS dialog", () => {
     renderDNS();
 
     const dialog = await openDialog(user, DNS_KIND);
-    expect(field(dialog, "Search Domain")).toHaveValue(stored.search);
-    expect(field(dialog, "DNS Server 1")).toHaveValue(stored.dns1);
-    expect(field(dialog, "DNS Server 2")).toHaveValue(stored.dns2);
-    expect(field(dialog, "DNS Server 3")).toHaveValue(stored.dns3);
+    expect(field(dialog, "Search domain")).toHaveValue(stored.search);
+    expect(field(dialog, "DNS server 1")).toHaveValue(stored.dns1);
+    expect(field(dialog, "DNS server 2")).toHaveValue(stored.dns2);
+    expect(field(dialog, "DNS server 3")).toHaveValue(stored.dns3);
     await setField(user, dialog, label, value);
     await save(user, dialog);
 
@@ -734,13 +734,13 @@ describe("the DNS dialog", () => {
 
     const dialog = await openDialog(user, DNS_KIND);
     expect(saveButton(dialog)).toBeEnabled();
-    await setField(user, dialog, "Search Domain", "");
+    await setField(user, dialog, "Search domain", "");
 
     expect(saveButton(dialog)).toBeDisabled();
     await save(user, dialog);
     expect(mockedPut).not.toHaveBeenCalled();
 
-    await user.type(field(dialog, "Search Domain"), "new.example.com");
+    await user.type(field(dialog, "Search domain"), "new.example.com");
     expect(saveButton(dialog)).toBeEnabled();
   });
 });
@@ -1244,7 +1244,7 @@ describe("the Edit button's read of the node", () => {
     serve({ [DNS_URL]: [DNS] });
     renderDNS({ probe: true });
     const first = await openDialog(user, DNS_KIND);
-    await setField(user, first, "Search Domain", "new.example.com");
+    await setField(user, first, "Search domain", "new.example.com");
     // From here every read is slow: the re-read the save asks for, and the
     // read of the press, which both answer with the node as the save left it.
     const held = deferred<unknown>();
@@ -1267,8 +1267,8 @@ describe("the Edit button's read of the node", () => {
     const second = await screen.findByRole("dialog", {
       name: DNS_KIND.dialog,
     });
-    expect(field(second, "Search Domain")).toHaveValue("new.example.com");
-    await setField(user, second, "DNS Server 3", "192.0.2.78");
+    expect(field(second, "Search domain")).toHaveValue("new.example.com");
+    await setField(user, second, "DNS server 3", "192.0.2.78");
     await save(user, second);
 
     await waitFor(() => {

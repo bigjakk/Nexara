@@ -155,7 +155,7 @@ async function openOptions(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     await screen.findByRole("button", { name: "Edit node options" }),
   );
-  return screen.findByRole("dialog", { name: "Edit Options - pve-01" });
+  return screen.findByRole("dialog", { name: "Edit options - pve-01" });
 }
 
 function notesCard(): HTMLElement {
@@ -372,7 +372,7 @@ describe("NodeDetailPage options and notes cards", () => {
     });
     await flushInAct();
     expect(
-      screen.getByRole("dialog", { name: "Edit Options - pve-01" }),
+      screen.getByRole("dialog", { name: "Edit options - pve-01" }),
     ).toBeInTheDocument();
     expect(
       within(dialog).getByRole("button", { name: "Saving..." }),
@@ -396,7 +396,7 @@ describe("NodeDetailPage options and notes cards", () => {
       await screen.findByRole("button", { name: "Edit node notes" }),
     );
     const dialog = await screen.findByRole("dialog", {
-      name: "Edit Notes - pve-01",
+      name: "Edit notes - pve-01",
     });
     await user.type(within(dialog).getByLabelText("Notes"), " and more");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));

@@ -125,7 +125,7 @@ describe("FirewallRulesTable — deleting a rule", () => {
     const { user, dialog } = await openDeleteFor(1);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -144,7 +144,7 @@ describe("FirewallRulesTable — deleting a rule", () => {
     );
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -194,7 +194,7 @@ describe("FirewallRulesTable — deleting a rule", () => {
     });
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -248,7 +248,7 @@ describe("FirewallRulesTable — deleting a rule", () => {
 
       qc.setQueryData(RULES_KEY, changed);
       await user.click(
-        within(dialog).getByRole("button", { name: "Delete Rule" }),
+        within(dialog).getByRole("button", { name: "Delete rule" }),
       );
 
       await waitFor(() => {
@@ -282,7 +282,7 @@ describe("FirewallRulesTable — deleting a rule", () => {
     });
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
     await waitFor(() => {
       expect(held).toBe(1);

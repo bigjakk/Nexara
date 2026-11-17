@@ -197,7 +197,7 @@ function expectNothingMutated() {
 
 /** The confirmation's action, and what Save confirms. */
 function deleteAndSave(dialog: HTMLElement): HTMLElement {
-  return within(dialog).getByRole("button", { name: "Delete and Save" });
+  return within(dialog).getByRole("button", { name: "Delete and save" });
 }
 
 describe("ContainerResourcesPanel unused volume deletion", () => {

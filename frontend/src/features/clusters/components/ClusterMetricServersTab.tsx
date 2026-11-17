@@ -92,7 +92,7 @@ export function ClusterMetricServersTab({
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4" />
-                Add Server
+                Add server
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-sm">

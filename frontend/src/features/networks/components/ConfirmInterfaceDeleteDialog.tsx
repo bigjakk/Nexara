@@ -72,7 +72,7 @@ export function ConfirmInterfaceDeleteDialog({
           </span>
         </>
       )}
-      confirmLabel="Delete Interface"
+      confirmLabel="Delete interface"
     />
   );
 }

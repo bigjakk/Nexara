@@ -231,7 +231,7 @@ function PluginsTab({ clusterId }: { clusterId: string }) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4" />
-                Add Plugin
+                Add plugin
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -1064,7 +1064,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
                 }
               >
                 <ShieldCheck className="h-4 w-4" />
-                {orderCert.isPending ? "Ordering..." : "Order Certificate"}
+                {orderCert.isPending ? "Ordering..." : "Order certificate"}
               </Button>
               <Button
                 size="sm"
@@ -1142,7 +1142,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
           configuredDomains.length < 6 ? (
             <Button size="sm" variant="outline" onClick={openAddDomain}>
               <Plus className="h-4 w-4" />
-              Add Domain
+              Add domain
             </Button>
           ) : undefined
         }
@@ -1373,7 +1373,7 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
               : `Proxmox asks the certificate authority for a new certificate for the domains of ${p.node}, even if the current one is not due for renewal yet, installs it, reloads pveproxy to use it, and then revokes the old one.`
           } If Nexara reaches this cluster through ${p.node} and has pinned its certificate, Nexara's live calls to the cluster fail until you verify the new certificate on the cluster's page.`
         }
-        confirmLabel={(p) => (p.kind === "order" ? "Order Certificate" : "Renew")}
+        confirmLabel={(p) => (p.kind === "order" ? "Order certificate" : "Renew")}
       />
     </div>
   );

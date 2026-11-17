@@ -390,7 +390,7 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
               <Label htmlFor="cluster-name">Cluster name</Label>
               <Input
                 id="cluster-name"
-                placeholder="Production Cluster"
+                placeholder="Production cluster"
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);

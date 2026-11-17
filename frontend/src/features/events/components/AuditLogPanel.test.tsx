@@ -77,7 +77,7 @@ describe("AuditLogPanel", () => {
     vi.clearAllMocks();
   });
 
-  it.each(["PBS Server", "Veeam Server", "Veeam Job", "Veeam Session"])(
+  it.each(["PBS server", "Veeam server", "Veeam job", "Veeam session"])(
     "offers %s in the Resource Type filter, as the rows filed under it need",
     (label) => {
       renderFor(["view:audit"]);

@@ -388,7 +388,7 @@ export function InterfaceFormDialog({
           )}
 
           {fields.ovsBridge && (
-            <Field label="OVS Bridge">
+            <Field label="OVS bridge">
               {ovsBridges.length > 0 ? (
                 <Select
                   value={form.ovs_bridge ?? ""}
@@ -444,7 +444,7 @@ export function InterfaceFormDialog({
           )}
 
           {fields.ovsTag && (
-            <Field label="VLAN Tag" hint="1–4094, blank for none">
+            <Field label="VLAN tag" hint="1–4094, blank for none">
               <Input
                 inputMode="numeric"
                 placeholder="e.g. 100"
@@ -484,7 +484,7 @@ export function InterfaceFormDialog({
           )}
 
           {fields.vlanId && (
-            <Field label="VLAN Tag" hint="1–4094">
+            <Field label="VLAN tag" hint="1–4094">
               <Input
                 inputMode="numeric"
                 placeholder="e.g. 100"
@@ -578,7 +578,7 @@ export function InterfaceFormDialog({
         )}
 
         <p className="text-xs text-muted-foreground">
-          Changes are staged as a pending configuration. Use Apply Config to
+          Changes are staged as a pending configuration. Use Apply config to
           activate them, or Revert to discard.
         </p>
 

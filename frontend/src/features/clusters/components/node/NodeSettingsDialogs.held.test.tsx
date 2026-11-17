@@ -81,8 +81,8 @@ const KINDS: [name: string, kind: Kind][] = [
       ui: <EditDNSDialog clusterId={CLUSTER} nodeName={NODE} />,
       url: `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/dns`,
       button: "Edit DNS settings",
-      dialog: `Edit DNS Configuration - ${NODE}`,
-      field: "DNS Server 1",
+      dialog: `Edit DNS configuration - ${NODE}`,
+      field: "DNS server 1",
       stored: {
         search: "corp.example.com",
         dns1: "192.0.2.53",
@@ -98,7 +98,7 @@ const KINDS: [name: string, kind: Kind][] = [
       ui: <EditTimezoneDialog clusterId={CLUSTER} nodeName={NODE} />,
       url: `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/time`,
       button: "Edit timezone",
-      dialog: `Edit Timezone - ${NODE}`,
+      dialog: `Edit timezone - ${NODE}`,
       field: "Timezone",
       stored: {
         timezone: "Europe/London",

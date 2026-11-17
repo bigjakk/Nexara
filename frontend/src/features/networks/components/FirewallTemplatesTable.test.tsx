@@ -82,7 +82,7 @@ describe("FirewallTemplatesTable — deleting a template", () => {
     const { user, dialog } = await openDeleteFor("db");
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Template" }),
+      within(dialog).getByRole("button", { name: "Delete template" }),
     );
 
     await waitFor(() => {
@@ -112,7 +112,7 @@ describe("FirewallTemplatesTable — applying a template", () => {
     expect(api.writes()).toEqual([]);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Apply to Cluster" }),
+      within(dialog).getByRole("button", { name: "Apply to cluster" }),
     );
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(

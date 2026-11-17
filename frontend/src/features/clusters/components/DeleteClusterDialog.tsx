@@ -93,7 +93,7 @@ export function DeleteClusterDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Cluster</DialogTitle>
+          <DialogTitle>Delete cluster</DialogTitle>
           <DialogDescription>
             This will permanently remove <CopyableName name={cluster.name} />{" "}
             and all associated data (nodes, VMs, metrics). Type the cluster name
@@ -160,7 +160,7 @@ export function DeleteClusterDialog({
             disabled={confirmName !== cluster.name || deleteMutation.isPending}
             onClick={handleDelete}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete Cluster"}
+            {deleteMutation.isPending ? "Deleting..." : "Delete cluster"}
           </Button>
         </DialogFooter>
       </DialogContent>

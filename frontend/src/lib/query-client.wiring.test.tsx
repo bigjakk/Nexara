@@ -193,7 +193,7 @@ const SHOWN_IN_PLACE: [
     () => <DRSConfigCard clusterId="c1" />,
     async (u) => {
       await u.click(
-        await screen.findByRole("button", { name: "Save Configuration" }),
+        await screen.findByRole("button", { name: "Save configuration" }),
       );
     },
   ],

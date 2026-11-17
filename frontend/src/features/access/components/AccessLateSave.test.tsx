@@ -151,8 +151,8 @@ async function createGroupNamed(
   groupid: string,
   comment?: string,
 ): Promise<HTMLElement> {
-  await user.click(await screen.findByRole("button", { name: "Create Group" }));
-  const dialog = await screen.findByRole("dialog", { name: "Create Group" });
+  await user.click(await screen.findByRole("button", { name: "Create group" }));
+  const dialog = await screen.findByRole("dialog", { name: "Create group" });
   await user.type(within(dialog).getByLabelText("Group ID"), ` ${groupid} `);
   if (comment !== undefined) {
     await user.type(within(dialog).getByLabelText("Comment"), comment);
@@ -197,8 +197,8 @@ async function createRoleNamed(
   roleid: string,
   padding = " ",
 ): Promise<HTMLElement> {
-  await user.click(await screen.findByRole("button", { name: "Create Role" }));
-  const dialog = await screen.findByRole("dialog", { name: "Create Role" });
+  await user.click(await screen.findByRole("button", { name: "Create role" }));
+  const dialog = await screen.findByRole("dialog", { name: "Create role" });
   await user.type(
     within(dialog).getByLabelText("Role ID"),
     `${padding}${roleid}${padding}`,
@@ -215,8 +215,8 @@ const GRANT = `Granting Operator on / to ${TOKEN_SUBJECT}`;
 
 /** The Operator role on the root path, to an API token: the one subject typed in rather than picked. */
 async function grantToToken(user: UserEvent): Promise<HTMLElement> {
-  await user.click(await screen.findByRole("button", { name: "Grant Access" }));
-  const dialog = await screen.findByRole("dialog", { name: "Grant Access" });
+  await user.click(await screen.findByRole("button", { name: "Grant access" }));
+  const dialog = await screen.findByRole("dialog", { name: "Grant access" });
   await user.click(within(dialog).getByRole("combobox", { name: "Role" }));
   await user.click(await screen.findByRole("option", { name: "Operator" }));
   await user.click(
@@ -265,8 +265,8 @@ const GROUP_CREATE = {
   send: (user) => createGroupNamed(user, "reviewers", "night shift"),
   action: "Creating group reviewers",
   reopen: async (user) => {
-    await user.click(screen.getByRole("button", { name: "Create Group" }));
-    return screen.findByRole("dialog", { name: "Create Group" });
+    await user.click(screen.getByRole("button", { name: "Create group" }));
+    return screen.findByRole("dialog", { name: "Create group" });
   },
   draft: {
     values: (dialog) => [
@@ -292,8 +292,8 @@ const GRANT_ACCESS = {
   send: grantToToken,
   action: GRANT,
   reopen: async (user) => {
-    await user.click(screen.getByRole("button", { name: "Grant Access" }));
-    return screen.findByRole("dialog", { name: "Grant Access" });
+    await user.click(screen.getByRole("button", { name: "Grant access" }));
+    return screen.findByRole("dialog", { name: "Grant access" });
   },
   draft: {
     values: (dialog) => [
@@ -349,8 +349,8 @@ const ROLE_CREATE = {
   send: (user) => createRoleNamed(user, "Reviewer"),
   action: "Creating role Reviewer",
   reopen: async (user) => {
-    await user.click(screen.getByRole("button", { name: "Create Role" }));
-    return screen.findByRole("dialog", { name: "Create Role" });
+    await user.click(screen.getByRole("button", { name: "Create role" }));
+    return screen.findByRole("dialog", { name: "Create role" });
   },
 } satisfies DialogSave;
 
@@ -470,8 +470,8 @@ const REPLACEMENTS: Replacement[] = [
       replacedBy(
         user,
         (u) => saveRole(u, "Operator"),
-        () => screen.getByRole("button", { name: "Create Role", hidden: true }),
-        "Create Role",
+        () => screen.getByRole("button", { name: "Create role", hidden: true }),
+        "Create role",
       ),
   },
   {
@@ -537,7 +537,7 @@ describe("a role save whose own editor is opened again from the keyboard", () =>
     const editor = await createRoleNamed(user, "Reviewer");
     await tabTo(
       user,
-      screen.getByRole("button", { name: "Create Role", hidden: true }),
+      screen.getByRole("button", { name: "Create role", hidden: true }),
     );
     await user.keyboard("{Enter}");
     await flushInAct();
@@ -782,7 +782,7 @@ const DELETES = [
     second: "auditors",
     title: (id: string) => `Delete group ${id}?`,
     action: (id: string) => `Deleting group ${id}`,
-    confirm: "Delete Group",
+    confirm: "Delete group",
     url: (id: string) => `${ACCESS}/groups/${id}`,
   },
   {
@@ -792,7 +792,7 @@ const DELETES = [
     second: "Auditor",
     title: (id: string) => `Delete role ${id}?`,
     action: (id: string) => `Deleting role ${id}`,
-    confirm: "Delete Role",
+    confirm: "Delete role",
     url: (id: string) => `${ACCESS}/roles/${id}`,
   },
 ];
@@ -879,12 +879,12 @@ const OVERRIDES = [
         name: "Delete group operators?",
       });
       await user.click(
-        within(ask).getByRole("button", { name: "Delete Group" }),
+        within(ask).getByRole("button", { name: "Delete group" }),
       );
     },
     title: "Deleting this group can cut off Nexara's access",
     confirmValue: "operators",
-    button: "Delete Group",
+    button: "Delete group",
     url: `${ACCESS}/groups/operators`,
   },
   {
@@ -899,12 +899,12 @@ const OVERRIDES = [
         name: "Delete role Operator?",
       });
       await user.click(
-        within(ask).getByRole("button", { name: "Delete Role" }),
+        within(ask).getByRole("button", { name: "Delete role" }),
       );
     },
     title: "Deleting this role can cut off Nexara's access",
     confirmValue: "Operator",
-    button: "Delete Role",
+    button: "Delete role",
     url: `${ACCESS}/roles/Operator`,
   },
   {
@@ -914,7 +914,7 @@ const OVERRIDES = [
     send: (user: UserEvent) => saveRole(user, "Operator"),
     title: "Saving this role can cut off Nexara's access",
     confirmValue: "Operator",
-    button: "Save Anyway",
+    button: "Save anyway",
     url: `${ACCESS}/roles/Operator`,
   },
   {
@@ -924,7 +924,7 @@ const OVERRIDES = [
     send: grantToToken,
     title: "Granting this can cut off Nexara's access",
     confirmValue: TOKEN_SUBJECT,
-    button: "Grant Anyway",
+    button: "Grant anyway",
     url: `${ACCESS}/acl`,
   },
   {

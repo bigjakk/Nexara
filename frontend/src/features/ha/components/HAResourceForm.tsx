@@ -279,7 +279,7 @@ export function HAResourceForm(props: Props) {
     <form onSubmit={handleSubmit} className="space-y-4">
       {props.mode === "create" ? (
         <div className="space-y-2">
-          <Label>VM / Container</Label>
+          <Label>VM / container</Label>
           <Select value={sid} onValueChange={setSID}>
             <SelectTrigger>
               <SelectValue placeholder="Select a VM or container" />
@@ -306,7 +306,7 @@ export function HAResourceForm(props: Props) {
       )}
 
       <div className="space-y-2">
-        <Label>Requested State</Label>
+        <Label>Requested state</Label>
         <Select value={state} onValueChange={setState}>
           <SelectTrigger>
             <SelectValue />
@@ -343,7 +343,7 @@ export function HAResourceForm(props: Props) {
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
-          <Label htmlFor="max-restart">Max Restart</Label>
+          <Label htmlFor="max-restart">Max restart</Label>
           <Input
             id="max-restart"
             type="number"
@@ -360,7 +360,7 @@ export function HAResourceForm(props: Props) {
           )}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="max-relocate">Max Relocate</Label>
+          <Label htmlFor="max-relocate">Max relocate</Label>
           <Input
             id="max-relocate"
             type="number"

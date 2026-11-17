@@ -140,7 +140,7 @@ describe("ClusterHATab — HA resource settings", () => {
     await openResources(PVE9, RESOURCES);
     // The headers the cell indexes above rely on.
     expect(
-      screen.getByRole("columnheader", { name: "Restart / Relocate" }),
+      screen.getByRole("columnheader", { name: "Restart / relocate" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("columnheader", { name: "Failback" }),
@@ -170,8 +170,8 @@ describe("ClusterHATab — HA resource settings", () => {
     const dialog = await screen.findByRole("dialog");
     // The dialog opens on the resource's real values: the explicit 0 as 0,
     // the unset max_relocate as the default, failback off.
-    expect(within(dialog).getByLabelText("Max Restart")).toHaveValue(0);
-    expect(within(dialog).getByLabelText("Max Relocate")).toHaveValue(1);
+    expect(within(dialog).getByLabelText("Max restart")).toHaveValue(0);
+    expect(within(dialog).getByLabelText("Max relocate")).toHaveValue(1);
     expect(
       within(dialog).getByRole("switch", { name: "Failback" }),
     ).not.toBeChecked();
@@ -208,7 +208,7 @@ describe("ClusterHATab — HA resource settings", () => {
   it("has no failback column or switch on PVE 8, and an edit there never sends failback", async () => {
     const user = await openResources(PVE8, PVE8_RESOURCES);
     expect(
-      screen.getByRole("columnheader", { name: "Restart / Relocate" }),
+      screen.getByRole("columnheader", { name: "Restart / relocate" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("columnheader", { name: "Failback" }),
@@ -248,7 +248,7 @@ describe("ClusterHATab — HA resource settings", () => {
     "creates through Add Resource with the failback $version allows",
     async ({ version, resources, failback }) => {
       const user = await openResources(version, resources);
-      await user.click(screen.getByRole("button", { name: "Add Resource" }));
+      await user.click(screen.getByRole("button", { name: "Add resource" }));
       const dialog = await screen.findByRole("dialog");
       const [guestTrigger] = within(dialog).getAllByRole("combobox");
       if (!guestTrigger) throw new Error("guest select not rendered");
@@ -282,11 +282,11 @@ describe("ClusterHATab — HA resource settings", () => {
       await screen.findByText("HA rules require Proxmox VE 9.0 or newer."),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add Rule" }),
+      screen.queryByRole("button", { name: "Add rule" }),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/^HA groups/)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Add Group" }),
+      screen.getByRole("button", { name: "Add group" }),
     ).toBeInTheDocument();
   });
 
@@ -295,12 +295,12 @@ describe("ClusterHATab — HA resource settings", () => {
     await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
 
     expect(
-      await screen.findByRole("button", { name: "Add Rule" }),
+      await screen.findByRole("button", { name: "Add rule" }),
     ).toBeInTheDocument();
     expect(screen.getByText("No HA rules configured.")).toBeInTheDocument();
     expect(screen.queryByText(/^HA groups/)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add Group" }),
+      screen.queryByRole("button", { name: "Add group" }),
     ).not.toBeInTheDocument();
   });
 
@@ -318,12 +318,12 @@ describe("ClusterHATab — HA resource settings", () => {
       screen.queryByText("HA rules require Proxmox VE 9.0 or newer."),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add Rule" }),
+      screen.queryByRole("button", { name: "Add rule" }),
     ).not.toBeInTheDocument();
     // Nothing to list, so no groups card either — and so no Add Group.
     expect(screen.queryByText(/^HA groups/)).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add Group" }),
+      screen.queryByRole("button", { name: "Add group" }),
     ).not.toBeInTheDocument();
   });
 
@@ -345,7 +345,7 @@ describe("ClusterHATab — HA resource settings", () => {
     expect(screen.getByDisplayValue("pve-01:100")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    await user.click(screen.getByRole("button", { name: "Add Group" }));
+    await user.click(screen.getByRole("button", { name: "Add group" }));
 
     expect(screen.getByPlaceholderText("node1:100,node2:50")).toHaveValue("");
   });
@@ -363,7 +363,7 @@ describe("ClusterHATab — HA resource settings", () => {
 
     expect(await screen.findByText("ha-group01")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add Group" }),
+      screen.queryByRole("button", { name: "Add group" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Edit group ha-group01" }),

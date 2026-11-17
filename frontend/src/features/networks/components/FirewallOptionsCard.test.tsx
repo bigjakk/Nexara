@@ -20,7 +20,7 @@ describe("FirewallOptionsCard — Disable Firewall", () => {
     renderWithProviders(<FirewallOptionsCard clusterId="c1" />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Disable Firewall" }),
+      await screen.findByRole("button", { name: "Disable firewall" }),
     );
     const dialog = await screen.findByRole("alertdialog");
     expect(
@@ -34,7 +34,7 @@ describe("FirewallOptionsCard — Disable Firewall", () => {
     expect(api.writes()).toEqual([]);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Disable Firewall" }),
+      within(dialog).getByRole("button", { name: "Disable firewall" }),
     );
     await waitFor(() => {
       expect(bodiesOf("PUT", OPTIONS_PATH)).toEqual([{ enable: 0 }]);

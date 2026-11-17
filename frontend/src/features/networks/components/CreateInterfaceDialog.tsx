@@ -24,7 +24,7 @@ export function CreateInterfaceDialog({
         }}
       >
         <Plus className="h-4 w-4" />
-        Create Interface
+        Create interface
       </Button>
       <InterfaceFormDialog
         clusterId={clusterId}

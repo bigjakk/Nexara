@@ -89,7 +89,7 @@ describe("deleting a pool", () => {
     // Before the confirmation nothing has been sent — the button only asks.
     expect(deleteMock).not.toHaveBeenCalled();
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Pool" }),
+      within(dialog).getByRole("button", { name: "Delete pool" }),
     );
 
     await waitFor(() => {

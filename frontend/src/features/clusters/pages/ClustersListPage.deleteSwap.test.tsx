@@ -108,7 +108,7 @@ async function sendDeleteOfFirst(user: UserEvent): Promise<HTMLElement> {
   await user.click(
     await screen.findByRole("button", { name: "Delete cluster01" }),
   );
-  const first = await screen.findByRole("dialog", { name: "Delete Cluster" });
+  const first = await screen.findByRole("dialog", { name: "Delete cluster" });
   await user.click(within(first).getByLabelText(REVOKE));
   await user.type(within(first).getByPlaceholderText("cluster01"), "cluster01");
   // What there is to carry over: the tick on, and the name typed.
@@ -120,7 +120,7 @@ async function sendDeleteOfFirst(user: UserEvent): Promise<HTMLElement> {
     "cluster01",
   );
   await user.click(
-    within(first).getByRole("button", { name: "Delete Cluster" }),
+    within(first).getByRole("button", { name: "Delete cluster" }),
   );
   expect(
     await within(first).findByRole("button", { name: "Deleting..." }),
@@ -136,7 +136,7 @@ async function replaceWithSecond(user: UserEvent): Promise<HTMLElement> {
     screen.getByRole("button", { name: "Delete cluster02", hidden: true }),
   );
   await user.keyboard("{Enter}");
-  const second = await screen.findByRole("dialog", { name: "Delete Cluster" });
+  const second = await screen.findByRole("dialog", { name: "Delete cluster" });
   await within(second).findByPlaceholderText("cluster02");
   return second;
 }
@@ -148,7 +148,7 @@ function expectNewDialogDefaults(dialog: HTMLElement) {
     "unchecked",
   );
   expect(within(dialog).getByPlaceholderText("cluster02")).toHaveValue("");
-  const button = within(dialog).getByRole("button", { name: "Delete Cluster" });
+  const button = within(dialog).getByRole("button", { name: "Delete cluster" });
   expect(button).toBeDisabled();
 }
 
@@ -175,7 +175,7 @@ describe("a cluster delete whose dialog is replaced by another cluster's from th
       "cluster02",
     );
     await user.click(
-      within(second).getByRole("button", { name: "Delete Cluster" }),
+      within(second).getByRole("button", { name: "Delete cluster" }),
     );
     await waitUntil(() => {
       expect(mockedDelete).toHaveBeenCalledTimes(2);
@@ -209,7 +209,7 @@ describe("a cluster delete whose dialog is replaced by another cluster's from th
       "cluster02",
     );
     await user.click(
-      within(second).getByRole("button", { name: "Delete Cluster" }),
+      within(second).getByRole("button", { name: "Delete cluster" }),
     );
     await waitUntil(() => {
       expect(mockedDelete).toHaveBeenCalledTimes(2);

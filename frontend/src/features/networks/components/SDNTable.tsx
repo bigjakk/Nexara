@@ -270,7 +270,7 @@ function VNetSubnetsRow({
                 allocated. It then drops the subnet from sdn/subnets.cfg.
                 Nodes build their SDN network from the running config, which
                 only the SDN apply (PUT /cluster/sdn, "Apply sdn controller
-                changes && reload") replaces — the Apply Changes button. The
+                changes && reload") replaces — the Apply changes button. The
                 SDN API's rollback (POST /cluster/sdn/rollback, which Nexara
                 does not call) rewrites subnets.cfg from the running config
                 but does not touch the IPAM, so the dialog promises no undo. */}
@@ -294,12 +294,12 @@ function VNetSubnetsRow({
                   </span>
                   <span className="mt-2 block">
                     The nodes keep using the subnet until SDN changes are
-                    applied (Apply Changes). Nexara cannot undo the delete: to
+                    applied (Apply changes). Nexara cannot undo the delete: to
                     get the subnet back, create it again.
                   </span>
                 </>
               )}
-              confirmLabel="Delete Subnet"
+              confirmLabel="Delete subnet"
             />
           </TableCell>
         </TableRow>
@@ -554,7 +554,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                 disabled={applySDN.isPending}
               >
                 <RefreshCw className="h-4 w-4" />
-                Apply Changes
+                Apply changes
               </Button>
               {view === "zones" && (
                 <CreateSDNZoneDialog clusterId={clusterId} />

@@ -185,7 +185,7 @@ export function StorageDetailPage() {
         description="It may have been removed, or you may not have access."
         action={
           <Button variant="outline" size="sm" asChild>
-            <Link to="/storage">Back to Storage</Link>
+            <Link to="/storage">Back to storage</Link>
           </Button>
         }
       />

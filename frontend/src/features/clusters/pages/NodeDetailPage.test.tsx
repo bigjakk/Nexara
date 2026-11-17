@@ -166,7 +166,7 @@ describe("NodeDetailPage Network tab — deleting an interface", () => {
     const { user, dialog } = await openDeleteFor("vmbr1");
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Interface" }),
+      within(dialog).getByRole("button", { name: "Delete interface" }),
     );
 
     await waitFor(() => {
@@ -250,7 +250,7 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
     const { user, dialog } = await openDeleteFor(1);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -294,7 +294,7 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
     });
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -332,7 +332,7 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
       LIST.map((r) => (r.pos === 1 ? { ...r, dport: "162" } : r)),
     );
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
 
     await waitFor(() => {
@@ -362,7 +362,7 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
     });
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Rule" }),
+      within(dialog).getByRole("button", { name: "Delete rule" }),
     );
     await waitFor(() => {
       expect(held).toBe(1);
@@ -391,7 +391,7 @@ describe("NodeDetailPage Network tab — Apply Config and Revert", () => {
 
   it.each([
     {
-      button: "Apply Config",
+      button: "Apply config",
       title: `Apply the pending network changes on ${NODE}?`,
       says: "can lose its network connection, Nexara's included",
       sends: `POST ${NET}/apply`,

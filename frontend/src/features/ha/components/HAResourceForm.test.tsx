@@ -115,7 +115,7 @@ describe("HAResourceForm — edit sends only what changed", () => {
 
   it("shows an explicit max_restart of 0 as 0 and leaves it out of an unrelated edit", async () => {
     const { user } = renderEdit({ ...ON_DEFAULTS, max_restart: 0 });
-    expect(screen.getByLabelText("Max Restart")).toHaveValue(0);
+    expect(screen.getByLabelText("Max restart")).toHaveValue(0);
 
     await user.type(screen.getByLabelText("Comment"), "note");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -125,7 +125,7 @@ describe("HAResourceForm — edit sends only what changed", () => {
 
   it("sends only max_relocate when that is all that changed", async () => {
     const { user } = renderEdit(ON_DEFAULTS);
-    const relocate = screen.getByLabelText("Max Relocate");
+    const relocate = screen.getByLabelText("Max relocate");
     // Unset reads as Proxmox's default of 1, not as 0 or as nothing.
     expect(relocate).toHaveValue(1);
 
@@ -159,7 +159,7 @@ describe("HAResourceForm — edit sends only what changed", () => {
 
   it("writes nothing for a save with nothing changed, including a change undone", async () => {
     const { user, onSuccess } = renderEdit(ON_DEFAULTS);
-    const restart = screen.getByLabelText("Max Restart");
+    const restart = screen.getByLabelText("Max restart");
     await user.clear(restart);
     await user.type(restart, "5");
     await user.clear(restart);
@@ -195,8 +195,8 @@ describe("HAResourceForm — edit sends only what changed", () => {
 
   it("opens a resource on the defaults at Proxmox's defaults, and says so", () => {
     const { unmount } = renderEdit(ON_DEFAULTS);
-    expect(screen.getByLabelText("Max Restart")).toHaveValue(1);
-    expect(screen.getByLabelText("Max Relocate")).toHaveValue(1);
+    expect(screen.getByLabelText("Max restart")).toHaveValue(1);
+    expect(screen.getByLabelText("Max relocate")).toHaveValue(1);
     expect(screen.getByRole("switch", { name: "Failback" })).toBeChecked();
     expect(
       screen.getAllByText(/Not set on this resource, so Proxmox's default/),
@@ -304,7 +304,7 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
   it("re-seeds from a different resource handed to the same form", async () => {
     const onSuccess = vi.fn();
     const { user, rerender } = renderEdit(ON_DEFAULTS, onSuccess);
-    expect(screen.getByLabelText("Max Restart")).toHaveValue(1);
+    expect(screen.getByLabelText("Max restart")).toHaveValue(1);
 
     const other: HAResource = {
       sid: "vm:102",
@@ -325,8 +325,8 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
         onSuccess={onSuccess}
       />,
     );
-    expect(screen.getByLabelText("Max Restart")).toHaveValue(4);
-    expect(screen.getByLabelText("Max Relocate")).toHaveValue(2);
+    expect(screen.getByLabelText("Max restart")).toHaveValue(4);
+    expect(screen.getByLabelText("Max relocate")).toHaveValue(2);
     expect(screen.getByLabelText("Comment")).toHaveValue("second");
 
     // Measured against the resource now shown, not the first one: only the
@@ -347,8 +347,8 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
       max_restart: 15,
       max_relocate: 12,
     });
-    expect(screen.getByLabelText("Max Restart")).toBeValid();
-    expect(screen.getByLabelText("Max Relocate")).toBeValid();
+    expect(screen.getByLabelText("Max restart")).toBeValid();
+    expect(screen.getByLabelText("Max relocate")).toBeValid();
 
     await user.type(screen.getByLabelText("Comment"), "note");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -361,7 +361,7 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
     // measured against a fixed 10 it would be dropped, and the dialog would
     // close as if it had saved.
     const { user, onSuccess } = renderEdit({ ...ON_DEFAULTS, max_restart: 15 });
-    const restart = screen.getByLabelText("Max Restart");
+    const restart = screen.getByLabelText("Max restart");
     await user.clear(restart);
     await user.type(restart, "12");
     expect(restart).toHaveValue(12);
@@ -378,7 +378,7 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
     // A number input takes "1e1" as a valid 10 — within max, a whole number —
     // and hands the form the text "1e1", which parseInt read as 1.
     const { user } = renderEdit(ON_DEFAULTS);
-    const relocate = screen.getByLabelText("Max Relocate");
+    const relocate = screen.getByLabelText("Max relocate");
     setNumberInput(relocate, "1e1");
     expect(relocate).toBeValid();
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -401,7 +401,7 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
     if (!guestTrigger) throw new Error("guest select not rendered");
     await user.click(guestTrigger);
     await user.click(screen.getByRole("option", { name: "vm:105 — linux05" }));
-    setNumberInput(screen.getByLabelText("Max Restart"), "1e1");
+    setNumberInput(screen.getByLabelText("Max restart"), "1e1");
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(mockedPost).toHaveBeenCalledTimes(1);
@@ -414,7 +414,7 @@ describe("HAResourceForm — per-version fields, unset state, re-seeding", () =>
   it("leaves a cleared count out rather than sending it as 0", async () => {
     // Number("") is 0, and 0 would switch restarts off.
     const { user } = renderEdit({ ...ON_DEFAULTS, max_restart: 3 });
-    await user.clear(screen.getByLabelText("Max Restart"));
+    await user.clear(screen.getByLabelText("Max restart"));
     await user.type(screen.getByLabelText("Comment"), "note");
     await user.click(screen.getByRole("button", { name: "Save" }));
 

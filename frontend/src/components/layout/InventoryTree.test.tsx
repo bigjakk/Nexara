@@ -59,7 +59,7 @@ describe("InventoryTree — focus after deleting a cluster", () => {
     );
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Cluster" }),
+      within(dialog).getByRole("button", { name: "Delete cluster" }),
     );
 
     await waitFor(() => {

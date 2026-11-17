@@ -198,7 +198,7 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
           <DialogTrigger asChild>
             <Button size="sm">
               <Plus className="h-4 w-4" />
-              Add Alias
+              Add alias
             </Button>
           </DialogTrigger>
           <DialogContent>
@@ -324,7 +324,7 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
           description={(a) =>
             `Proxmox removes the alias ${a.name} (${a.cidr}) from the cluster firewall at once, without checking whether a rule or IP set still refers to it. It cannot be undone: to get it back, create it again.`
           }
-          confirmLabel="Delete Alias"
+          confirmLabel="Delete alias"
         />
       </>
     </Panel>
@@ -370,7 +370,7 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
             <DialogTrigger asChild>
               <Button size="sm">
                 <Plus className="h-4 w-4" />
-                Add IP Set
+                Add IP set
               </Button>
             </DialogTrigger>
             <DialogContent>
@@ -493,7 +493,7 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
         description={(s) =>
           `Proxmox deletes the IP set ${s.name} only if it has no entries left — remove its entries first. It does not check whether a rule still refers to the set. It cannot be undone: to get it back, create it again.`
         }
-        confirmLabel="Delete IP Set"
+        confirmLabel="Delete IP set"
       />
       {selectedSet && (
         <IPSetEntriesCard clusterId={clusterId} setName={selectedSet} />
@@ -632,7 +632,7 @@ function IPSetEntriesCard({
               ? `This is a nomatch entry: it excludes ${e.cidr} from the IP set ${setName}. Proxmox removes it at once, which lifts the exclusion — addresses in ${e.cidr} that another entry of the set covers start matching the set, and rules that use the set start applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again with nomatch.`
               : `Proxmox removes ${e.cidr} from the IP set ${setName} at once; unless another entry of the set covers them, its addresses stop matching the set, and rules that use the set stop applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again.`
           }
-          confirmLabel="Remove Entry"
+          confirmLabel="Remove entry"
         />
       </>
     </Panel>
@@ -671,7 +671,7 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
           <DialogTrigger asChild>
             <Button size="sm">
               <Plus className="h-4 w-4" />
-              Add Group
+              Add group
             </Button>
           </DialogTrigger>
           <DialogContent>
@@ -784,7 +784,7 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
           description={(g) =>
             `Proxmox deletes the security group ${g.group} only if it has no rules left — delete its rules first. It does not check whether any rule still refers to the group. It cannot be undone: to get it back, create it again.`
           }
-          confirmLabel="Delete Group"
+          confirmLabel="Delete group"
         />
       </>
     </Panel>

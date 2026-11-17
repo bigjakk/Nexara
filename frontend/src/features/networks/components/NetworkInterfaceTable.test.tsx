@@ -99,7 +99,7 @@ describe("NetworkInterfaceTable — deleting an interface", () => {
     const { user, dialog } = await openDeleteFor("Delete vmbr1 on pve-02");
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Delete Interface" }),
+      within(dialog).getByRole("button", { name: "Delete interface" }),
     );
 
     await waitFor(() => {
@@ -118,7 +118,7 @@ describe("NetworkInterfaceTable — Apply Config", () => {
       "pve-02",
     );
 
-    await user.click(screen.getByRole("button", { name: "Apply Config" }));
+    await user.click(screen.getByRole("button", { name: "Apply config" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(
       within(dialog).getByRole("heading", {
@@ -128,7 +128,7 @@ describe("NetworkInterfaceTable — Apply Config", () => {
     expect(api.writes()).toEqual([]);
 
     await user.click(
-      within(dialog).getByRole("button", { name: "Apply Config" }),
+      within(dialog).getByRole("button", { name: "Apply config" }),
     );
     await waitFor(() => {
       expect(api.writes()).toEqual([`POST ${NETWORKS_PATH}/pve-02/apply`]);

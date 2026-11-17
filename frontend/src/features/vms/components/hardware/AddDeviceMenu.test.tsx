@@ -422,7 +422,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     expect(within(dialog).getByLabelText("Mapping name")).toHaveValue(
       k.create.name,
     );
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
 
     await waitFor(() => {
       expect(onAdd).toHaveBeenCalledWith(`${k.slots.prefix}0`, k.create.staged);
@@ -477,7 +477,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
         /Creating a mapping needs the Manage Cluster permission/,
       ),
     ).toBeInTheDocument();
-    expect(await button(dialog, "Create mapping & add")).toBeDisabled();
+    expect(await button(dialog, "Create mapping and add")).toBeDisabled();
 
     await user.selectOptions(device(dialog), k.reuse.pick);
     await user.click(await button(dialog, "Add"));
@@ -496,7 +496,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
 
     await user.selectOptions(device(dialog), k.create.pick);
     const before = reads();
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
 
     expect(await within(dialog).findByText(refusal)).toBeInTheDocument();
     expect(onAdd).not.toHaveBeenCalled();
@@ -514,7 +514,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     const { user, dialog } = await start(k);
 
     await user.selectOptions(device(dialog), k.create.pick);
-    const create = await button(dialog, "Create mapping & add");
+    const create = await button(dialog, "Create mapping and add");
     const name = within(dialog).getByLabelText("Mapping name");
     await user.clear(name);
     await user.type(name, "1bad");
@@ -554,7 +554,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     const { user, onAdd, dialog } = await start(k);
 
     await user.selectOptions(device(dialog), k.create.pick);
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
 
     expect(await button(dialog, "Creating mapping…")).toBeDisabled();
     expect(
@@ -588,7 +588,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     mockedPost.mockReturnValue(post.promise);
     const { user, dialog, unmount } = await start(k);
     await user.selectOptions(device(dialog), k.create.pick);
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
     await button(dialog, "Creating mapping…");
 
     unmount();
@@ -635,7 +635,7 @@ describe.each([USB, PCI])("Add $kind device dialog", (k) => {
     ).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Mapping name")).toBeNull();
     for (const b of within(dialog).getAllByRole("button", {
-      name: /^(Add|Create mapping & add)$/,
+      name: /^(Add|Create mapping and add)$/,
     })) {
       expect(b).toBeDisabled();
     }
@@ -657,11 +657,11 @@ describe("AddUSBDialog", () => {
     // usbdev01 follows the radio to any port; a port mapping ties it to one.
     // Different mapping, so a new one.
     await user.selectOptions(within(dialog).getByLabelText("Port"), "1-3");
-    expect(await button(dialog, "Create mapping & add")).toBeEnabled();
+    expect(await button(dialog, "Create mapping and add")).toBeEnabled();
     expect(within(dialog).queryByText(/Uses the existing mapping/)).toBeNull();
 
     await user.selectOptions(within(dialog).getByLabelText("Port"), "1-2");
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
     await waitFor(() => {
       expect(onAdd).toHaveBeenCalledWith(
         "usb0",
@@ -703,7 +703,7 @@ describe("AddUSBDialog", () => {
 
     await user.clear(input);
     await user.type(input, "ABCD:0001");
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
     await waitFor(() => {
       expect(onAdd).toHaveBeenCalledWith(
         "usb0",
@@ -752,7 +752,7 @@ describe("AddUSBDialog", () => {
     // Shown clean too: an override would reorder the id printed after it.
     expect(optionsOf(device(dialog))).toContain("Example Reader (dddd:0007)");
     await user.selectOptions(device(dialog), "dddd:0007");
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalledTimes(1);
     });
@@ -849,7 +849,7 @@ describe("AddPCIDialog", () => {
       "example-gpu",
     );
     expect(within(dialog).queryByLabelText(ACK)).not.toBeInTheDocument();
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
 
     await waitFor(() => {
       expect(mockedPost).toHaveBeenCalledWith(PCI.createUrl, {
@@ -874,7 +874,7 @@ describe("AddPCIDialog", () => {
 
     await user.selectOptions(device(dialog), "0000:02:00.0");
 
-    expect(await button(dialog, "Create mapping & add")).toBeInTheDocument();
+    expect(await button(dialog, "Create mapping and add")).toBeInTheDocument();
     expect(
       within(dialog).queryByText(/Uses the existing mapping/),
     ).not.toBeInTheDocument();
@@ -942,7 +942,7 @@ describe("AddPCIDialog", () => {
       within(dialog).getByText(/An address like 0000:01:00.0/),
     ).toBeInTheDocument();
     expect(
-      within(dialog).queryByRole("button", { name: "Create mapping & add" }),
+      within(dialog).queryByRole("button", { name: "Create mapping and add" }),
     ).not.toBeInTheDocument();
 
     await user.clear(input);
@@ -956,9 +956,9 @@ describe("AddPCIDialog", () => {
         "Nexara cannot tell what 0000:01:00.0 is, or what shares its IOMMU group: check in Proxmox that pve-01 does not need it.",
       ),
     ).toBeInTheDocument();
-    expect(await button(dialog, "Create mapping & add")).toBeDisabled();
+    expect(await button(dialog, "Create mapping and add")).toBeDisabled();
     await user.click(ack(dialog));
-    await user.click(await button(dialog, "Create mapping & add"));
+    await user.click(await button(dialog, "Create mapping and add"));
     await waitFor(() => {
       expect(onAdd).toHaveBeenCalledWith("hostpci0", "mapping=gpu01");
     });
@@ -1008,13 +1008,13 @@ describe("AddPCIDialog", () => {
     });
     await user.type(device(dialog), "0000:09:00.0");
     expect(
-      within(dialog).getByRole("button", { name: "Create mapping & add" }),
+      within(dialog).getByRole("button", { name: "Create mapping and add" }),
     ).toBeInTheDocument();
 
     rerender({ pciDevices: pciDeviceList });
     expect(device(dialog)).toHaveValue("");
     expect(
-      within(dialog).queryByRole("button", { name: "Create mapping & add" }),
+      within(dialog).queryByRole("button", { name: "Create mapping and add" }),
     ).not.toBeInTheDocument();
     expect(await button(dialog, "Add")).toBeDisabled();
   });
@@ -1038,7 +1038,7 @@ describe("AddPCIDialog", () => {
         "Proxmox takes every device in the IOMMU group away from the node when the VM starts, so 0000:06:00.0 goes too.",
       ),
     ).toBeInTheDocument();
-    const create = await button(dialog, "Create mapping & add");
+    const create = await button(dialog, "Create mapping and add");
     expect(create).toBeDisabled();
 
     await user.click(ack(dialog));

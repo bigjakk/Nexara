@@ -5,19 +5,20 @@
  */
 
 import { formatDate } from "@/lib/format";
+import { spellOutKey } from "@/lib/spell-out-key";
 
 function detailKeyLabel(key: string): string {
   const labels: Record<string, string> = {
     vm_type: "Type",
     vmid: "VMID",
-    source_node: "Source Node",
-    target_node: "Target Node",
-    migration_type: "Migration Type",
-    online: "Live Migration",
+    source_node: "Source node",
+    target_node: "Target node",
+    migration_type: "Migration type",
+    online: "Live migration",
     error: "Error",
     status: "Status",
-    bwlimit_kib: "BW Limit (KiB)",
-    delete_source: "Delete Source",
+    bwlimit_kib: "BW limit (KiB)",
+    delete_source: "Delete source",
     target_vmid: "Target VMID",
     storage: "Storage",
     pool: "Pool",
@@ -33,10 +34,7 @@ function detailKeyLabel(key: string): string {
     // A Proxmox user's or token's expiry (handlers/access.go).
     expire: "Expires",
   };
-  return (
-    labels[key] ??
-    key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-  );
+  return labels[key] ?? spellOutKey(key);
 }
 
 function detailValue(val: unknown): string {

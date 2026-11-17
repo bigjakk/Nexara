@@ -145,7 +145,7 @@ describe("an observed change", () => {
         details:
           '{"notice":"too_many_objects","objects":12000,"cap":10000,"parent":"blocklist"}',
       },
-      "Firewall Ipset Entry of blocklist: 12,000 objects, more than the 10,000 compared field by field; until it is back under, what changes is counted",
+      "Firewall IP set entry of blocklist: 12,000 objects, more than the 10,000 compared field by field; until it is back under, what changes is counted",
     ],
     [
       {
@@ -317,6 +317,6 @@ describe("historyDetailParts", () => {
       JSON.stringify({ while_over_cap: true, added_ids: ids, fields: ["a"] }),
     );
     expect(parts.lists).toEqual([{ key: "added_ids", items: ids }]);
-    expect(parts.pairs?.map(([k]) => k)).toEqual(["While Over Cap", "Fields"]);
+    expect(parts.pairs?.map(([k]) => k)).toEqual(["While over cap", "Fields"]);
   });
 });

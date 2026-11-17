@@ -96,12 +96,12 @@ export function ClusterReplicationTab({
                 <DialogTrigger asChild>
                   <Button size="sm">
                     <Plus className="mr-2 h-4 w-4" />
-                    Create Job
+                    Create job
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle>Create Replication Job</DialogTitle>
+                    <DialogTitle>Create replication job</DialogTitle>
                   </DialogHeader>
                   <CreateJobForm
                     clusterId={clusterId}
@@ -342,7 +342,7 @@ function CreateJobForm({
       </div>
 
       <div className="space-y-2">
-        <Label>Target Node</Label>
+        <Label>Target node</Label>
         <Select value={target} onValueChange={setTarget}>
           <SelectTrigger>
             <SelectValue placeholder="Select target node..." />
@@ -369,7 +369,7 @@ function CreateJobForm({
       </div>
 
       <div className="space-y-2">
-        <Label>Rate Limit (MB/s, optional)</Label>
+        <Label>Rate limit (MB/s, optional)</Label>
         <Input
           value={rate}
           onChange={(e) => {
@@ -465,7 +465,7 @@ function EditJobDialog({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Replication Job: {job.id}</DialogTitle>
+          <DialogTitle>Edit replication job: {job.id}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-4 text-sm">
@@ -491,7 +491,7 @@ function EditJobDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Rate Limit (MB/s, optional)</Label>
+            <Label>Rate limit (MB/s, optional)</Label>
             <Input
               value={rate}
               onChange={(e) => {

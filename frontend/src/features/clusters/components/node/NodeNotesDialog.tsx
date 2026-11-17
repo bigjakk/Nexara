@@ -90,7 +90,7 @@ export function EditNodeNotesDialog({
     >
       <DialogContent className="max-w-xl" fallbackFocus={fallbackFocus}>
         <DialogHeader>
-          <DialogTitle>Edit Notes - {nodeName}</DialogTitle>
+          <DialogTitle>Edit notes - {nodeName}</DialogTitle>
           <DialogDescription>
             Empty notes are removed from the node's configuration.
           </DialogDescription>

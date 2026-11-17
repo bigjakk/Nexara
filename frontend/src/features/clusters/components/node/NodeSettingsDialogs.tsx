@@ -410,11 +410,11 @@ function DNSDialog({
     >
       <DialogContent fallbackFocus={fallbackFocus}>
         <DialogHeader>
-          <DialogTitle>Edit DNS Configuration - {nodeName}</DialogTitle>
+          <DialogTitle>Edit DNS configuration - {nodeName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor={`${uid}-search`}>Search Domain</Label>
+            <Label htmlFor={`${uid}-search`}>Search domain</Label>
             <Input
               id={`${uid}-search`}
               value={search}
@@ -425,7 +425,7 @@ function DNSDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`${uid}-dns1`}>DNS Server 1</Label>
+            <Label htmlFor={`${uid}-dns1`}>DNS server 1</Label>
             <Input
               id={`${uid}-dns1`}
               value={dns1}
@@ -436,7 +436,7 @@ function DNSDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`${uid}-dns2`}>DNS Server 2</Label>
+            <Label htmlFor={`${uid}-dns2`}>DNS server 2</Label>
             <Input
               id={`${uid}-dns2`}
               value={dns2}
@@ -447,7 +447,7 @@ function DNSDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`${uid}-dns3`}>DNS Server 3</Label>
+            <Label htmlFor={`${uid}-dns3`}>DNS server 3</Label>
             <Input
               id={`${uid}-dns3`}
               value={dns3}
@@ -515,7 +515,7 @@ function TimezoneDialog({
     >
       <DialogContent fallbackFocus={fallbackFocus}>
         <DialogHeader>
-          <DialogTitle>Edit Timezone - {nodeName}</DialogTitle>
+          <DialogTitle>Edit timezone - {nodeName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">

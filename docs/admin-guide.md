@@ -185,7 +185,7 @@ Open **Topology** in the navigation rail for an interactive map of your infrastr
 
 ### Creating a Guest
 
-Click **Create** in the top bar and choose **Virtual Machine** or **Container**, or right-click a cluster in the tree's **Hosts** view for **Create VM** or **Create CT**. They need `manage:vm` and `manage:container`. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
+Click **Create** in the top bar and choose **Virtual machine** or **Container**, or right-click a cluster in the tree's **Hosts** view for **Create VM** or **Create CT**. They need `manage:vm` and `manage:container`. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
 
 - The VM wizard's steps are General, OS, System, Disks, CPU, Memory, Network, Cloud-init and Review, which also has **Start after creation** and **Start on boot**.
 - The container wizard's are General, Template, Root disk, CPU and memory, Network, DNS and options, and Review. **Unprivileged container** is on by default.
@@ -223,7 +223,7 @@ Tick rows in a guest table (Inventory, a cluster's or node's VMs, a folder's) an
 
 A console needs `console:vm`, `console:container` or `console:node`, which the built-in Viewer does not hold.
 
-- **Open one** with **VNC console** on a VM's page or **Attach** on a container's, **Console** on a running guest's right-click menu, **Shell** on a node's page or a cluster's **Overview**, or **New console** on the **Console** page in the navigation rail. A guest that is stopped parks the console on **Start VM** (**Start Container** for a container) and **Connect anyway**, and connects when the guest powers on. A running VM's page also shows a small view-only preview.
+- **Open one** with **VNC console** on a VM's page or **Attach** on a container's, **Console** on a running guest's right-click menu, **Shell** on a node's page or a cluster's **Overview**, or **New console** on the **Console** page in the navigation rail. A guest that is stopped parks the console on **Start VM** (**Start container** for a container) and **Connect anyway**, and connects when the guest powers on. A running VM's page also shows a small view-only preview.
 - **Node shell.** It opens at the host's login prompt, not a root shell: Proxmox logs a shell straight in only for `root@pam` itself, and an API token is never that.
 - **The floating window** holds a tab per console, with **New console** (**+**), minimize, maximize and **Open in new tab**. **Close** hides it and disconnects; the tabs remain.
 - **In its own browser tab.** Set **Open consoles in** to **New browser tab** under [Appearance](#appearance), or Ctrl/⌘-click any console button. The tab has **Reconnect** and **Fullscreen**, and a link to a console that Nexara did not open itself asks **Open this console?** first.
@@ -262,7 +262,7 @@ This needs `manage:migration` on the source cluster and, across clusters, on the
 
 A folder's page has **Overview** (its totals, subfolders and guests), **History** (see [A Folder's History](#a-folders-history)) and **Alerts** (`view:alert`).
 
-**Favorites.** **Add to Favorites** on a cluster's, node's or guest's menu pins it to a **Favorites** section above the tree, per user. The section shows only what your grants still let you see, and a guest there keeps its full menu.
+**Favorites.** **Add to favorites** on a cluster's, node's or guest's menu pins it to a **Favorites** section above the tree, per user. The section shows only what your grants still let you see, and a guest there keeps its full menu.
 
 ---
 
@@ -276,7 +276,7 @@ A node's tabs are **Summary**, **VMs**, **Network**, **Disks**, **Services**, **
 - **Evacuate** — see [Node Evacuation](#node-evacuation)
 - **Reboot** and **Shutdown** (`manage:node`) — they ask first and do not migrate anything
 
-**Summary** shows the node's **Performance**, the **Guests on this node**, its **Hardware** (processor and memory) and its **System**, with a pencil for the **Timezone** and another for the **DNS servers** (**Search Domain**, **DNS Server 1** to **3**; a save replaces them all, `manage:node`). It also has [Options and Notes](#node-options), [Memory modules](#memory-modules) and **Temperatures**, the node's hardware sensors, read over the cluster's [SSH credentials](#prerequisites) with a pinned host key (`view:node`).
+**Summary** shows the node's **Performance**, the **Guests on this node**, its **Hardware** (processor and memory) and its **System**, with a pencil for the **Timezone** and another for the **DNS servers** (**Search domain**, **DNS server 1** to **3**; a save replaces them all, `manage:node`). It also has [Options and Notes](#node-options), [Memory modules](#memory-modules) and **Temperatures**, the node's hardware sensors, read over the cluster's [SSH credentials](#prerequisites) with a pinned host key (`view:node`).
 
 **Network** — see [Network Interfaces](#network-interfaces). **Firewall** — see [Node Firewall](#node-firewall).
 
@@ -376,13 +376,13 @@ A running VM's [History](#a-guests-history) tab opens with the QEMU block jobs w
 
 All four are under the cluster's **Configure** tab.
 
-**Resource pools** (`view:pool`, `manage:pool`). **Create Pool**, then expand a pool's row for **Add VM** and **Add Storage**. Proxmox refuses to delete a pool that still has members, and on success the delete removes the ACL entries on it too.
+**Resource pools** (`view:pool`, `manage:pool`). **Create pool**, then expand a pool's row for **Add VM** and **Add storage**. Proxmox refuses to delete a pool that still has members, and on success the delete removes the ACL entries on it too.
 
-**Replication** (`view:replication`, `manage:replication`). **Create Job** takes the guest, **Target Node**, **Schedule** (a Proxmox calendar event, `*/15` by default), **Rate Limit** and **Comment**. A row's action triggers a sync now. Deleting a job also removes the target's copy once Proxmox gets to it. A job's log is available only through the API.
+**Replication** (`view:replication`, `manage:replication`). **Create job** takes the guest, **Target node**, **Schedule** (a Proxmox calendar event, `*/15` by default), **Rate limit** and **Comment**. A row's action triggers a sync now. Deleting a job also removes the target's copy once Proxmox gets to it. A job's log is available only through the API.
 
 **Options** (`manage:cluster`). **Notes**; **General**, whose **Datacenter options** include the migration network, fencing, the HA **Shutdown policy**, [CRS](#native-crs-coexistence-proxmox-ve-92), **Bandwidth limits** and the **Next VMID range**, saved with **Save changes**; **Tags**; and **Cluster info**.
 
-**Metric servers** (`manage:cluster`). **Add Server** points Proxmox at an external metrics server by ID, Type, Server and Port. There is no edit, and an InfluxDB v2 server, which needs a token and a bucket, can be added only through the API.
+**Metric servers** (`manage:cluster`). **Add server** points Proxmox at an external metrics server by ID, Type, Server and Port. There is no edit, and an InfluxDB v2 server, which needs a token and a bucket, can be added only through the API.
 
 ---
 
@@ -620,12 +620,12 @@ reports an ordinary failure and does not offer the override.
 
 The UI puts each override behind a type-the-name confirmation whose title says
 what it confirms — "Deleting this user can cut off Nexara's access" (button
-**Delete User**), "Revoking this token can cut off Nexara's access" (**Revoke
-Token**), "Regenerating this token can cut off Nexara's access" (**Regenerate
-Token**) and, for an edit, "Saving this edit can cut off Nexara's access"
-(**Save Anyway**). Type the user id — the full `user@realm!token` id for a
+**Delete user**), "Revoking this token can cut off Nexara's access" (**Revoke
+token**), "Regenerating this token can cut off Nexara's access" (**Regenerate
+token**) and, for an edit, "Saving this edit can cut off Nexara's access"
+(**Save anyway**). Type the user id — the full `user@realm!token` id for a
 token — to enable the button. An edit sends only the fields you changed, and
-**Save Anyway** re-sends exactly the edit that was refused, with
+**Save anyway** re-sends exactly the edit that was refused, with
 `?force=true`; Cancel or Escape on that dialog goes back to the form with the
 edit intact. While a delete, revoke, regenerate or forced save is being sent,
 its dialog stays open and cannot be dismissed until the request settles.
@@ -665,11 +665,11 @@ If Nexara cannot read the permission list, the group or the user it needs to
 check (for example because its token may not see them), it asks too, with a
 **409** that says it could not check, rather than letting the change through
 or refusing it outright. The override dialogs are titled "Granting this can cut
-off Nexara's access" (**Grant Anyway**), "Revoking this can cut off Nexara's
+off Nexara's access" (**Grant anyway**), "Revoking this can cut off Nexara's
 access" (**Revoke**), "Deleting this group can cut off Nexara's access"
-(**Delete Group**), "Saving this role can cut off Nexara's access" (**Save
-Anyway**) and "Deleting this role can cut off Nexara's access" (**Delete
-Role**); type the subject, group or role named to enable the button.
+(**Delete group**), "Saving this role can cut off Nexara's access" (**Save
+anyway**) and "Deleting this role can cut off Nexara's access" (**Delete
+role**); type the subject, group or role named to enable the button.
 
 ---
 
@@ -878,21 +878,21 @@ The Distributed Resource Scheduler automatically balances VM workloads across cl
    - **Evaluation interval** — how often DRS evaluates balance, in seconds, at least 60
    - **Hold-off after a node boots** — for this many minutes after a node boots, DRS moves no guest onto it or off it (10 by default, up to 1440; 0 turns it off). See [Guests DRS Leaves in Place](#guests-drs-leaves-in-place)
    - **Include containers in balancing** — balance CTs alongside VMs
-5. Click **Save Configuration**
+5. Click **Save configuration**
 
 ### DRS Rules
 
-On the **Rules** sub-tab, **Add Rule** controls VM placement:
+On the **Rules** sub-tab, **Add rule** controls VM placement:
 
 - **Affinity** — keep guests together on the same node; needs at least two
-- **Anti-Affinity** — keep guests on different nodes (e.g., HA pairs); needs at least two
+- **Anti-affinity** — keep guests on different nodes (e.g., HA pairs); needs at least two
 - **Pin** — lock a guest to one or more nodes
 
-Its **Target** is **Nexara Only**, which only DRS honours, or **Proxmox HA**, which writes a rule to Proxmox under the **Rule Name** you give it. Clearing **Enabled** creates the rule disabled, for either target. A Proxmox HA rule needs Proxmox VE 9 or later, which introduced HA rules: on an older cluster, or one whose version Nexara has not read yet, the dialog has no **Target** and creates a Nexara rule.
+Its **Target** is **Nexara only**, which only DRS honours, or **Proxmox HA**, which writes a rule to Proxmox under the **Rule name** you give it. Clearing **Enabled** creates the rule disabled, for either target. A Proxmox HA rule needs Proxmox VE 9 or later, which introduced HA rules: on an older cluster, or one whose version Nexara has not read yet, the dialog has no **Target** and creates a Nexara rule.
 
 ### Manual Evaluation
 
-Click **Run Evaluation** to trigger an immediate DRS evaluation. In Advisory mode, this lists migration recommendations for you to review; they cannot be applied from the list. With **Mode** on Disabled, or a configuration that was never saved, it reports **Cluster balanced** at 0.0%: nothing was evaluated.
+Click **Run evaluation** to trigger an immediate DRS evaluation. In Advisory mode, this lists migration recommendations for you to review; they cannot be applied from the list. With **Mode** on Disabled, or a configuration that was never saved, it reports **Cluster balanced** at 0.0%: nothing was evaluated.
 
 ### DRS Migrations and History
 
@@ -902,9 +902,9 @@ The **Migrations** sub-tab of DRS shows the moves DRS proposed or carried out. A
 
 DRS does not pick a guest Proxmox cannot migrate right now: one with a config lock (a backup or a snapshot, say) or with a task running on it, such as a disk move. An open console does not count. If a node's tasks cannot be read, its guests stay put until the next evaluation. All of these still count toward their node's load and toward rules.
 
-DRS also leaves a whole node alone for the **Hold-off after a node boots** (10 minutes by default) after it boots, so a cluster started from cold is not rebalanced while its guests are still starting. It moves no guest onto that node or off it; the node still counts in the scores and the variance, and its guests still count toward rules. It goes by the uptime Proxmox reports for the node, and a node with no uptime reading is not held. **Run Evaluation** names each node it left alone and when it booted. A manual migrate is not affected.
+DRS also leaves a whole node alone for the **Hold-off after a node boots** (10 minutes by default) after it boots, so a cluster started from cold is not rebalanced while its guests are still starting. It moves no guest onto that node or off it; the node still counts in the scores and the variance, and its guests still count toward rules. It goes by the uptime Proxmox reports for the node, and a node with no uptime reading is not held. **Run evaluation** names each node it left alone and when it booted. A manual migrate is not affected.
 
-After a failed migration DRS leaves that guest alone for 15 minutes, doubling with each failure in a row up to 6 hours, and balances with other guests meanwhile. A completed DRS migration resets the count, and failures older than 7 days stop counting. The wait comes from the DRS history, so restarting Nexara does not clear it, and **Run Evaluation** does not skip it. To move the guest sooner, migrate it by hand; that does not reset the count.
+After a failed migration DRS leaves that guest alone for 15 minutes, doubling with each failure in a row up to 6 hours, and balances with other guests meanwhile. A completed DRS migration resets the count, and failures older than 7 days stop counting. The wait comes from the DRS history, so restarting Nexara does not clear it, and **Run evaluation** does not skip it. To move the guest sooner, migrate it by hand; that does not reset the count.
 
 The audit entry for a failed migration carries the reason from the task's log in its details, such as `migration aborted (duration 00:00:10): can't lock file '/var/lock/qemu-server/lock-101.conf' - got timeout`. If the log names no reason or cannot be read, it carries Proxmox's exit text instead.
 
@@ -926,7 +926,7 @@ On its **Resources** sub-tab, a resource's **State** sets the HA request state. 
 
 ### HA Rules
 
-On Proxmox VE 9 and later, create rules from the **Groups / Rules** sub-tab of **High availability**: **HA rules** → **Add Rule**. Proxmox VE 8 has **Add Group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
+On Proxmox VE 9 and later, create rules from the **Groups / Rules** sub-tab of **High availability**: **HA rules** → **Add rule**. Proxmox VE 8 has **Add group** there instead. Rule names must start with a letter, be at least 2 characters, and contain only letters, numbers, hyphens, and underscores — the form validates this up front instead of letting Proxmox reject the rule later.
 
 While picking resources for a rule, the search also lists guests that are not yet HA-managed. When you select one, the form offers to add it to HA management with the settings below, ticked by default, and Nexara enrolls it as part of creating the rule — no need to leave the form and add the resource separately.
 
@@ -1100,16 +1100,16 @@ Creating or destroying an OSD and creating a CephFS are not offered.
 
 ### Network Interfaces
 
-A cluster's **Configure** → **Networks** → **Interfaces**, after picking a node in the panel's node filter (it starts at **All nodes**), or a node's **Network** tab. **Create Interface** offers Linux Bridge, Bond and VLAN, and OVS Bridge, Bond and IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
+A cluster's **Configure** → **Networks** → **Interfaces**, after picking a node in the panel's node filter (it starts at **All nodes**), or a node's **Network** tab. **Create interface** offers a Linux bridge, bond or VLAN and an OVS bridge, bond or IntPort, each with Proxmox's own options for that type. Edits stay pending, with no marker, until you apply them.
 
-**Apply Config** makes every pending edit live and reloads the node's network, and **Revert** discards every pending edit. Both act on edits made outside Nexara too, and both ask first. A bad configuration can cut the node off from Nexara, and then needs fixing from its console. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
+**Apply config** makes every pending edit live and reloads the node's network, and **Revert** discards every pending edit. Both act on edits made outside Nexara too, and both ask first. A bad configuration can cut the node off from Nexara, and then needs fixing from its console. `view:network`, `manage:network` and `delete:network` gate reading, changing and deleting.
 
 ### Cluster Firewall
 
 A cluster's **Configure** → **Firewall** has **Rules**, **Templates**, **Aliases**, **IP sets**, **Security groups**, **Log**, **Options** and **History**.
 
-- **Add Rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
-- **Options** — **Disable Firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable Firewall**, **Inbound policy** and **Outbound policy** take effect immediately, without asking
+- **Add rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
+- **Options** — **Disable firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable firewall**, **Inbound policy** and **Outbound policy** take effect immediately, without asking
 - **IP sets** must be empty to delete. **Security groups** can be created and deleted, but a group's rules have no page
 
 ### Node Firewall
@@ -1124,11 +1124,11 @@ A guest's own firewall is API only (`/clusters/:id/vms/:vmid/firewall/…`, wher
 
 **Firewall** → **Templates** holds reusable rule sets that belong to Nexara rather than one cluster, so listing, creating and deleting them needs an instance-wide `view:network`, `manage:network` or `delete:network`. A rule has a direction, action, protocol, destination port and comment. The page cannot edit a template; `PUT /api/v1/firewall-templates/:id` can.
 
-**Apply to Cluster** (`manage:network` on the cluster) only adds rules, and never replaces what is there. The template's rules go to the top of the cluster's list, above your existing rules, in the template's order. Rules are matched from the top, so a broad `DROP` or `REJECT` in a template comes before every rule the cluster already has and can lock you out of the cluster. The dialog says how many rules it adds and where, and warns when the template has a `DROP` or `REJECT` rule. A rule Proxmox rejects is skipped, and a message then says how many of the template's rules were added.
+**Apply to cluster** (`manage:network` on the cluster) only adds rules, and never replaces what is there. The template's rules go to the top of the cluster's list, above your existing rules, in the template's order. Rules are matched from the top, so a broad `DROP` or `REJECT` in a template comes before every rule the cluster already has and can lock you out of the cluster. The dialog says how many rules it adds and where, and warns when the template has a `DROP` or `REJECT` rule. A rule Proxmox rejects is skipped, and a message then says how many of the template's rules were added.
 
 ### SDN
 
-A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add Subnet**, with **Enable SNAT** and a **DHCP range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply Changes**, which asks first.
+A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VLAN, QinQ, VXLAN, EVPN), **VNets** (expand one for **Add subnet**, with **Enable SNAT** and a **DHCP range**), **Controllers** (EVPN, BGP, IS-IS), **IPAM** (Proxmox, NetBox, phpIPAM) and **DNS** (PowerDNS). Changes to zones, VNets and subnets stay pending until **Apply changes**, which asks first.
 
 ---
 
@@ -1137,8 +1137,8 @@ A cluster's **Configure** → **Networks** → **SDN** has **Zones** (simple, VL
 A cluster's **Configure** → **Certificates** reads with `view:certificate` and changes with `manage:certificate`, which among the built-in roles only Admin holds.
 
 - **Accounts** are read-only here: create one in the Proxmox web UI. The API has routes for them
-- **Plugins** — **Add Plugin** takes Standalone (HTTP) or DNS with its **Validation delay (seconds)** (30 by default). A plugin can be deleted but not edited
-- **Node certificates** — pick a node. **Add Domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order Certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal, and Proxmox then revokes the old certificate. Both ask first. If Nexara pinned the certificate of the node it connects through, a new one there breaks the pin: see [When a Node's Certificate Changes](#when-a-nodes-certificate-changes). A certificate with under 30 days left reads **Expiring**. Revoking is API only
+- **Plugins** — **Add plugin** takes Standalone (HTTP) or DNS with its **Validation delay (seconds)** (30 by default). A plugin can be deleted but not edited
+- **Node certificates** — pick a node. **Add domain** (up to 6) and **Edit** set its ACME domains; removing a domain is done in Proxmox. **Order certificate** needs a domain and restarts `pveproxy`. **Renew** always forces a renewal, and Proxmox then revokes the old certificate. Both ask first. If Nexara pinned the certificate of the node it connects through, a new one there breaks the pin: see [When a Node's Certificate Changes](#when-a-nodes-certificate-changes). A certificate with under 30 days left reads **Expiring**. Revoking is API only
 
 ---
 
@@ -1755,7 +1755,7 @@ A saved rule can be turned off or on from its row, or deleted, which also delete
 4. Click **Create**
 5. Click **Test** on the channel's row to send a test notification. A failed test says what kind of failure it was beside the channel — could not connect, timed out, TLS failed (certificate not trusted, or not valid for this host), HTTP status or SMTP code — and nothing the target said. The server log has the detail, with any password, token, webhook URL or header value the channel holds cut out
 
-A channel whose Slack, Discord, Teams or Generic Webhook URL, or SMTP host with **Use STARTTLS** on, resolves to a private network address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, carrier-grade NAT `100.64.0.0/10`, IPv6 `fc00::/7`) asks you to confirm it when you create it: **Continue with private address** stores the confirmation on that channel, and the audit log records it. Every send checks the address again, against what the name resolves to then, so a public name that later resolves to a private address is refused on a channel that was not confirmed. A loopback, link-local (the cloud metadata address `169.254.169.254` among them), unspecified or cloud metadata (`fd00:ec2::254`, `fd20:ce::254`, and Alibaba Cloud's `100.100.100.200` inside carrier-grade NAT) address, or one written with an IPv6 zone (`%`), is refused for every channel, confirmed or not, and redirects are never followed. Changing a channel's type through the API without new settings drops its confirmation. With **Use STARTTLS** off, an SMTP host must resolve to loopback, as before. Report email sent through a confirmed email channel and rolling update notifications follow the channel's confirmation too.
+A channel whose Slack, Discord, Teams or generic webhook URL, or SMTP host with **Use STARTTLS** on, resolves to a private network address (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, carrier-grade NAT `100.64.0.0/10`, IPv6 `fc00::/7`) asks you to confirm it when you create it: **Continue with private address** stores the confirmation on that channel, and the audit log records it. Every send checks the address again, against what the name resolves to then, so a public name that later resolves to a private address is refused on a channel that was not confirmed. A loopback, link-local (the cloud metadata address `169.254.169.254` among them), unspecified or cloud metadata (`fd00:ec2::254`, `fd20:ce::254`, and Alibaba Cloud's `100.100.100.200` inside carrier-grade NAT) address, or one written with an IPv6 zone (`%`), is refused for every channel, confirmed or not, and redirects are never followed. Changing a channel's type through the API without new settings drops its confirmation. With **Use STARTTLS** off, an SMTP host must resolve to loopback, as before. Report email sent through a confirmed email channel and rolling update notifications follow the channel's confirmation too.
 
 A channel's **Edit** changes its name and **Enabled** only: its settings are stored encrypted and never shown again. To change them, send a new `config` to `PUT /api/v1/notification-channels/:id`, which replaces them all. Deleting a channel and creating it again gives it a new id: every alert rule step that named the old one silently sends nothing, with no dead-letter entry, and the channel drops out of CVE notifications and report schedules.
 

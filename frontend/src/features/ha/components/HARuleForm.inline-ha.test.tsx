@@ -109,8 +109,8 @@ describe("HARuleForm — inline HA management", () => {
     await user.click(checkboxIn(screen.getByText("vm:100").closest("label")));
 
     expect(screen.getByText(/Add it to HA management/i)).toBeInTheDocument();
-    expect(screen.getByText(/Requested State/i)).toBeInTheDocument();
-    expect(screen.getByText(/Max Restart/i)).toBeInTheDocument();
+    expect(screen.getByText(/Requested state/i)).toBeInTheDocument();
+    expect(screen.getByText(/Max restart/i)).toBeInTheDocument();
   });
 
   it("creates the unmanaged resource before the rule on submit", async () => {
@@ -231,7 +231,7 @@ describe("HARuleForm — inline add-to-HA per version", () => {
   it("adds the guest without failback, and offers none, on PVE 8", async () => {
     const body = await createRuleOn("8.4.1", () => {
       // The inline block is open (a guest is unmanaged) and has no switch.
-      expect(screen.getByLabelText("Max Restart")).toBeInTheDocument();
+      expect(screen.getByLabelText("Max restart")).toBeInTheDocument();
       expect(
         screen.queryByRole("switch", { name: "Failback" }),
       ).not.toBeInTheDocument();
@@ -249,7 +249,7 @@ describe("HARuleForm — inline add-to-HA per version", () => {
     // fireEvent, not user.type: user.type leaves "1e1" in a number input as
     // "10", which would never reach the form in the spelling parseInt misread.
     const body = await createRuleOn("9.0.6", () => {
-      const restart = screen.getByLabelText("Max Restart");
+      const restart = screen.getByLabelText("Max restart");
       fireEvent.change(restart, { target: { value: "1e1" } });
       expect((restart as HTMLInputElement).value).toBe("1e1");
       return Promise.resolve();

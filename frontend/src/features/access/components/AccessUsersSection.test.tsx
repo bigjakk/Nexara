@@ -348,10 +348,10 @@ describe("an edit refused as Nexara's own credential", () => {
     const confirm = await screen.findByRole("dialog", { name: EDIT_TITLE });
     expect(within(confirm).getByText(REFUSAL)).toBeInTheDocument();
     expect(
-      within(confirm).queryByRole("button", { name: "Delete User" }),
+      within(confirm).queryByRole("button", { name: "Delete user" }),
     ).toBeNull();
     const saveAnyway = within(confirm).getByRole("button", {
-      name: "Save Anyway",
+      name: "Save anyway",
     });
     expect(saveAnyway).toBeDisabled();
     // The net runs before a failure reaches the component's own handler, so
@@ -486,7 +486,7 @@ describe("an edit refused as Nexara's own credential", () => {
     const form = await saveDisabled();
     const confirm = await typedOverride(EDIT_TITLE);
     await user.click(
-      within(confirm).getByRole("button", { name: "Save Anyway" }),
+      within(confirm).getByRole("button", { name: "Save anyway" }),
     );
     // The button says so once the request is out, which is when the dialog
     // holds; a dismissal before then would close it whatever the guard does.
@@ -597,7 +597,7 @@ describe("an edit refused as Nexara's own credential", () => {
       await saveDisabled();
       const confirm = await typedOverride(EDIT_TITLE);
       await user.click(
-        within(confirm).getByRole("button", { name: "Save Anyway" }),
+        within(confirm).getByRole("button", { name: "Save anyway" }),
       );
 
       await waitFor(expectNoOverride);
@@ -779,7 +779,7 @@ describe("a save that settles after its edit dialog is gone", () => {
       await saveDisabled();
       const confirm = await typedOverride(EDIT_TITLE);
       await user.click(
-        within(confirm).getByRole("button", { name: "Save Anyway" }),
+        within(confirm).getByRole("button", { name: "Save anyway" }),
       );
       // Nothing on the page can dismiss the override while the forced edit is
       // out, but leaving the page still takes it away.
@@ -1191,13 +1191,13 @@ describe("a delete refused as Nexara's own credential", () => {
     const ask = await screen.findByRole("alertdialog", {
       name: `Delete ${OWN}?`,
     });
-    await user.click(within(ask).getByRole("button", { name: "Delete User" }));
+    await user.click(within(ask).getByRole("button", { name: "Delete user" }));
     const confirm = await typedOverride(DELETE_TITLE);
     expect(
-      within(confirm).queryByRole("button", { name: "Save Anyway" }),
+      within(confirm).queryByRole("button", { name: "Save anyway" }),
     ).toBeNull();
     await user.click(
-      within(confirm).getByRole("button", { name: "Delete User" }),
+      within(confirm).getByRole("button", { name: "Delete user" }),
     );
 
     await waitFor(() => {
@@ -1222,13 +1222,13 @@ const HELD = [
     needsTokens: false,
     trigger: `Delete ${OWN}`,
     ask: `Delete ${OWN}?`,
-    send: "Delete User",
+    send: "Delete user",
     sending: "Deleting...",
     request: mockedDelete,
     other: mockedPut,
     title: DELETE_TITLE,
     typed: OWN,
-    confirm: "Delete User",
+    confirm: "Delete user",
     forced: undefined,
     sent: [[OWN_URL], [`${OWN_URL}?force=true`]],
   },
@@ -1237,13 +1237,13 @@ const HELD = [
     needsTokens: true,
     trigger: `Revoke ${TOKEN}`,
     ask: `Revoke ${FULL_TOKEN}?`,
-    send: "Revoke Token",
+    send: "Revoke token",
     sending: "Revoking...",
     request: mockedDelete,
     other: mockedPut,
     title: REVOKE_TITLE,
     typed: FULL_TOKEN,
-    confirm: "Revoke Token",
+    confirm: "Revoke token",
     forced: undefined,
     sent: [[TOKEN_URL], [`${TOKEN_URL}?force=true`]],
   },
@@ -1258,7 +1258,7 @@ const HELD = [
     other: mockedDelete,
     title: REGENERATE_TITLE,
     typed: FULL_TOKEN,
-    confirm: "Regenerate Token",
+    confirm: "Regenerate token",
     forced: { "full-tokenid": FULL_TOKEN, value: SECRET },
     sent: [
       [TOKEN_URL, { regenerate: true }],
