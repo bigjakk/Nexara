@@ -65,6 +65,8 @@ type Orchestrator struct {
 	// sshProbe logs in to a node before its drain (sshReady):
 	// sshpkg.RequireRoot, which tests replace, having no SSH server to reach.
 	sshProbe func(context.Context, sshpkg.Config) error
+	// cephConfirm holds each job's first clean Ceph reading; see cephConfirm.
+	cephConfirm *cephConfirm
 }
 
 // sshProbeTimeout bounds sshReady's login, which runs on the tick: Execute caps
@@ -97,6 +99,7 @@ func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptio
 		notifyRegistry: notifyRegistry,
 		shutdownCtx:    shutdownCtx,
 		sshProbe:       sshpkg.RequireRoot,
+		cephConfirm:    newCephConfirm(time.Now),
 	}
 }
 
@@ -1936,6 +1939,9 @@ func (o *Orchestrator) releaseDRSPause(ctx context.Context, job db.RollingUpdate
 // Returns released (nothing is held anymore) and didWork (there was at least
 // one held resource at entry).
 func (o *Orchestrator) releaseJobState(ctx context.Context, jobID uuid.UUID, auditFailures bool) (released, didWork bool) {
+	if o.cephConfirm != nil {
+		o.cephConfirm.reset(jobID) // The job is over; nothing reads its run again.
+	}
 	job, err := o.queries.GetRollingUpdateJob(ctx, jobID)
 	if err != nil {
 		o.logger.Warn("rolling: release could not re-read job", "job_id", jobID, "error", err)

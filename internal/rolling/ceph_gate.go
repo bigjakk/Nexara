@@ -3,8 +3,10 @@ package rolling
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
@@ -16,6 +18,66 @@ import (
 // and Ceph is slow, and a failed job releases what it holds and strands the
 // guests it drained.
 const cephWaitLimit = 30 * time.Minute
+
+// cephConfirmInterval is how long before a clean reading the confirming clean
+// reading must have been taken, below the scheduler's 15 s tick so it is the
+// previous tick's. While the active manager fails over, Ceph's PG map can read
+// active+clean for a few seconds on stale data (seen live: 3 of 3 OSDs up and
+// every PG clean, then every PG peering 3 s later), and one reading taken then
+// would pass a gate.
+const cephConfirmInterval = 10 * time.Second
+
+// cephConfirmingReason is the wait reason while a gate waits only for the
+// confirming reading.
+const cephConfirmingReason = "Ceph reads clean; confirming on the next check"
+
+// cephConfirm keeps, in memory, when each job's run of clean readings began.
+// Lost on a restart or a leader change, which costs one more tick of waiting.
+type cephConfirm struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	since map[uuid.UUID]time.Time
+}
+
+func newCephConfirm(now func() time.Time) *cephConfirm {
+	return &cephConfirm{now: now, since: map[uuid.UUID]time.Time{}}
+}
+
+// clean records a clean reading and reports whether the run began at least
+// cephConfirmInterval ago.
+func (c *cephConfirm) clean(job uuid.UUID) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	first, ok := c.since[job]
+	if !ok {
+		c.since[job] = c.now()
+		return false
+	}
+	return c.now().Sub(first) >= cephConfirmInterval
+}
+
+// reset ends a job's run: a reading not clean, one not taken, or a node going
+// down, since Ceph is about to change.
+func (c *cephConfirm) reset(job uuid.UUID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.since, job)
+}
+
+// cephConfirmed is the verdict of both gates: Ceph clean on this reading and
+// on one at least cephConfirmInterval earlier, with nothing else in between.
+// A clean reading not yet confirmed waits with cephConfirmingReason.
+func (o *Orchestrator) cephConfirmed(check CephCheck, job db.RollingUpdateJob) (CephCheck, bool) {
+	if check.Outcome != CephClean {
+		o.cephConfirm.reset(job.ID)
+		return check, false
+	}
+	if !o.cephConfirm.clean(job.ID) {
+		check.Reason = cephConfirmingReason
+		return check, false
+	}
+	return check, true
+}
 
 // cephPresent reads the cluster's Ceph status for a job that has a Ceph option
 // on, from a node that runs Ceph (proxmox.ReadCephStatus), and decides once per
@@ -85,11 +147,13 @@ func (o *Orchestrator) cephAllowsStart(ctx context.Context, client *proxmox.Clie
 	}
 	// No baseline here: one is taken now, and an OSD lost before this node
 	// starts is either back or not this node's doing.
-	check := cephCheck(status, err, 0)
-	if check.Outcome != CephClean {
+	check, ok := o.cephConfirmed(cephCheck(status, err, 0), *job)
+	if !ok {
 		o.cephWaiting(ctx, *job, node, check)
 		return false
 	}
+	// The node is about to go down: Ceph is about to change.
+	o.cephConfirm.reset(job.ID)
 	o.cephWaitOver(ctx, node)
 	if err := o.queries.SetJobCephOSDBaseline(ctx, db.SetJobCephOSDBaselineParams{
 		ID: job.ID, CephOsdsBaseline: int32(status.OSDMap.NumUpOSDs), //nolint:gosec // an OSD count
@@ -113,8 +177,8 @@ func (o *Orchestrator) cephAllowsHealthy(ctx context.Context, client *proxmox.Cl
 	if !present {
 		return true
 	}
-	check := cephCheck(status, err, int(job.CephOsdsBaseline))
-	if check.Outcome != CephClean {
+	check, ok := o.cephConfirmed(cephCheck(status, err, int(job.CephOsdsBaseline)), *job)
+	if !ok {
 		o.cephWaiting(ctx, *job, node, check)
 		return false
 	}
