@@ -106,25 +106,32 @@ export function SecurityDashboardPage() {
     : (clusters?.[0]?.id ?? "");
 
   // A job link without a known cluster (one saved before the cluster was kept
-  // in the URL) is tried on the default cluster. If that cluster does not have
-  // it, the link opens that cluster's jobs list rather than "Job not found".
+  // in the URL) is tried on the default cluster. Found, the job's cluster is
+  // written into the URL, which ends this mode; not found (a failed read with
+  // no data, not a failed poll), the link opens that cluster's jobs list.
   const legacyJob = useRollingUpdateJob(
     selectedJobId && !urlClusterKnown ? activeClusterId : "",
     selectedJobId ?? "",
   );
+  const inLegacyMode = selectedJobId !== null && !urlClusterKnown;
   const legacyJobMissing =
-    selectedJobId !== null && !urlClusterKnown && legacyJob.isError;
+    inLegacyMode && legacyJob.isError && legacyJob.data === undefined;
+  const legacyJobCluster = inLegacyMode
+    ? legacyJob.data?.cluster_id
+    : undefined;
   useEffect(() => {
-    if (!legacyJobMissing) return;
+    if (!legacyJobMissing && legacyJobCluster === undefined) return;
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.delete("job");
+        if (legacyJobCluster !== undefined)
+          next.set("cluster", legacyJobCluster);
+        else next.delete("job");
         return next;
       },
       { replace: true },
     );
-  }, [legacyJobMissing, setSearchParams]);
+  }, [legacyJobMissing, legacyJobCluster, setSearchParams]);
 
   // CVE scanning hooks
   const postureQuery = useSecurityPosture(activeClusterId);
