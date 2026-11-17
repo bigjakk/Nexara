@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,10 +19,35 @@ import { useAuth } from "@/hooks/useAuth";
 import { PackagePreviewTable } from "./PackagePreviewTable";
 import {
   useNodePackagePreview,
+  useRollingUpdateJob,
+  useRollingUpdateNodes,
   useSSHConfigured,
   useStartInPlaceNodeUpdate,
 } from "../api/rolling-update-queries";
 import { securityPackageCount } from "../lib/packages";
+
+/** Why the started job waits or was paused, as its own page says it. */
+function JobHold({ clusterId, jobId }: { clusterId: string; jobId: string }) {
+  const { t } = useTranslation("security");
+  const job = useRollingUpdateJob(clusterId, jobId).data;
+  const waiting = useRollingUpdateNodes(clusterId, jobId).data?.find(
+    (n) => n.ceph_wait_reason,
+  );
+  return (
+    <>
+      {job?.status === "paused" && job.pause_reason && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          {job.pause_reason}
+        </p>
+      )}
+      {job?.status === "running" && waiting?.ceph_wait_reason && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          {t("nodeWaitingForCephReason", { reason: waiting.ceph_wait_reason })}
+        </p>
+      )}
+    </>
+  );
+}
 
 /**
  * Pending apt updates for one node, and a way to apply them to that node alone.
@@ -157,6 +183,9 @@ export function NodeUpdatePanel({
             </Link>
             .
           </p>
+        )}
+        {update.isSuccess && (
+          <JobHold clusterId={update.data.cluster_id} jobId={update.data.id} />
         )}
       </div>
 

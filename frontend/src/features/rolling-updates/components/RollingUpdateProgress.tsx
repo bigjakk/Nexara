@@ -418,11 +418,14 @@ function HAWarningsPanel({
 
 /** The job's two Ceph options and what became of noout, in a few words. */
 function cephSummary(job: RollingUpdateJob, t: TFunction<"security">): string {
+  const ended = ["completed", "failed", "cancelled"].includes(job.status);
   const noout = !job.ceph_noout
     ? t("nooutState.off")
     : job.ceph_noout_state === ""
       ? t("nooutState.pending")
-      : t(`nooutState.${job.ceph_noout_state}`);
+      : ended && job.ceph_noout_state === "held"
+        ? t("nooutState.held_after_end")
+        : t(`nooutState.${job.ceph_noout_state}`);
   return `${job.ceph_wait ? t("cephWaits") : t("cephNoWait")}, ${noout}`;
 }
 
@@ -582,6 +585,11 @@ export function RollingUpdateProgress({
       />
 
       <div className="space-y-4">
+        {job.ceph_noout_reason && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            {job.ceph_noout_reason}
+          </p>
+        )}
         {job.status === "paused" && job.pause_reason && (
           <p className="text-sm text-amber-700 dark:text-amber-400">
             {job.pause_reason}

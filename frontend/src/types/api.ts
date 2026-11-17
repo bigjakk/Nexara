@@ -932,6 +932,8 @@ export interface RollingUpdateJob {
   /** What became of noout: "" not looked at yet, "already_set" is the
    * operator's and is left alone, "not_held" could not be set. */
   ceph_noout_state: "" | "held" | "already_set" | "not_held" | "released";
+  /** Why noout is not held, or could not be cleared yet. */
+  ceph_noout_reason?: string;
   /** Why Nexara paused the job itself; "" otherwise. */
   pause_reason: string;
   failure_reason: string;

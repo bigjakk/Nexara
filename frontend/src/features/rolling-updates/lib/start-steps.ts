@@ -29,9 +29,11 @@ export function startJobSteps(
   const ceph = job.ceph_present !== false;
   const cephWait = ceph && job.ceph_wait;
   const steps = [
-    job.parallelism > 1
-      ? t("startJobOrderMany", { count: job.parallelism })
-      : t("startJobOrderOne"),
+    job.parallelism <= 1
+      ? t("startJobOrderOne")
+      : cephWait
+        ? t("startJobOrderCeph")
+        : t("startJobOrderMany", { count: job.parallelism }),
     job.drain_guests
       ? `${t("startJobDrain")} ${t("startJobHARules")}`
       : t("startJobInPlace"),

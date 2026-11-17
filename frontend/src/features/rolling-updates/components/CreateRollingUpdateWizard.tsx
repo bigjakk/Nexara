@@ -547,6 +547,7 @@ export function CreateRollingUpdateWizard({
                     <Label htmlFor="ceph-wait">{t("cephWaitLabel")}</Label>
                     <p className="text-xs text-muted-foreground">
                       {t("cephWaitHelp")}
+                      {effectiveParallelism > 1 && ` ${t("cephOneAtATime")}`}
                     </p>
                   </div>
                   <Switch

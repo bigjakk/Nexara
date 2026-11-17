@@ -16,6 +16,7 @@
   "rebootAutoHelp": "Reboot a node only if its upgrade installs a kernel or, for an automated upgrade, asks for a reboot.",
   "cephWaitLabel": "Wait for Ceph",
   "cephWaitHelp": "Take a node down, and move its guests back, only once every placement group is active+clean. A wait over 30 minutes pauses the job.",
+  "cephOneAtATime": "With this on, the nodes are taken one at a time whatever the parallelism.",
   "cephNooutLabel": "Hold noout",
   "cephNooutHelp": "Keep Ceph from marking a rebooting node's OSDs out and copying their data elsewhere. Cleared when the job ends.",
   "noRollingUpdateJobs": "No rolling update jobs yet",
@@ -25,6 +26,7 @@
   "startJobNodesUnread": "Nexara could not read which nodes the job updates.",
   "startJobOrderOne": "Nexara takes the nodes one at a time, in the order the job lists them.",
   "startJobOrderMany": "Nexara takes the nodes {{count}} at a time, in the order the job lists them.",
+  "startJobOrderCeph": "On this Ceph cluster Nexara takes the nodes one at a time, in the order the job lists them, whatever the parallelism.",
   "startJobDrain": "Each node is drained first: its VMs migrate live to other nodes, its containers restart on them, and a guest with a PCI or USB device is shut down where it is.",
   "startJobHARules": "Before the drain, the HA rules that name one of the node's guests are turned off until the job ends.",
   "startJobInPlace": "Guests are not moved: each node is updated with its guests running.",
@@ -57,6 +59,7 @@
     "off": "noout off",
     "pending": "noout not set yet",
     "held": "noout held",
+    "held_after_end": "noout still set, being cleared",
     "already_set": "noout set before the job, left alone",
     "not_held": "noout not held",
     "released": "noout cleared"
