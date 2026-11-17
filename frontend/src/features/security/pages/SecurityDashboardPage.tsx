@@ -198,7 +198,12 @@ export function SecurityDashboardPage() {
             {activeTab === "rolling-updates" ? (
               canManageRolling &&
               activeClusterId && (
-                <CreateRollingUpdateWizard clusterId={activeClusterId} />
+                <CreateRollingUpdateWizard
+                  clusterId={activeClusterId}
+                  clusterName={
+                    clusters.find((c) => c.id === activeClusterId)?.name
+                  }
+                />
               )
             ) : (
               <Button

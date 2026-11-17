@@ -11,6 +11,7 @@
   "vulnerabilitiesFound": "{{count}} vulnerabilities found",
   "noScansYet": "No scans have been run yet. Click \"Scan Now\" to check for vulnerabilities.",
   "rollingUpdate": "Rolling Update",
+  "rollingWizardCluster": "On cluster {{name}}.",
   "noRollingUpdateJobs": "No rolling update jobs yet",
   "startJobTitle_one": "Start the rolling update on {{count}} node?",
   "startJobTitle_other": "Start the rolling update on {{count}} nodes?",

@@ -1885,7 +1885,7 @@ Navigate to **Security > Rolling Updates** tab.
 
 ### Creating an Update Job
 
-1. Click **New Rolling Update**
+1. Click **New Rolling Update**. The job is for the cluster chosen at the top of the page, which the wizard names under each step's title; the page keeps that choice in its address
 2. Work through the wizard's three steps — **Select Nodes**, **HA Constraint Check**, **Configure Update**:
    - **Nodes** — select which nodes to update (or all)
    - **Parallelism (max nodes updated at once)** — default 1, set on the **Select Nodes** step because the pre-flight that follows checks capacity for that many nodes drained at once

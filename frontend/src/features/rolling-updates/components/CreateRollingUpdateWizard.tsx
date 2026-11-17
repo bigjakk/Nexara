@@ -18,6 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -44,6 +45,8 @@ import { useTranslation } from "react-i18next";
 
 interface CreateRollingUpdateWizardProps {
   clusterId: string;
+  /** Named on every step, so the cluster the job acts on is never a guess. */
+  clusterName?: string | undefined;
 }
 
 function ConflictCard({ conflict }: { conflict: HAConflict }) {
@@ -74,6 +77,7 @@ function ConflictCard({ conflict }: { conflict: HAConflict }) {
 
 export function CreateRollingUpdateWizard({
   clusterId,
+  clusterName,
 }: CreateRollingUpdateWizardProps) {
   const { t } = useTranslation("security");
   const [open, setOpen] = useState(false);
@@ -237,6 +241,11 @@ export function CreateRollingUpdateWizard({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{stepTitle[step]}</DialogTitle>
+          {clusterName !== undefined && (
+            <DialogDescription>
+              {t("rollingWizardCluster", { name: clusterName })}
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         {step === "nodes" && (
