@@ -117,17 +117,18 @@ func TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment(t *testing.T) {
 		{"the probe value", "UPID:pve-01:a/../../../status"},
 		// Named for StopNodeTask, which appends nothing, so there it lands on
 		// /nodes/pve-01/status; the two GETs append "/status" or "/log" to it.
-		{"a traversal onto the node's own status", "A/../../status"},
-		// Dot-free, and therefore refused ONLY by the separator ban. Swapping in
-		// validatePathSegmentAllowingSlash lets exactly these two through, which
-		// is how we know the separator half is load-bearing on its own.
-		{"a single separator", "A/b"},
-		{"a descent one level deeper than the segment", "tasks/log"},
-		{"a backslash form", `A\..\status`},
-		{"a newline", "A\nb"},
-		{"a NUL", "A\x00b"},
-		{"an ANSI escape", "A\x1b[2Kb"},
-		{"a leading absolute slash", "/cluster/log"},
+		{"a traversal onto the node's own status", "UPID:pve-01:A/../../status"},
+		// These and the cases below name the dialled node, so TaskNode passes
+		// them and only validateTaskUPID can refuse them. The next two are
+		// dot-free, and so refused ONLY by the separator ban: swapping in
+		// validatePathSegmentAllowingSlash lets exactly these two through.
+		{"a single separator", "UPID:pve-01:A/b"},
+		{"a descent one level deeper than the segment", "UPID:pve-01:tasks/log"},
+		{"a backslash form", `UPID:pve-01:A\..\status`},
+		{"a newline", "UPID:pve-01:A\nb"},
+		{"a NUL", "UPID:pve-01:A\x00b"},
+		{"an ANSI escape", "UPID:pve-01:A\x1b[2Kb"},
+		{"an absolute path after the node", "UPID:pve-01:/cluster/log"},
 		// Whole segments, refused because the client dials only the node a
 		// UPID names (TaskNode), and these name another node or none.
 		{"a task on another node", "UPID:pve-02:0000A1B2:00000001:6A8CE407:imgcopy::root@pam:"},
@@ -157,6 +158,26 @@ func TestNodeTaskCallsRefuseAUPIDThatIsNotOnePathSegment(t *testing.T) {
 			err := c.StopNodeTask(context.Background(), node, tc.upid)
 			assertNodeTaskUPIDRefused(t, err, seen)
 		})
+	}
+}
+
+// TestTaskNode pins the node field to PVE::UPID::decode's pattern: a value
+// that names no node a decode would accept is never dialled as one.
+func TestTaskNode(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ upid, want string }{
+		{"UPID:pve1:0000A1B2:qmstart:100:root@pam:", "pve1"},
+		{"UPID:pve-01:0000A1B2:qmstart:100:root@pam:", "pve-01"},
+		{"UPID:a.b:0000A1B2:qmstart:100:root@pam:", ""},
+		{"UPID:-x:0000A1B2:qmstart:100:root@pam:", ""},
+		{"UPID:pve1", ""},
+		{"UPID::0000A1B2:qmstart:100:root@pam:", ""},
+		{"pve1:0000A1B2:qmstart:100:root@pam:", ""},
+	} {
+		got, err := TaskNode(tc.upid)
+		if got != tc.want || (err == nil) != (tc.want != "") {
+			t.Errorf("TaskNode(%q) = %q, %v; want %q", tc.upid, got, err, tc.want)
+		}
 	}
 }
 
