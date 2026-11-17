@@ -30,6 +30,8 @@ type HAConflict struct {
 type HAPreFlightReport struct {
 	Conflicts []HAConflict `json:"conflicts"`
 	HasErrors bool         `json:"has_errors"`
+	// Ceph is the pre-flight route's Ceph part; the create does not read it.
+	Ceph *CephPreflight `json:"ceph,omitempty"`
 }
 
 // AnalyzeHAConstraints checks what HA/DRS rules would be violated by draining

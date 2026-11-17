@@ -195,7 +195,10 @@ func registerRollingUpdateEndpoints(reg *Registry, h *handlers.RollingUpdateHand
 			"guests leaving a node, and whether the remaining nodes could absorb them. Gated on view " +
 			"rather than manage — it computes an answer and changes nothing — and a check that could not " +
 			"run is reported as an error-severity conflict rather than omitted, so a strict job refuses " +
-			"rather than proceeding on a verdict nobody reached.",
+			"rather than proceeding on a verdict nobody reached. The ceph object says whether the cluster " +
+			"runs Ceph (status absent, clean, not_clean or unknown) and what is not clean; a Ceph that is " +
+			"not clean or could not be read, and a parallelism above 1 on a Ceph cluster, add warning " +
+			"conflicts with source ceph, which never refuse a strict job.",
 		Group:       "Rolling Updates",
 		Permissions: rollingView(),
 		Parameters: clusterParams(apischema.Properties{

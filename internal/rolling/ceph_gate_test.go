@@ -125,3 +125,36 @@ func TestCephGate_ANodeIsNotCalledHealthyUntilCephIsClean(t *testing.T) {
 		})
 	}
 }
+
+// TestAnalyzeCeph_WarnsAndNeverBlocks: the pre-flight's Ceph part says whether
+// the cluster runs Ceph and what is not clean, and warns (never errors, so a
+// strict job is not refused) for that and for more than one node at a time. A
+// cluster without Ceph gets neither.
+func TestAnalyzeCeph_WarnsAndNeverBlocks(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name       string
+		pgs        string
+		wantStatus string
+		wantTypes  []string
+	}{
+		{"degraded", "active+clean=100,active+undersized+degraded=28", "not_clean", []string{"ceph_not_clean", "ceph_parallelism"}},
+		{"no Ceph", "", "absent", nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, client, _ := engineOn(t, &memberDB{t: t}, cephStub(3, tt.pgs))
+			got, conflicts := AnalyzeCeph(context.Background(), client, 2)
+			var types []string
+			for _, c := range conflicts {
+				if c.Severity != "warning" {
+					t.Errorf("%s is %q; the Ceph part only warns", c.Type, c.Severity)
+				}
+				types = append(types, c.Type)
+			}
+			if got.Status != tt.wantStatus || !slices.Equal(types, tt.wantTypes) {
+				t.Errorf("status %q with %v, want %q with %v", got.Status, types, tt.wantStatus, tt.wantTypes)
+			}
+		})
+	}
+}

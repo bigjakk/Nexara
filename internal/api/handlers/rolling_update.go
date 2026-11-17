@@ -70,6 +70,16 @@ type rollingUpdateJobResponse struct {
 	CompletedAt       string          `json:"completed_at,omitempty"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
+
+	// The two Ceph options, whether the cluster runs Ceph (null until the job
+	// first looks), and what became of noout: "" not looked yet, "held",
+	// "already_set" (the operator's, left alone), "not_held", "released".
+	CephWait       bool   `json:"ceph_wait"`
+	CephNoout      bool   `json:"ceph_noout"`
+	CephPresent    *bool  `json:"ceph_present"`
+	CephNooutState string `json:"ceph_noout_state"`
+	// PauseReason says why the engine paused the job itself; "" otherwise.
+	PauseReason string `json:"pause_reason"`
 }
 
 type rollingUpdateNodeResponse struct {
@@ -99,6 +109,11 @@ type rollingUpdateNodeResponse struct {
 	RebootRequired bool   `json:"reboot_required"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
+
+	// CephWaitReason is what the node waits for in Ceph before it is taken
+	// down or called healthy, since CephWaitStartedAt; "" when it is not.
+	CephWaitReason    string `json:"ceph_wait_reason,omitempty"`
+	CephWaitStartedAt string `json:"ceph_wait_started_at,omitempty"`
 }
 
 func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
@@ -118,10 +133,17 @@ func toJobResponse(j db.RollingUpdateJob) rollingUpdateJobResponse {
 		HAWarnings:        haWarnings,
 		AutoUpgrade:       j.AutoUpgrade,
 		DrainGuests:       j.DrainGuests,
+		CephWait:          j.CephWait,
+		CephNoout:         j.CephNoout,
+		CephNooutState:    j.CephNooutState,
+		PauseReason:       j.PauseReason,
 		FailureReason:     j.FailureReason,
 		CreatedBy:         j.CreatedBy.String(),
 		CreatedAt:         j.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:         j.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if j.CephPresent.Valid {
+		r.CephPresent = &j.CephPresent.Bool
 	}
 	if j.StartedAt.Valid {
 		r.StartedAt = j.StartedAt.Time.Format(time.RFC3339Nano)
@@ -168,6 +190,8 @@ func toRollingNodeResponse(n db.RollingUpdateNode) rollingUpdateNodeResponse {
 		UpgradeCompletedAt: formatTimestamptz(n.UpgradeCompletedAt),
 		UpgradeOutput:      n.UpgradeOutput,
 		RebootRequired:     n.RebootRequired,
+		CephWaitReason:     n.CephWaitReason,
+		CephWaitStartedAt:  formatTimestamptz(n.CephWaitStartedAt),
 		CreatedAt:          n.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:          n.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -787,7 +811,10 @@ func (h *RollingUpdateHandler) PreflightHA(c fiber.Ctx, p *apischema.Params) err
 	// haErr is nil here on purpose: an HA failure already returned above, so
 	// only the capacity half can still be unavailable at this point.
 	conflicts, hasErrors := foldPreflight(report, nil, capConflicts, capHasErrors, capErr)
-	report.Conflicts, report.HasErrors = conflicts, hasErrors
+	// Warnings only: they never set has_errors, so a strict job is not refused.
+	ceph, cephConflicts := rolling.AnalyzeCeph(c.Context(), client, parallelism)
+	conflicts = append(conflicts, cephConflicts...)
+	report.Conflicts, report.HasErrors, report.Ceph = conflicts, hasErrors, &ceph
 
 	return c.JSON(report)
 }

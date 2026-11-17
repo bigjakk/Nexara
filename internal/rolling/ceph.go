@@ -1,6 +1,7 @@
 package rolling
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -86,4 +87,46 @@ func cephCheck(status *proxmox.CephStatus, readErr error, osdBaseline int) CephC
 		c.Reason = strings.Join(reasons, "; ")
 	}
 	return c
+}
+
+// CephPreflight is the pre-flight's answer about Ceph: Status is "absent" (the
+// cluster has no Ceph), "clean", "not_clean" or "unknown" (could not look).
+type CephPreflight struct {
+	Status      string `json:"status"`
+	Reason      string `json:"reason,omitempty"`
+	PGsNotClean int    `json:"pgs_not_clean"`
+	PGsTotal    int    `json:"pgs_total"`
+	OSDsUp      int    `json:"osds_up"`
+	OSDsTotal   int    `json:"osds_total"`
+}
+
+// AnalyzeCeph reads the cluster's Ceph status for the pre-flight: whether it
+// runs Ceph, whether Ceph is clean now as the job's first gate would judge it,
+// and warnings (never errors: warn and confirm, not block) for a Ceph that is
+// not clean or could not be read, and for more than one node down at a time.
+func AnalyzeCeph(ctx context.Context, client *proxmox.Client, parallelism int32) (CephPreflight, []HAConflict) {
+	status, err := client.GetClusterCephStatus(ctx)
+	if proxmox.IsCephNotConfigured(err) {
+		return CephPreflight{Status: "absent"}, []HAConflict{}
+	}
+	check := cephCheck(status, err, 0)
+	out := CephPreflight{Status: string(check.Outcome), Reason: check.Reason,
+		PGsNotClean: check.PGsNotClean, PGsTotal: check.PGsTotal, OSDsUp: check.OSDsUp}
+	if status != nil {
+		out.OSDsTotal = status.OSDMap.NumOSDs
+	}
+	conflicts := []HAConflict{}
+	warn := func(typ, msg string) {
+		conflicts = append(conflicts, HAConflict{Source: "ceph", Type: typ, Severity: "warning", Message: msg})
+	}
+	switch check.Outcome {
+	case CephNotClean:
+		warn("ceph_not_clean", "Ceph is not clean: "+check.Reason+". With Wait for Ceph on, the job waits for it before taking the first node down.")
+	case CephUnknown:
+		warn("ceph_unknown", "Could not read the Ceph status. With Wait for Ceph on, the job waits until it can.")
+	}
+	if parallelism > 1 {
+		warn("ceph_parallelism", fmt.Sprintf("Parallelism is %d on a Ceph cluster: taking more than one node down at a time can leave placement groups without enough copies.", parallelism))
+	}
+	return out, conflicts
 }
