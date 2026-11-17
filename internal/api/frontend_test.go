@@ -165,7 +165,8 @@ func TestRegisterFrontend_CacheHeaders(t *testing.T) {
 // old bundle against the new API. Since fasthttp 1.79 a file with no modtime has
 // no validator at all; the "modtime" bundle holds the strip to the job it keeps.
 func TestRegisterFrontend_StaleRevalidationGetsTheNewShell(t *testing.T) {
-	t.Parallel()
+	// Not parallel itself: each bundle's New runs here, one after the other,
+	// before its subtest goes parallel (New writes a package-level cookie mode).
 	modTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	withModTime := spaTestFS()
 	for _, f := range withModTime {

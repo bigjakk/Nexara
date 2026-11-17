@@ -79,8 +79,8 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 // in setupMiddleware). Far more sign-outs than any cap here allows, from one address,
 // and the owner's still reaches the handler.
 func TestLogout_HasNoPerAddressLimit(t *testing.T) {
-	t.Parallel()
 	s := newTestServer(t)
+	t.Parallel() // after New, which writes a package-level cookie mode
 	s.app.Post("/api/v1/auth/logout", func(c fiber.Ctx) error {
 		if c.Cookies("nexara_refresh") != "the-owners-cookie" {
 			return c.SendStatus(fiber.StatusUnauthorized)
