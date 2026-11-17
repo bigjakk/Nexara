@@ -26,7 +26,8 @@
 -- starts waiting for Ceph on its next tick, which is intended: a node in its
 -- health check is not called healthy, and the next node is not started, until
 -- Ceph is clean, and the next node it starts sets noout. Its first wait has no
--- OSD baseline, so it waits for the PGs alone.
+-- OSD baseline, so it waits for the PGs alone. One with two nodes already under
+-- way keeps both: the one-at-a-time cap applies to the nodes it starts.
 ALTER TABLE rolling_update_jobs
     ADD COLUMN IF NOT EXISTS ceph_wait BOOLEAN NOT NULL DEFAULT true,
     ADD COLUMN IF NOT EXISTS ceph_noout BOOLEAN NOT NULL DEFAULT true,

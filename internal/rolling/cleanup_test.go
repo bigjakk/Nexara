@@ -403,6 +403,7 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 		refuseSet    bool
 		refuseUnset  bool
 		raced        bool
+		unconfirmed  bool // the set fails, and so does the read after it
 		wantState    string
 		wantReleased bool
 		wantPuts     []string
@@ -413,11 +414,14 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 			wantState: nooutNotHeld + "/noout is not held: the cluster's API token lacks Sys.Modify on /.", wantReleased: true, wantPuts: []string{"value=1"}},
 		{name: "an endpoint without Ceph keeps it held", refuseUnset: true, wantState: nooutHeld + "/", wantPuts: []string{"value=1", "value=0"}},
 		{name: "raced", raced: true, wantState: nooutHeld + "/", wantReleased: true, wantPuts: []string{"value=1", "value=0"}},
+		{name: "raced, the set unconfirmed", raced: true, unconfirmed: true, wantState: nooutHeld + "/", wantReleased: true,
+			wantPuts: []string{"value=1", "value=0"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var mu sync.Mutex
 			var puts []string
+			var setFailed atomic.Bool
 			d := &memberDB{t: t, audits: true, jobStatus: "running",
 				accept: map[string]int64{"SetJobCephNooutState": 1, "ArmJobCleanupPending": 0}}
 			o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
@@ -432,10 +436,15 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 					mu.Lock()
 					puts = append(puts, "value="+value)
 					mu.Unlock()
-					switch {
-					case tt.raced:
+					if tt.raced && value == "1" {
 						// The other release, between the record and the set.
 						_, _ = d.Exec(context.Background(), "-- name: SetJobCephNooutState", nooutReleased, "", uuid.Nil)
+					}
+					switch {
+					case tt.unconfirmed && value == "1":
+						setFailed.Store(true)
+						http.Error(w, `{"data":null,"message":"timeout\n"}`, http.StatusInternalServerError)
+						return
 					case tt.refuseSet && value == "1":
 						http.Error(w, `{"data":null,"message":"Permission check failed (/, Sys.Modify)\n"}`, http.StatusForbidden)
 						return
@@ -444,6 +453,10 @@ func TestNoout_HeldAndReleasedOnlyWhenTheJobSetIt(t *testing.T) {
 						return
 					}
 					_, _ = w.Write([]byte(`{"data":null}`))
+					return
+				}
+				if setFailed.Load() {
+					http.Error(w, `{"data":null,"message":"timeout\n"}`, http.StatusInternalServerError)
 					return
 				}
 				_, _ = w.Write([]byte(map[bool]string{true: `{"data":1}`, false: `{"data":0}`}[tt.alreadySet]))
