@@ -49,6 +49,9 @@ type memberDB struct {
 	// in writes.
 	accept map[string]int64
 	writes []string
+	values []string // "Name=value" for each accepted write whose first argument is a string
+	// rowFor answers each single-row query it names with that value's fields.
+	rowFor map[string]any
 	// jobStatus, when set, answers GetRollingUpdateJob with a job in it.
 	jobStatus string
 	// rowsFor answers each query it names with those rows, each one's columns
@@ -140,6 +143,11 @@ func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Comm
 	if n, ok := d.accept[name]; ok {
 		d.mu.Lock()
 		d.writes = append(d.writes, name)
+		if len(args) > 0 {
+			if v, ok := args[0].(string); ok {
+				d.values = append(d.values, name+"="+v)
+			}
+		}
 		d.mu.Unlock()
 		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
 	}
@@ -185,6 +193,9 @@ func (d *memberDB) Query(_ context.Context, sql string, args ...any) (pgx.Rows, 
 }
 
 func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	if v, ok := d.rowFor[queryName(sql)]; ok {
+		return structRow{v}
+	}
 	switch name := queryName(sql); {
 	case name == "GetRollingUpdateJob" && d.jobStatus != "":
 		id, _ := args[0].(uuid.UUID)

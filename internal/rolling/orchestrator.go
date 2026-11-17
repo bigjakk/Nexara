@@ -190,18 +190,8 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 		}
 	}
 
-	// Check if we should start a new node.
-	activeCount, err := o.queries.CountActiveNodes(ctx, job.ID)
-	if err != nil {
-		o.logger.Error("failed to count active nodes", "job_id", job.ID, "error", err)
+	if !o.startNextNode(ctx, client, job) {
 		return
-	}
-
-	if activeCount < int64(job.Parallelism) {
-		nextNode, err := o.queries.GetNextPendingNode(ctx, job.ID)
-		if err == nil {
-			o.startNode(ctx, client, job, nextNode)
-		}
 	}
 
 	// Check if job is done.
@@ -245,6 +235,23 @@ func (o *Orchestrator) processJob(ctx context.Context, job db.RollingUpdateJob) 
 	}
 }
 
+// startNextNode starts the next pending node when the job has room for one and
+// Ceph allows it. False means the active nodes could not be counted.
+func (o *Orchestrator) startNextNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob) bool {
+	activeCount, err := o.queries.CountActiveNodes(ctx, job.ID)
+	if err != nil {
+		o.logger.Error("failed to count active nodes", "job_id", job.ID, "error", err)
+		return false
+	}
+	if activeCount < int64(job.Parallelism) {
+		nextNode, err := o.queries.GetNextPendingNode(ctx, job.ID)
+		if err == nil && o.cephAllowsStart(ctx, client, &job, nextNode) {
+			o.startNode(ctx, client, job, nextNode)
+		}
+	}
+	return true
+}
+
 // advanceNode moves one node of a running job through its next automatic step.
 func (o *Orchestrator) advanceNode(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
 	switch node.Step {
@@ -265,7 +272,9 @@ func (o *Orchestrator) advanceNode(ctx context.Context, client *proxmox.Client, 
 	case "rebooting":
 		o.advanceRebooting(ctx, client, job, node)
 	case "health_check":
-		o.advanceHealthCheck(ctx, client, job, node)
+		if o.cephAllowsHealthy(ctx, client, &job, node) {
+			o.advanceHealthCheck(ctx, client, job, node)
+		}
 	case "restoring":
 		o.advanceRestoring(ctx, client, job, node)
 	}
