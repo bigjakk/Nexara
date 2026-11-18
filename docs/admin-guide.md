@@ -53,7 +53,7 @@ This guide covers day-to-day administration of Nexara: managing clusters, users,
 
 The dashboard is the landing page. It needs no permission of its own: each widget shows what your grants on each cluster let you read.
 
-- **Controls.** The **Layout** menu of presets, **Customize** (on screens at least 768 px wide), the time range (**Live**, **1h**, **6h**, **24h**, **7d**, which applies to the charts and is not saved), the refresh rate (5, 10, 30 or 60 seconds, remembered per browser) and **Add cluster**.
+- **Controls.** The **Layout** menu of presets, **Customize** (on screens at least 768 px wide; widgets move and resize only where the dashboard has its full 12 columns, from about 1000 px of dashboard width), the time range (**Live**, **1h**, **6h**, **24h**, **7d**, which applies to the charts and is not saved), the refresh rate (5, 10, 30 or 60 seconds, remembered per browser) and **Add cluster**.
 - **Default layout.** **Needs attention**, the open health issues (above every layout, only while there are some); **Fleet**, each node's load with a cell per guest; for each cluster the **CPU usage**, **Memory usage**, **Disk I/O** and **Network in** charts and **Live load**; and **Top consumers**, the top 10 per cluster. **All clusters** and **Clusters**, the old stat and cluster cards, are in **Add widget**.
 - **Customize.** **Add widget**, drag a widget by its bar, resize it by its corner, remove it with its ✕, or **Reset to default**. **Lock** saves; leaving the page before that loses the changes. **UPS status** appears only if you add it, and needs a global `view:ups`.
 - **Presets.** In the **Layout** menu, pick a preset (**Default** resets), or **Save current as preset**; a name already in use is overwritten. Picking a preset and **Reset to default** replace the layout at once, without asking.
@@ -225,7 +225,7 @@ A console needs `console:vm`, `console:container` or `console:node`, which the b
 
 - **Open one** with **VNC console** on a VM's page or **Attach** on a container's, **Console** on a running guest's right-click menu, **Shell** on a node's page or a cluster's **Overview**, or **New console** on the **Console** page in the navigation rail. A guest that is stopped parks the console on **Start VM** (**Start container** for a container) and **Connect anyway**, and connects when the guest powers on. A running VM's page also shows a small view-only preview.
 - **Node shell.** It opens at the host's login prompt, not a root shell: Proxmox logs a shell straight in only for `root@pam` itself, and an API token is never that.
-- **The floating window** holds a tab per console, with **New console** (**+**), minimize, maximize and **Open in new tab**. **Close** hides it and disconnects; the tabs remain.
+- **The floating window** holds a tab per console, with **New console** (**+**), minimize, maximize and **Open in new tab**. **Close** ends its sessions; minimize keeps them.
 - **In its own browser tab.** Set **Open consoles in** to **New browser tab** under [Appearance](#appearance), or Ctrl/⌘-click any console button. The tab has **Reconnect** and **Fullscreen**, and a link to a console that Nexara did not open itself asks **Open this console?** first.
 - **The VNC toolbar** has **Power**; **Media** on a VM (**Mount ISO...** and **Eject CD-ROM**, `execute:vm`, which creates `ide2` if the VM has no CD-ROM); **Keys** (Ctrl+Alt+Del, Ctrl+Alt+F1–F12, Alt+Tab, Alt+F4, Print Screen, SysRq); paste, typed on a US layout, which reports any character it cannot type; a PNG screenshot; and **Scale** and **Resize**.
 - **A console ends with its sign-in.** Within about 5 seconds of the session that opened it ending, the server closes the console and it reads **Session ended**.
@@ -394,14 +394,14 @@ The user menu (your name, top right) holds **Profile**, **Security**, **API keys
 
 **Security** has [two-factor authentication](#two-factor-authentication-totp) and **Active sessions**: each sign-in's device and address, when it was last active and **This device**. **Revoke** ends one, and asks first for your own. That sign-in is refused at its next request. Once an hour Nexara deletes the records of sessions that have expired.
 
-**Sign out all devices** ends every session without asking, and each is refused at its next request. An API key is not affected.
+**Sign out all devices** asks first, then ends every session, and each is refused at its next request. An API key is not affected.
 
 ### API Keys
 
 **API keys** → **Create API key** takes a name and an expiration (**Never**, **30 days**, **90 days** or **1 year**; through the API, from an hour to 100 years) and shows the key once. Send it as `Authorization: Bearer nxra_…`.
 
 - It acts with its owner's permissions as they are at each request, and stops working if the owner is deactivated.
-- It survives a password change and **Sign out all devices**, so revoke it yourself if it may have leaked: **Revoke** → **Revoke key**.
+- It survives a password change and **Sign out all devices**, so revoke it yourself if it may have leaked: **Revoke** → **Revoke key**. A revoked key stays on record, folded under **Show revoked** in the list.
 - It cannot change its owner's credentials or end their sessions: change-password, the two-factor routes, sign-out-all, ending a session and creating another key answer 403.
 - Creating one needs a global `manage:api_key`, which every built-in role holds. An account holds at most 25 unrevoked keys, expired ones counted. `manage:user` lists and revokes other users' keys through the API (`/api/v1/admin/api-keys`).
 
@@ -1323,7 +1323,7 @@ The jobs table shows the schedule in plain English with the raw calendar event u
 
 1. Find the snapshot on the **Backup** page, on its PBS server's **Snapshots** tab
 2. Click **Restore**
-3. Select the target cluster and node
+3. Select the target cluster and node. From a guest's **Backups** tab the guest's own cluster and node are already chosen; with several clusters and no guest to go by, the dialog waits for a choice
 4. Optionally change the VMID
 5. Optionally choose the target storage
 6. Click **Restore**
@@ -2281,7 +2281,7 @@ To install Nexara as an app, open it in your phone's browser and choose **Add to
 
 ## UI Tips
 
-Every page has the same layout. The navigation rail on the left lists the destinations, each an icon over its name, with **Settings** and **Admin** at its foot. Beside it, the inventory tree has a panel of its own, titled **Inventory**, which a button in its header hides and a button at the left of the top bar shows again. The top bar holds the search box and command palette (**Ctrl+K**), the health indicator, **Create**, the theme toggle and the user menu, and the [Activity panel](#the-activity-panel) runs along the bottom. On a phone, the menu button at the left of the top bar opens the destinations in a drawer, with the inventory tree folded under **Inventory**.
+Every page has the same layout. The navigation rail on the left lists the destinations, each an icon over its name, with **Settings** and **Admin** at its foot. Beside it, the inventory tree has a panel of its own, titled **Inventory**, which a button in its header hides and a button at the left of the top bar shows again. Between 768 and 1023 px wide the panel starts hidden, to leave the page room, and showing it there lasts until the page reloads. The top bar holds the search box and command palette (**Ctrl+K**), the health indicator, **Create**, the theme toggle and the user menu, and the [Activity panel](#the-activity-panel) runs along the bottom. On a phone, the menu button at the left of the top bar opens the destinations in a drawer, with the inventory tree folded under **Inventory**.
 
 - **Command palette** — press **Ctrl+K** (**⌘K** on macOS) anywhere, or click **Search or jump to…**. Type at least two characters to search guests by name or VMID, nodes, storage and clusters, and, with a global `view:ups`, UPSes by name, description, model or NUT server. It also jumps to pages, to a cluster's **Ceph** tab and to its settings under **Configure**, and runs actions: create a VM or container, import a VM, open the console page, switch the theme. Right-click a guest in the results for its own actions.
 - **What's new** — after an upgrade, a "What's new" dialog summarizes the releases you've picked up since your last visit (fed by GitHub Releases, per browser). **What's new** in the user menu shows the current release again. If Nexara cannot reach GitHub there is no popup, and the menu item says so with a link to the releases.
@@ -2304,9 +2304,9 @@ Navigate to **Admin > Branding**.
 
 ### Custom Branding
 
-- **Application title** — change the title shown in the top bar and the browser tab, and on a phone at the top of the navigation drawer
-- **Logo** — upload a custom logo, shown in the square at the top of the navigation rail, and on a phone at the top of the navigation drawer
-- **Favicon** — upload a custom favicon
+- **Application title** — change the title shown in the top bar and the browser tab, and on a phone at the top of the navigation drawer; **Reset** goes back to "Nexara"
+- **Logo** — upload a custom logo, shown in the square at the top of the navigation rail, and on a phone at the top of the navigation drawer; **Use default** puts the default logo back
+- **Favicon** — upload a custom favicon; **Use default** puts the default one back
 
 ### Appearance
 

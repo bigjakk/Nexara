@@ -60,6 +60,7 @@ import { ColumnToggle } from "./ColumnToggle";
 import { BulkActionToolbar } from "./BulkActionToolbar";
 import { menuOpener } from "@/components/ui/return-focus";
 import {
+  actionVerb,
   lifecycleActions,
   managementActions,
   type ManagementAction,
@@ -396,7 +397,7 @@ function RowContextMenu({
             handleLifecycleAction(
               config.action,
               config.needsConfirm,
-              config.label,
+              actionVerb(config),
             );
           }}
         >
@@ -573,16 +574,20 @@ function buildColumns(
       cell: ({ row }) => <TypeCell row={row.original} />,
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("vmid", {
+    // A blank (a node's VMID, a stopped guest's load) is undefined, not null,
+    // for sortUndefined to keep it last both ways: as null it sorted first.
+    columnHelper.accessor((row) => row.vmid ?? undefined, {
+      id: "vmid",
       header: ({ column }) => <SortHeader column={column}>VMID</SortHeader>,
       cell: ({ getValue }) => {
         const val = getValue();
-        return val !== null ? (
+        return val !== undefined ? (
           <span className="tabular-nums text-muted-foreground">{val}</span>
         ) : (
           EMPTY
         );
       },
+      sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     ...(singleCluster
@@ -622,38 +627,51 @@ function buildColumns(
       cell: ({ getValue }) => formatBytes(getValue()),
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("cpuPercent", {
+    columnHelper.accessor((row) => live(row, row.cpuPercent) ?? undefined, {
+      id: "cpuPercent",
       header: ({ column }) => <SortHeader column={column}>CPU</SortHeader>,
-      cell: ({ row, getValue }) => (
-        <MetricMiniBar value={live(row.original, getValue())} bar={!isMobile} />
+      cell: ({ getValue }) => (
+        <MetricMiniBar value={getValue() ?? null} bar={!isMobile} />
       ),
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor("memPercent", {
+    columnHelper.accessor((row) => live(row, row.memPercent) ?? undefined, {
+      id: "memPercent",
       header: ({ column }) => <SortHeader column={column}>Memory</SortHeader>,
-      cell: ({ row, getValue }) => (
-        <MetricMiniBar value={live(row.original, getValue())} bar={!isMobile} />
-      ),
-      sortUndefined: "last",
-      enableHiding: true,
-    }) as ColumnDef<InventoryRow>,
-    columnHelper.accessor((row) => (row.netInBps ?? 0) + (row.netOutBps ?? 0), {
-      id: "network",
-      header: ({ column }) => <SortHeader column={column}>Network</SortHeader>,
-      cell: ({ row }) => (
-        <RateCell
-          inBps={row.original.netInBps}
-          outBps={row.original.netOutBps}
-          inLabel="in"
-          outLabel="out"
-        />
+      cell: ({ getValue }) => (
+        <MetricMiniBar value={getValue() ?? null} bar={!isMobile} />
       ),
       sortUndefined: "last",
       enableHiding: true,
     }) as ColumnDef<InventoryRow>,
     columnHelper.accessor(
-      (row) => (row.diskReadBps ?? 0) + (row.diskWriteBps ?? 0),
+      (row) =>
+        row.netInBps === null && row.netOutBps === null
+          ? undefined
+          : (row.netInBps ?? 0) + (row.netOutBps ?? 0),
+      {
+        id: "network",
+        header: ({ column }) => (
+          <SortHeader column={column}>Network</SortHeader>
+        ),
+        cell: ({ row }) => (
+          <RateCell
+            inBps={row.original.netInBps}
+            outBps={row.original.netOutBps}
+            inLabel="in"
+            outLabel="out"
+          />
+        ),
+        sortUndefined: "last",
+        enableHiding: true,
+      },
+    ) as ColumnDef<InventoryRow>,
+    columnHelper.accessor(
+      (row) =>
+        row.diskReadBps === null && row.diskWriteBps === null
+          ? undefined
+          : (row.diskReadBps ?? 0) + (row.diskWriteBps ?? 0),
       {
         id: "disk",
         header: ({ column }) => (

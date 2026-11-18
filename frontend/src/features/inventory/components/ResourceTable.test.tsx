@@ -148,6 +148,24 @@ describe("ResourceTable", () => {
     }
   });
 
+  // The toolbar's Shutdown is Proxmox's noun; the question and its button
+  // need the verb.
+  it("asks before a bulk shutdown in the verb's words", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <ResourceTable data={[makeRow({ key: "c1:vm:1", name: "web-01" })]} />,
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+    await user.click(screen.getByRole("button", { name: "Shutdown" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText(/^This will shut down 1 resource\./),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Shut down 1 resource" }),
+    ).toBeInTheDocument();
+  });
+
   // The same through the search, by a row leaving it while the search stays.
   it("unticks a row that leaves the search's view", async () => {
     const user = userEvent.setup();
@@ -228,6 +246,23 @@ describe("ResourceTable", () => {
     await waitFor(() => {
       expect(screen.getByText(/1 resource total/)).toBeInTheDocument();
     });
+  });
+
+  // A node's VMID is blank; as null it sorted ahead of every guest ascending.
+  it("keeps blank VMIDs last when sorting ascending", async () => {
+    const user = userEvent.setup();
+    const data = [
+      makeRow({ key: "c1:node:1", type: "node", name: "pve-01", vmid: null }),
+      makeRow({ key: "c1:vm:2", name: "linux02", vmid: 102 }),
+      makeRow({ key: "c1:vm:1", name: "linux01", vmid: 101 }),
+    ];
+    renderWithProviders(<ResourceTable data={data} />);
+    await user.click(screen.getByRole("button", { name: /VMID/ }));
+    const names = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => (/linux0\d|pve-01/.exec(r.textContent) ?? [""])[0]);
+    expect(names).toEqual(["linux01", "linux02", "pve-01"]);
   });
 
   it("sorts by name column", async () => {

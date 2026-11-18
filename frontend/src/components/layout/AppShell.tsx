@@ -20,6 +20,14 @@ import { apiPath } from "@/lib/api-path";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -34,6 +42,7 @@ import { useLoadBranding } from "@/hooks/useLoadBranding";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useBrandingStore } from "@/stores/branding-store";
 import { useSidebarStore } from "@/stores/sidebar-store";
+import { useTreeVisibility } from "@/hooks/useTreeVisibility";
 import { useChangelogStore } from "@/stores/changelog-store";
 import {
   extractBaseVersion,
@@ -88,24 +97,21 @@ function useStorageTreeOnStorageRoutes() {
 // the shell and the routed page do not re-render with every tree change.
 
 function DesktopTree() {
-  const treeVisible = useSidebarStore((s) => s.treeVisible);
-  return treeVisible ? <TreePanel /> : null;
+  const { visible } = useTreeVisibility();
+  return visible ? <TreePanel /> : null;
 }
 
 /** Brings the tree back; the panel's own header holds the button that hides it. */
 function ShowTreeButton() {
-  const treeVisible = useSidebarStore((s) => s.treeVisible);
-  const setTreeVisible = useSidebarStore((s) => s.setTreeVisible);
-  if (treeVisible) return null;
+  const { visible, show } = useTreeVisibility();
+  if (visible) return null;
   return (
     <Button
       variant="ghost"
       size="icon"
       className="h-8 w-8 shrink-0"
       aria-label="Show inventory tree"
-      onClick={() => {
-        setTreeVisible(true);
-      }}
+      onClick={show}
     >
       <PanelLeftOpen />
     </Button>
@@ -146,6 +152,7 @@ export function AppShell() {
     [],
   );
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [logoutAllOpen, setLogoutAllOpen] = useState(false);
   const changelogQuery = useChangelog();
 
   useEffect(() => {
@@ -326,7 +333,11 @@ export function AppShell() {
                   <LogOut className="mr-2 h-4 w-4" />
                   {t("signOut", { ns: "common" })}
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogoutAll}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    setLogoutAllOpen(true);
+                  }}
+                >
                   <LogOutIcon className="mr-2 h-4 w-4" />
                   {t("signOutAllDevices", { ns: "common" })}
                 </DropdownMenuItem>
@@ -374,6 +385,38 @@ export function AppShell() {
         onOpenChange={setAboutOpen}
         version={versionInfo?.version}
       />
+      {/* Ends every session of the account at once, other people's devices
+          included where they share it: asked first, as a shutdown is. */}
+      <Dialog open={logoutAllOpen} onOpenChange={setLogoutAllOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Sign out all devices?</DialogTitle>
+            <DialogDescription>
+              Every session of your account ends, in this browser and on every
+              other device. Each one has to sign in again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLogoutAllOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setLogoutAllOpen(false);
+                handleLogoutAll();
+              }}
+            >
+              Sign out all devices
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

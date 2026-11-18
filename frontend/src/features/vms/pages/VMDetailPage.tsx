@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { VMGuestToolsCard } from "@/features/guest-tools/components/VMGuestToolsCard";
 import { VMGuestToolsSummary } from "@/features/guest-tools/components/VMGuestToolsSummary";
-import { useParams, useSearchParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, Link, Navigate } from "react-router-dom";
 import {
   Monitor,
   Terminal,
@@ -21,6 +21,7 @@ import {
   PropertyRow,
 } from "@/components/page/Panel";
 import { Stat, StatStrip } from "@/components/page/StatStrip";
+import { ApiClientError } from "@/lib/api-client";
 import { classifyOS } from "@/lib/os-classify";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -171,6 +172,15 @@ export function VMDetailPage() {
         <Skeleton className="h-48 w-full" />
       </div>
     );
+  }
+
+  // A destroy run from this page ends with the guest gone, and the collector
+  // can drop its row before the dialog hears the task finish: the branch below
+  // would then unmount the dialog, and its move back to the inventory with it.
+  // Gone is a 404 or nothing to show; any other failure keeps the error page.
+  const gone = !vm || (error instanceof ApiClientError && error.status === 404);
+  if (gone && destroyOpen) {
+    return <Navigate to="/inventory" replace />;
   }
 
   if (error || !vm) {

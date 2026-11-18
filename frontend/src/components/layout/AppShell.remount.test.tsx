@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, useParams } from "react-router-dom";
 
@@ -95,5 +95,24 @@ describe("the app shell, when the route under it changes", () => {
     });
 
     expect(pageState()).toBe("cluster-a|1");
+  });
+});
+
+describe("AppShell — Sign out all devices", () => {
+  // It ended every session of the account at once, the moment it was chosen.
+  it("asks before ending every session", async () => {
+    const user = userEvent.setup();
+    renderShell("/clusters/c1");
+    await user.click(await screen.findByRole("button", { name: /User$/ }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Sign out all devices" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Sign out all devices?",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.queryByRole("dialog", { name: "Sign out all devices?" }),
+    ).toBeNull();
   });
 });

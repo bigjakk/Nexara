@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { PanelLeftClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { clampTreeWidth, useSidebarStore } from "@/stores/sidebar-store";
+import { useTreeVisibility } from "@/hooks/useTreeVisibility";
 import { TreeView } from "./TreeView";
 
 /** The inventory tree as its own panel beside the navigation rail. */
@@ -10,7 +11,7 @@ export function TreePanel() {
   const { t } = useTranslation("navigation");
   const width = useSidebarStore((s) => s.width);
   const setWidth = useSidebarStore((s) => s.setWidth);
-  const setTreeVisible = useSidebarStore((s) => s.setTreeVisible);
+  const { hide } = useTreeVisibility();
   // The width while a drag is in flight. Kept here and stored once on release:
   // the store writes localStorage and re-renders every tree row on each change.
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -57,9 +58,7 @@ export function TreePanel() {
           size="icon"
           className="h-8 w-8"
           aria-label="Hide inventory tree"
-          onClick={() => {
-            setTreeVisible(false);
-          }}
+          onClick={hide}
         >
           <PanelLeftClose />
         </Button>

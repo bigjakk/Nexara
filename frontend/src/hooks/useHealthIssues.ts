@@ -19,8 +19,16 @@ export interface FlatIssue extends HealthIssue {
   to: string;
 }
 
-function issueLink(clusterId: string, i: HealthIssue): string {
+/**
+ * Where an issue's Open goes. A store's issue opens the cluster's Storage tab,
+ * which lists the store with its state (the store's own page is keyed by an id
+ * the issue does not carry); it opened the cluster's Overview, which does not
+ * show stores at all.
+ */
+export function issueLink(clusterId: string, i: HealthIssue): string {
   if (i.type === "ceph") return `/clusters/${clusterId}?tab=ceph`;
+  if (i.scope === "storage") return `/clusters/${clusterId}?tab=storage`;
+  if (i.type === "ha_error") return `/clusters/${clusterId}?tab=ha`;
   return `/clusters/${clusterId}`;
 }
 

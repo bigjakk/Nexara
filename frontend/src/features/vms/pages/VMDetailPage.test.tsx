@@ -222,26 +222,44 @@ vi.mock("@/features/storage/api/storage-queries", () => ({
   }),
 }));
 
-function renderPage(kind: string = "vm", vm: Partial<VMResponse> = {}) {
-  mockCurrentVM = { ...mockVM, ...vm };
-
-  return renderWithProviders(
+function pageRoutes() {
+  return (
     <Routes>
       <Route
         path="/inventory/:kind/:clusterId/:vmId"
         element={<VMDetailPage />}
       />
-    </Routes>,
-    {
-      router: { initialEntries: [`/inventory/${kind}/cluster-1/vm-uuid-1`] },
-    },
+      <Route path="/inventory" element={<p>Inventory page</p>} />
+    </Routes>
   );
+}
+
+function renderPage(kind: string = "vm", vm: Partial<VMResponse> = {}) {
+  mockCurrentVM = { ...mockVM, ...vm };
+
+  return renderWithProviders(pageRoutes(), {
+    router: { initialEntries: [`/inventory/${kind}/cluster-1/vm-uuid-1`] },
+  });
 }
 
 describe("VMDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCurrentVM = mockVM;
+  });
+
+  // The collector can drop a destroyed guest's row before the destroy dialog
+  // hears its task finish; the page then unmounted the dialog and stayed on
+  // "Resource not found" instead of going back to the inventory.
+  it("goes back to the inventory when the guest it is destroying disappears", async () => {
+    const view = renderPage("vm", { status: "stopped" });
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "More actions" })[0] as HTMLElement,
+    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Destroy" }));
+    mockCurrentVM = undefined as unknown as VMResponse;
+    view.rerender(pageRoutes());
+    expect(await screen.findByText("Inventory page")).toBeTruthy();
   });
 
   it("names the guest, its state and where it sits", () => {

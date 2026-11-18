@@ -15,19 +15,49 @@ function hasMatchMedia(): boolean {
   return typeof window.matchMedia === "function";
 }
 
-function subscribe(onStoreChange: () => void): () => void {
-  if (!hasMatchMedia()) return () => undefined;
-  const mql = window.matchMedia(MOBILE_QUERY);
-  mql.addEventListener("change", onStoreChange);
-  return () => {
-    mql.removeEventListener("change", onStoreChange);
-  };
+interface MediaSource {
+  subscribe: (onStoreChange: () => void) => () => void;
+  getSnapshot: () => boolean;
 }
 
-function getSnapshot(): boolean {
-  return hasMatchMedia() ? window.matchMedia(MOBILE_QUERY).matches : false;
+// One subscribe/getSnapshot pair per query, made once: useSyncExternalStore
+// resubscribes whenever it is handed a new subscribe function.
+const sources = new Map<string, MediaSource>();
+
+function sourceFor(query: string): MediaSource {
+  let source = sources.get(query);
+  if (source === undefined) {
+    source = {
+      subscribe: (onStoreChange) => {
+        if (!hasMatchMedia()) return () => undefined;
+        const mql = window.matchMedia(query);
+        mql.addEventListener("change", onStoreChange);
+        return () => {
+          mql.removeEventListener("change", onStoreChange);
+        };
+      },
+      getSnapshot: () =>
+        hasMatchMedia() ? window.matchMedia(query).matches : false,
+    };
+    sources.set(query, source);
+  }
+  return source;
+}
+
+/** Whether `query` matches the viewport now; false where it cannot be read. */
+export function useMediaQuery(query: string): boolean {
+  const { subscribe, getSnapshot } = sourceFor(query);
+  return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
 
 export function useIsMobile(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, () => false);
+  return useMediaQuery(MOBILE_QUERY);
+}
+
+// Desktop widths where the inventory tree beside a page leaves the page too
+// little room (at 800 px, 484 px): there the tree starts hidden.
+const NARROW_DESKTOP_QUERY = "(min-width: 768px) and (max-width: 1023px)";
+
+export function useIsNarrowDesktop(): boolean {
+  return useMediaQuery(NARROW_DESKTOP_QUERY);
 }

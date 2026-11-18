@@ -5,6 +5,11 @@ export type TreePerspective = "hosts" | "storage" | "vms";
 interface SidebarState {
   /** Whether the inventory tree is shown beside the navigation rail. */
   treeVisible: boolean;
+  /**
+   * Whether the tree is shown at a narrow desktop width, where it starts
+   * hidden whatever `treeVisible` says. Kept for this page load only.
+   */
+  treeShownNarrow: boolean;
   expandedNodes: Set<string>;
   width: number;
   perspective: TreePerspective;
@@ -22,6 +27,7 @@ interface SidebarState {
 
 interface SidebarActions {
   setTreeVisible: (visible: boolean) => void;
+  setTreeShownNarrow: (shown: boolean) => void;
   toggleNode: (key: string) => void;
   expandNode: (key: string) => void;
   setWidth: (width: number) => void;
@@ -36,7 +42,7 @@ export function clampTreeWidth(width: number): number {
   return Math.min(480, Math.max(180, width));
 }
 
-function loadPersistedState(): SidebarState {
+function loadPersistedState(): Omit<SidebarState, "treeShownNarrow"> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -95,10 +101,14 @@ function persist(state: SidebarState) {
 export const useSidebarStore = create<SidebarState & SidebarActions>()(
   (set, get) => ({
     ...loadPersistedState(),
+    treeShownNarrow: false,
     setTreeVisible: (visible: boolean) => {
       const state = { ...get(), treeVisible: visible };
       set({ treeVisible: visible });
       persist(state);
+    },
+    setTreeShownNarrow: (shown: boolean) => {
+      set({ treeShownNarrow: shown });
     },
     toggleNode: (key: string) => {
       const expanded = new Set(get().expandedNodes);

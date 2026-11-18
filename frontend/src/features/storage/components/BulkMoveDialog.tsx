@@ -11,6 +11,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -361,44 +362,54 @@ export function BulkMoveDialog({
               </div>
             )}
 
-            <Button
-              onClick={() => {
-                void handleEvacuate();
-              }}
-              disabled={
-                !targetStorage || running || (jobs.length > 0 && !running)
-              }
-              className="w-full"
-            >
-              {buildingJobs ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Resolving
-                  disks...
-                </>
-              ) : running ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
-                  Evacuating...
-                </>
-              ) : jobs.length > 0 ? (
-                "Evacuation complete"
+            <DialogFooter className="gap-2 sm:gap-0">
+              {running && !buildingJobs ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setStopping(true);
+                    stopRef.current?.abort();
+                  }}
+                  disabled={stopping}
+                >
+                  Stop
+                </Button>
               ) : (
-                "Start evacuation"
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setOpen(false);
+                  }}
+                  disabled={running}
+                >
+                  {jobs.length > 0 ? "Close" : "Cancel"}
+                </Button>
               )}
-            </Button>
-            {running && !buildingJobs && (
               <Button
-                variant="outline"
                 onClick={() => {
-                  setStopping(true);
-                  stopRef.current?.abort();
+                  void handleEvacuate();
                 }}
-                disabled={stopping}
-                className="w-full"
+                disabled={
+                  !targetStorage || running || (jobs.length > 0 && !running)
+                }
               >
-                Stop
+                {buildingJobs ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Resolving
+                    disks...
+                  </>
+                ) : running ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />{" "}
+                    Evacuating...
+                  </>
+                ) : jobs.length > 0 ? (
+                  "Evacuation complete"
+                ) : (
+                  "Start evacuation"
+                )}
               </Button>
-            )}
+            </DialogFooter>
           </>
         )}
       </DialogContent>

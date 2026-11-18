@@ -157,7 +157,7 @@ function TitleBar({
           title={t("floatingConsole.close")}
           danger
           onClick={() => {
-            setWindowMode("hidden");
+            useConsoleStore.getState().closeWindow();
           }}
         >
           <X className="h-3.5 w-3.5" />
@@ -481,7 +481,7 @@ export function FloatingConsole() {
               <button
                 className="flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-white/90 hover:bg-red-500/70 hover:text-white"
                 onClick={() => {
-                  useConsoleStore.getState().setWindowMode("hidden");
+                  useConsoleStore.getState().closeWindow();
                 }}
                 title={t("floatingConsole.close")}
               >

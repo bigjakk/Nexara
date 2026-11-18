@@ -686,12 +686,24 @@ export function CreateRollingUpdateWizard({
               >
                 Back
               </Button>
-              <Button onClick={handleCreate} disabled={createJob.isPending}>
-                {createJob.isPending && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {startImmediately ? "Create and start" : "Create job"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setOpen(false);
+                    reset();
+                  }}
+                  disabled={createJob.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleCreate} disabled={createJob.isPending}>
+                  {createJob.isPending && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
+                  {startImmediately ? "Create and start" : "Create job"}
+                </Button>
+              </div>
             </div>
           </div>
         )}

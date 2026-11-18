@@ -124,6 +124,18 @@ describe("FloatingConsole window modes", () => {
     expect(document.querySelector('[title="Restore"]')).toBeNull();
   });
 
+  // The × only hid the window: each session stayed on the Console page,
+  // "open, none connected", until closed there one by one.
+  it("ends the window's sessions when it is closed", () => {
+    const { getByTitle } = renderWithProviders(<FloatingConsole />);
+    act(() => {
+      useConsoleStore.getState().setWindowMode("floating");
+    });
+    fireEvent.click(getByTitle("Close"));
+    expect(useConsoleStore.getState().tabs).toEqual([]);
+    expect(useConsoleStore.getState().windowMode).toBe("hidden");
+  });
+
   it("tears the content down when the console is hidden", () => {
     renderWithProviders(<FloatingConsole />);
     expect(content()).not.toBeNull();

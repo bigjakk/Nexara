@@ -97,6 +97,7 @@ export function APIKeysPage() {
 
   // Create dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [showRevoked, setShowRevoked] = useState(false);
   const [keyName, setKeyName] = useState("");
   const [expiry, setExpiry] = useState<ExpiryOption>("never");
   const [createError, setCreateError] = useState("");
@@ -185,6 +186,10 @@ export function APIKeysPage() {
   const active = (keys ?? []).filter(
     (k) => getKeyStatus(k).label === "Active",
   ).length;
+  // A revoked key cannot be used or removed: it stays as a record, folded
+  // away until asked for, so the list does not fill with dead keys.
+  const revokedCount = (keys ?? []).filter((k) => k.is_revoked).length;
+  const shownKeys = (keys ?? []).filter((k) => showRevoked || !k.is_revoked);
 
   return (
     <div className="max-w-5xl space-y-5">
@@ -224,6 +229,21 @@ export function APIKeysPage() {
         flush
         title="Your API keys"
         className="outline-none"
+        actions={
+          revokedCount > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setShowRevoked((v) => !v);
+              }}
+            >
+              {showRevoked
+                ? "Hide revoked"
+                : `Show revoked (${String(revokedCount)})`}
+            </Button>
+          ) : undefined
+        }
       >
         {!keys || keys.length === 0 ? (
           <div className="flex flex-col items-center px-[18px] py-10 text-center">
@@ -259,7 +279,17 @@ export function APIKeysPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {keys.map((apiKey) => {
+              {shownKeys.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-6 text-center text-sm text-muted-foreground"
+                  >
+                    No active keys.
+                  </TableCell>
+                </TableRow>
+              )}
+              {shownKeys.map((apiKey) => {
                 const status = getKeyStatus(apiKey);
                 return (
                   <TableRow key={apiKey.id}>

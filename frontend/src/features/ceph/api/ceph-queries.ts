@@ -1,3 +1,5 @@
+import { reportsNoCeph } from "@/features/clusters/lib/ceph-absent";
+import { retryUnlessClientError } from "@/lib/query-client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
@@ -31,7 +33,13 @@ export function useCephStatus(clusterId: string) {
         apiPath`/api/v1/clusters/${clusterId}/ceph/status`,
       ),
     enabled: clusterId.length > 0,
-    refetchInterval,
+    // "This cluster has no Ceph" is Proxmox's settled answer, relayed as a
+    // 502: asking again, at once or every minute, only repeated it, and each
+    // time the browser logged a failed request on the cluster's page.
+    retry: (failureCount, error) =>
+      !reportsNoCeph(error) && retryUnlessClientError(failureCount, error),
+    refetchInterval: (query) =>
+      reportsNoCeph(query.state.error) ? false : refetchInterval,
   });
 }
 

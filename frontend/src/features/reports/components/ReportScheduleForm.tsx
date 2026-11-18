@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -273,17 +274,27 @@ export function ReportScheduleForm({
           )}
         </div>
 
-        <Button
-          onClick={handleSubmit}
-          disabled={!name || !clusterId || isPending}
-          className="w-full"
-        >
-          {isPending
-            ? "Saving..."
-            : isEditing
-              ? "Update schedule"
-              : "Create schedule"}
-        </Button>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!name || !clusterId || isPending}
+          >
+            {isPending
+              ? "Saving..."
+              : isEditing
+                ? "Update schedule"
+                : "Create schedule"}
+          </Button>
+        </DialogFooter>
       </div>
     </DialogContent>
   );

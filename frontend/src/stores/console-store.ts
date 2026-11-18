@@ -42,6 +42,12 @@ interface ConsoleActions {
   /** Show the floating console — if hidden opens as floating, if minimized restores. */
   showConsole: () => void;
   /**
+   * The window's ×: its sessions end with it. Hiding it alone left each one on
+   * the Console page as "open, none connected"; Minimize is the button that
+   * keeps them.
+   */
+  closeWindow: () => void;
+  /**
    * The signed-in session ended: drop every tab and hide the window. The tabs
    * name the guests and nodes the previous user opened (and, persisted, would
    * come back on the next sign-in, the active one dialling at once), so they
@@ -295,6 +301,10 @@ function consoleStore(
       if (state.windowMode === "hidden" || state.windowMode === "minimized") {
         set({ windowMode: "floating" });
       }
+    },
+
+    closeWindow: () => {
+      set({ tabs: [], activeTabId: null, windowMode: "hidden" });
     },
 
     resetSession: () => {

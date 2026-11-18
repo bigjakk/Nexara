@@ -135,3 +135,19 @@ describe("APIKeysPage — focus after its dialogs", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("APIKeysPage — revoked keys", () => {
+  // A revoked key cannot be removed, so the list only ever grew.
+  it("folds them away until asked for", async () => {
+    stubKeys([
+      apiKey("key1", "deploy01"),
+      { ...apiKey("key2", "deploy02"), is_revoked: true },
+    ]);
+    const user = userEvent.setup();
+    renderWithProviders(<APIKeysPage />);
+    expect(await screen.findByText("deploy01")).toBeInTheDocument();
+    expect(screen.queryByText("deploy02")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show revoked (1)" }));
+    expect(screen.getByText("deploy02")).toBeInTheDocument();
+  });
+});
