@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { CreateResourceDropdownItems } from "./create-resource-actions";
+import { useVisibleCreateActions } from "./create-actions";
 
 // Top-bar "Create" dropdown. The actual dialogs + multi-cluster picker live in
 // the globally-mounted CreateResourceDialogs; the items come from the shared
@@ -14,6 +15,9 @@ import { CreateResourceDropdownItems } from "./create-resource-actions";
 export function CreateResourceMenu() {
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
+  const actions = useVisibleCreateActions();
+  // A role that may create nothing gets no Create button, not an empty menu.
+  if (actions.length === 0) return null;
 
   return (
     <DropdownMenu>

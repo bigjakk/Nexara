@@ -166,7 +166,11 @@ function FolderBranch({
   return (
     <div>
       <ContextMenu modal={false}>
-        <ContextMenuTrigger asChild>
+        {/* Every item on it takes manage:vm_folder. */}
+        <ContextMenuTrigger
+          asChild
+          disabled={!hasPermission("manage", "vm_folder")}
+        >
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -404,6 +408,7 @@ function VMClusterBranch({
   const navigate = useNavigate();
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
+  const { hasPermission } = usePermissions();
   const clusterKey = `vm-cluster:${cluster.id}`;
   const isExpanded = expandedNodes.has(clusterKey);
   const isActive = location.pathname === `/clusters/${cluster.id}`;
@@ -496,7 +501,11 @@ function VMClusterBranch({
 
   return (
     <ContextMenu modal={false}>
-      <ContextMenuTrigger asChild>
+      {/* New folder, its one item, takes manage:vm_folder. */}
+      <ContextMenuTrigger
+        asChild
+        disabled={!hasPermission("manage", "vm_folder")}
+      >
         <div>
           <div
             className={cn(

@@ -37,7 +37,7 @@ export function DeleteClusterDialog({
   const [revokeCredentials, setRevokeCredentials] = useState(false);
   const deleteMutation = useDeleteCluster();
   const settle = useSaveOutcome();
-  const { hasPermission } = usePermissions();
+  const { hasGlobalPermission } = usePermissions();
 
   // Two conditions, both required.
   //
@@ -52,7 +52,7 @@ export function DeleteClusterDialog({
   // delete into a failed one would be worse than not offering it.
   const canRevoke =
     cluster.credential_source === "bootstrap" &&
-    hasPermission("manage", "cluster");
+    hasGlobalPermission("manage", "cluster");
 
   function handleDelete() {
     settle(

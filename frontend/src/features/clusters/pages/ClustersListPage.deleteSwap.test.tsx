@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { apiClient } from "@/lib/api-client";
 import { deferred } from "@/test/fake-server";
+import { grantPermissions } from "@/test/permissions";
 import {
   DENIED,
   PATIENCE_MS,
@@ -31,15 +32,6 @@ vi.mock("@/lib/api-client", async () =>
 );
 
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
-
-// The revoke option is gated on GLOBAL manage:cluster, matching the server; the
-// dialog is the only component of the page that asks.
-vi.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    hasPermission: (action: string, resource: string) =>
-      action === "manage" && resource === "cluster",
-  }),
-}));
 
 // The whole page renders cold in the first test of this file, which is given the
 // kit's patience for it (test/save-outcome-kit.tsx says why).
@@ -82,6 +74,8 @@ type UserEvent = ReturnType<typeof userEvent.setup>;
 beforeEach(() => {
   vi.resetAllMocks();
   signIn();
+  // The revoke option takes manage:cluster install-wide, as the server checks.
+  grantPermissions("manage:cluster");
   mockedList.mockImplementation((path: string) =>
     Promise.resolve(path === "/api/v1/clusters" ? CLUSTERS : []),
   );

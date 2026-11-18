@@ -477,8 +477,10 @@ export function SearchBar() {
   }
 
   const actions = useMemo<ActionEntry[]>(() => {
-    const list: ActionEntry[] = [
-      {
+    // Each create takes what its route declares, as in the Create menu.
+    const list: ActionEntry[] = [];
+    if (can("manage:vm")) {
+      list.push({
         id: "create-vm",
         label: "Create virtual machine…",
         description: "New QEMU guest",
@@ -487,8 +489,10 @@ export function SearchBar() {
         perform: () => {
           startCreate("vm");
         },
-      },
-      {
+      });
+    }
+    if (can("manage:container")) {
+      list.push({
         id: "create-ct",
         label: "Create container…",
         description: "New LXC guest",
@@ -497,8 +501,8 @@ export function SearchBar() {
         perform: () => {
           startCreate("ct");
         },
-      },
-    ];
+      });
+    }
     if (can("manage:vm_import")) {
       list.push({
         id: "import-vm",

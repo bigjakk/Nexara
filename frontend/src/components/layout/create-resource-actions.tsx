@@ -1,53 +1,7 @@
-import { Monitor, Container, Upload } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextMenuItem } from "@/components/ui/context-menu";
-import { usePermissions } from "@/hooks/usePermissions";
-import {
-  useCreateResourceStore,
-  type CreateKind,
-} from "@/stores/create-resource-store";
-
-interface CreateActionDef {
-  kind: CreateKind;
-  label: string; // label in the top "Create" dropdown
-  contextLabel: string; // label in right-click context menus
-  Icon: React.ComponentType<{ className?: string }>;
-  permission?: { action: string; resource: string };
-}
-
-// Single source of truth for the create/import entry points. Add a new
-// create-type here and it appears in every menu (Create dropdown, tree and
-// inventory context menus, command palette) with consistent gating.
-const createActions: CreateActionDef[] = [
-  {
-    kind: "vm",
-    label: "Virtual machine",
-    contextLabel: "Create VM",
-    Icon: Monitor,
-  },
-  {
-    kind: "ct",
-    label: "Container",
-    contextLabel: "Create CT",
-    Icon: Container,
-  },
-  {
-    kind: "import",
-    label: "Import VM",
-    contextLabel: "Import VM",
-    Icon: Upload,
-    permission: { action: "manage", resource: "vm_import" },
-  },
-];
-
-function useVisibleCreateActions(): CreateActionDef[] {
-  const { hasPermission } = usePermissions();
-  return createActions.filter(
-    (a) =>
-      !a.permission ||
-      hasPermission(a.permission.action, a.permission.resource),
-  );
-}
+import { useCreateResourceStore } from "@/stores/create-resource-store";
+import { useVisibleCreateActions } from "./create-actions";
 
 // Items for the top "Create" dropdown. clusterId is optional — when omitted the
 // globally-mounted CreateResourceDialogs resolves the cluster.

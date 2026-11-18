@@ -66,7 +66,7 @@ Layouts and presets are stored per user on the server, so they follow you betwee
 
 ### Adding a Cluster
 
-1. Click **Add cluster**: with no cluster yet, the one on the Dashboard; after that, the one in the Dashboard's header, or the **+** beside **Datacenter** in the inventory tree's **Hosts** view
+1. Click **Add cluster**: with no cluster yet, the one on the Dashboard; after that, the one in the Dashboard's header, or the **+** beside **Datacenter** in the inventory tree's **Hosts** view. It is offered only to a holder of `manage:cluster` across the whole install, which the server requires
 2. Fill in the **Cluster name** and the **API URL** (e.g., `https://pve.example.com:8006`) and click **Connect**. Nexara probes the endpoint's certificate:
    - a CA-signed certificate is confirmed as **Trusted certificate** and you continue
    - a self-signed certificate shows its **SHA-256 fingerprint**; verify it against the Proxmox host, then tick *I have verified this fingerprint and trust this certificate*
@@ -88,7 +88,7 @@ The collector starts syncing inventory (nodes, VMs, containers, storage) and met
 
 ### Editing a Cluster
 
-Open the cluster's **⋯** menu in the inventory tree's **Hosts** view, or right-click it there, and choose **Edit** (or click **Edit** on the cluster's page) to update the name, API URL, or token.
+Open the cluster's **⋯** menu in the inventory tree's **Hosts** view, or right-click it there, and choose **Edit** (or click **Edit** on the cluster's page) to update the name, API URL, or token. **Edit** needs `manage:cluster` and **Delete** `delete:cluster`, and each is offered only with its permission.
 
 **Changing the API URL requires re-entering the token secret.** A stored credential is only ever sent to the address it was saved for — leaving the secret blank while moving the address would deliver it to whatever the new URL points at. The refusal is audited.
 
@@ -96,7 +96,7 @@ Changing the address also **clears the cluster's stored SSH credential and every
 
 ### Removing a Cluster
 
-From the same **⋯** menu choose **Delete**, or **Delete cluster** under the cluster page's **More actions** (**⋯**), and type the cluster's name. It is refused while a rolling update runs on the cluster. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster, unless you tick **Also delete the Proxmox user and API token Nexara created for this cluster**. Everything else scoped to the cluster goes with it and does not come back if you add it again: DRS rules and settings, alert rules scoped to it with their alerts, maintenance windows, scheduled tasks, report schedules and runs, rolling-update jobs, CVE scans and schedules, migration jobs, folders, guest tools and virtio-win settings, and favorites. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters. Role assignments scoped to the removed cluster are removed with it, so a user who held one loses it and it leaves their role list (a global role is not affected). The removal itself is recorded among them, with how many role assignments went with the cluster. A cluster you add again is a new cluster, and its entries do not join the old ones.
+From the same **⋯** menu choose **Delete**, or **Delete cluster** under the cluster page's **More actions** (**⋯**), and type the cluster's name. It is refused while a rolling update runs on the cluster. This removes the cluster from Nexara but does **not** affect the actual Proxmox cluster, unless you tick **Also delete the Proxmox user and API token Nexara created for this cluster**, which is offered only with `manage:cluster` across the whole install. Everything else scoped to the cluster goes with it and does not come back if you add it again: DRS rules and settings, alert rules scoped to it with their alerts, maintenance windows, scheduled tasks, report schedules and runs, rolling-update jobs, CVE scans and schedules, migration jobs, folders, guest tools and virtio-win settings, and favorites. The audit entries recorded against it are kept, labelled with the cluster's name followed by `(removed)`. Earlier releases deleted them with the cluster. Like entries that belong to no cluster, they are shown only to someone who can view the audit log across all clusters. Role assignments scoped to the removed cluster are removed with it, so a user who held one loses it and it leaves their role list (a global role is not affected). The removal itself is recorded among them, with how many role assignments went with the cluster. A cluster you add again is a new cluster, and its entries do not join the old ones.
 
 Removing a cluster leaves its audit entries untouched, so it takes no longer for having many.
 
@@ -185,7 +185,7 @@ Open **Topology** in the navigation rail for an interactive map of your infrastr
 
 ### Creating a Guest
 
-Click **Create** in the top bar and choose **Virtual machine** or **Container**, or right-click a cluster in the tree's **Hosts** view for **Create VM** or **Create CT**. They need `manage:vm` and `manage:container`. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
+Click **Create** in the top bar and choose **Virtual machine** or **Container**, or right-click a cluster in the tree's **Hosts** view for **Create VM** or **Create CT**. They need `manage:vm` and `manage:container`, and each is offered, there and in the command palette, only to a role that holds it; a role allowed no create gets no **Create** button. **Import VM**, in the same menu, is under [VM Imports](#vm-imports).
 
 - The VM wizard's steps are General, OS, System, Disks, CPU, Memory, Network, Cloud-init and Review, which also has **Start after creation** and **Start on boot**.
 - The container wizard's are General, Template, Root disk, CPU and memory, Network, DNS and options, and Review. **Unprivileged container** is on by default.
@@ -260,7 +260,7 @@ This needs `manage:migration` on the source cluster and, across clusters, on the
 
 ## Folders and Favorites
 
-**Folders** live in the inventory tree's **Folders** view, and belong to Nexara, not Proxmox. Right-click a cluster for **New folder**, and a folder for **New subfolder**, **Rename** or **Delete** (its guests fall back to **Discovered**, and its subfolders are deleted). Move a guest by dragging it or with **Move to folder…**. A name is 1 to 128 characters, unique at its level, and this needs `view:vm_folder` and `manage:vm_folder`.
+**Folders** live in the inventory tree's **Folders** view, and belong to Nexara, not Proxmox. Right-click a cluster for **New folder**, and a folder for **New subfolder**, **Rename** or **Delete** (its guests fall back to **Discovered**, and its subfolders are deleted); these menus open only with `manage:vm_folder`. Move a guest by dragging it or with **Move to folder…**. A name is 1 to 128 characters, unique at its level, and this needs `view:vm_folder` and `manage:vm_folder`.
 
 A folder's page has **Overview** (its totals, subfolders and guests), **History** (see [A Folder's History](#a-folders-history)) and **Alerts** (`view:alert`).
 
@@ -965,7 +965,7 @@ state of its nodes, and opens to a row per node, each leading to that node's sto
 ### Adding Storage
 
 **Add storage** on the Storage page or a cluster's Storage tab, or right-click a
-cluster in the Storage view (`manage:storage`). Give it an **ID** (letters, digits, `.`, `-` and `_`), a **Type**,
+cluster in the Storage view (`manage:storage`; that menu opens only with it). Give it an **ID** (letters, digits, `.`, `-` and `_`), a **Type**,
 that type's fields, its **Content types**, optionally the **Nodes** it is on, and
 **Enable** it. The types are Directory, BTRFS, NFS, CIFS/SMB, GlusterFS, LVM, LVM-Thin,
 ZFS, iSCSI, iSCSI Direct, RBD (Ceph), CephFS and Proxmox Backup Server.

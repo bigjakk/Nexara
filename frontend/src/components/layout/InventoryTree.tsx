@@ -62,6 +62,7 @@ import {
   FavoriteDropdownItem,
 } from "@/features/favorites/components/FavoriteMenuItem";
 import { CreateResourceContextItems } from "./create-resource-actions";
+import { useVisibleCreateActions } from "./create-actions";
 import {
   TreeChevron,
   TreeGuestRow,
@@ -267,6 +268,11 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { expandedNodes, toggleNode, expandNode } = useSidebarStore();
+  // As on the cluster's page: Edit takes manage:cluster, Delete delete:cluster.
+  const { canManage, canDelete } = useAuth();
+  const canEditCluster = canManage("cluster");
+  const canDeleteCluster = canDelete("cluster");
+  const canCreate = useVisibleCreateActions().length > 0;
   const clusterKey = `cluster:${cluster.id}`;
   const storedExpanded = expandedNodes.has(clusterKey);
   const { t } = useTranslation("common");
@@ -410,23 +416,27 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
                       ref: "",
                     }}
                   />
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setEditOpen(true);
-                    }}
-                  >
-                    <Pencil className="mr-2 h-3.5 w-3.5" />
-                    Edit
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setDeleteOpen(true);
-                    }}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <Trash2 className="mr-2 h-3.5 w-3.5" />
-                    Delete
-                  </DropdownMenuItem>
+                  {canEditCluster && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setEditOpen(true);
+                      }}
+                    >
+                      <Pencil className="mr-2 h-3.5 w-3.5" />
+                      Edit
+                    </DropdownMenuItem>
+                  )}
+                  {canDeleteCluster && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setDeleteOpen(true);
+                      }}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -451,7 +461,7 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
         </ContextMenuTrigger>
         <ContextMenuContent className="w-48">
           <CreateResourceContextItems clusterId={cluster.id} />
-          <ContextMenuSeparator />
+          {canCreate && <ContextMenuSeparator />}
           <FavoriteContextItem
             target={{
               resource_type: "cluster",
@@ -459,24 +469,28 @@ function ClusterBranch({ cluster, filter }: ClusterBranchProps) {
               ref: "",
             }}
           />
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            onClick={() => {
-              setEditOpen(true);
-            }}
-          >
-            <Pencil className="mr-2 h-3.5 w-3.5" />
-            Edit
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              setDeleteOpen(true);
-            }}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 className="mr-2 h-3.5 w-3.5" />
-            Delete
-          </ContextMenuItem>
+          {(canEditCluster || canDeleteCluster) && <ContextMenuSeparator />}
+          {canEditCluster && (
+            <ContextMenuItem
+              onClick={() => {
+                setEditOpen(true);
+              }}
+            >
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Edit
+            </ContextMenuItem>
+          )}
+          {canDeleteCluster && (
+            <ContextMenuItem
+              onClick={() => {
+                setDeleteOpen(true);
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              Delete
+            </ContextMenuItem>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 

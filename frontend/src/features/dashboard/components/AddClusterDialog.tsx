@@ -24,6 +24,7 @@ import {
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import type {
   BootstrapSummary,
   ConnectivityResult,
@@ -106,6 +107,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
   const createCluster = useCreateCluster();
   const settle = useSaveOutcome(open);
   const { t } = useTranslation("clusters");
+  // Adding a cluster takes manage:cluster install-wide, as the route checks.
+  const canAdd = usePermissions().hasGlobalPermission("manage", "cluster");
 
   const secure = isSecureContext();
 
@@ -297,6 +300,8 @@ export function AddClusterDialog({ trigger }: AddClusterDialogProps) {
     mode === "bootstrap"
       ? bootstrapUser !== "" && bootstrapPassword !== "" && !bootstrapBlocked
       : tokenId !== "" && tokenSecret !== "";
+
+  if (!canAdd) return null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

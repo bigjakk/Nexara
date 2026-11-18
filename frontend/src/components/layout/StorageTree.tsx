@@ -18,6 +18,7 @@ import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { useClusterStorage } from "@/features/storage/api/storage-queries";
 import { AddStorageDialog } from "@/features/storage/components/AddStorageDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarStore } from "@/stores/sidebar-store";
 import type { ClusterResponse, StorageResponse } from "@/types/api";
 import {
@@ -160,6 +161,8 @@ function StorageClusterBranch({ cluster, filter }: StorageClusterBranchProps) {
   const clusterKey = `storage-cluster:${cluster.id}`;
   const isExpanded = expandedNodes.has(clusterKey);
   const [addStorageOpen, setAddStorageOpen] = useState(false);
+  // Add storage, the menu's one item, takes manage:storage.
+  const canAddStorage = usePermissions().hasPermission("manage", "storage");
 
   const { data: pools } = useClusterStorage(isExpanded ? cluster.id : "");
   const { data: nodes } = useClusterNodes(isExpanded ? cluster.id : "");
@@ -253,7 +256,7 @@ function StorageClusterBranch({ cluster, filter }: StorageClusterBranchProps) {
   return (
     <div>
       <ContextMenu modal={false}>
-        <ContextMenuTrigger asChild>
+        <ContextMenuTrigger asChild disabled={!canAddStorage}>
           <div
             className={cn(
               treeRowClass({ active: isClusterActive }),

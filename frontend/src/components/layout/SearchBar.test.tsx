@@ -5,6 +5,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
+import { grantPermissions } from "@/test/permissions";
 import { SearchBar } from "./SearchBar";
 
 vi.mock("@/lib/api-client", async () => (await import("@/test/mocks")).apiClientMock());
@@ -49,6 +50,22 @@ describe("SearchBar", () => {
     await user.type(screen.getByRole("combobox"), "power");
     expect(await screen.findByText(/No results/i)).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /Power/ })).not.toBeInTheDocument();
+  });
+
+  // Each create takes what its route declares; the palette offered a Viewer both.
+  it.each([
+    [["manage:vm"], /Create virtual machine/, /Create container/],
+    [["manage:container"], /Create container/, /Create virtual machine/],
+  ])("with %j offers only the create it allows", async (permissions, offered, refused) => {
+    grantPermissions(...permissions);
+    vi.mocked(apiClient.list).mockResolvedValue([] as never);
+    const user = setupUser();
+    renderWithProviders(<SearchBar />);
+
+    await user.click(screen.getByRole("button", { name: /Search or jump to/ }));
+    await user.type(screen.getByRole("combobox"), "create");
+    expect(await screen.findByRole("option", { name: offered })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: refused })).not.toBeInTheDocument();
   });
 
   // A running VM whose vCPUs are halted reads as its halted state here too,

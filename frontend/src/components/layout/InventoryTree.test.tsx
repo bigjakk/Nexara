@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
 import { makeNode, makeVM } from "@/test/cluster.fixtures";
 import type { ClusterResponse } from "@/types/api";
+import { grantPermissions } from "@/test/permissions";
 import { InventoryTree } from "./InventoryTree";
 
 function cluster(id: string, name: string): ClusterResponse {
@@ -46,6 +47,7 @@ describe("InventoryTree — focus after deleting a cluster", () => {
         ),
     });
     api = stubApi(reads);
+    grantPermissions("view:cluster", "delete:cluster");
     const user = userEvent.setup();
     renderWithProviders(<InventoryTree />);
     await user.click(
@@ -74,6 +76,37 @@ describe("InventoryTree — focus after deleting a cluster", () => {
     });
   });
 });
+
+// Edit takes manage:cluster and Delete delete:cluster, on the row's ⋯ menu and
+// on its right-click menu alike; a Viewer got both, each answering 403.
+it.each([
+  [["view:cluster", "manage:cluster", "delete:cluster", "manage:vm"], true],
+  [["view:cluster"], false],
+])(
+  "with %j offers a cluster's Edit and Delete: %s",
+  async (permissions, offered) => {
+    grantPermissions(...permissions);
+    api = stubApi({ "/api/v1/clusters": listOf([cluster("c1", "cluster01")]) });
+    const user = userEvent.setup();
+    renderWithProviders(<InventoryTree />);
+    const actions = await screen.findByRole("button", {
+      name: "Actions for cluster01",
+    });
+    const items = () =>
+      ["Edit", "Delete"].map(
+        (name) => screen.queryByRole("menuitem", { name }) !== null,
+      );
+    await user.click(actions);
+    expect(items()).toEqual([offered, offered]);
+    await user.keyboard("{Escape}");
+    fireEvent.contextMenu(actions);
+    expect(items()).toEqual([offered, offered]);
+    // A separator under Create VM, and one over Edit; a Viewer has neither.
+    expect(
+      within(screen.getByRole("menu")).queryAllByRole("separator"),
+    ).toHaveLength(offered ? 2 : 0);
+  },
+);
 
 describe("InventoryTree — heading", () => {
   it("links the Datacenter heading to the Clusters page", async () => {

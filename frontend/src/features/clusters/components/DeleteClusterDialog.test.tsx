@@ -3,6 +3,8 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { deferred } from "@/test/fake-server";
+import { useAuthStore } from "@/stores/auth-store";
+import { grantPermissions } from "@/test/permissions";
 import { DeleteClusterDialog } from "./DeleteClusterDialog";
 import type { ClusterResponse } from "@/types/api";
 
@@ -16,17 +18,8 @@ vi.mock("@/lib/api-client", async () =>
   }),
 );
 
-// The revoke option is gated on GLOBAL manage:cluster, matching the server.
-let granted: string[] = [];
-vi.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    hasPermission: (action: string, resource: string) =>
-      granted.includes(`${action}:${resource}`),
-  }),
-}));
-
 beforeEach(() => {
-  granted = ["manage:cluster", "delete:cluster"];
+  grantPermissions("manage:cluster", "delete:cluster");
   deleteMock.mockReset();
   deleteMock.mockResolvedValue(undefined);
 });
@@ -84,18 +77,25 @@ describe("DeleteClusterDialog", () => {
   // The server requires global manage:cluster for revocation, while the delete
   // itself needs only delete:cluster — which can be scoped to one cluster.
   // Showing the box to someone the server will 403 turns a working delete into
-  // a failed one.
-  it("hides revocation from a caller who only holds delete:cluster", () => {
-    granted = ["delete:cluster"];
-    renderWithProviders(
-      <DeleteClusterDialog
-        cluster={cluster({ credential_source: "bootstrap" })}
-        open
-        onOpenChange={() => {}}
-      />,
-    );
-    expect(screen.queryByLabelText(REVOKE)).not.toBeInTheDocument();
-  });
+  // a failed one. The revoke takes manage:cluster install-wide, as the server
+  // checks; a grant on one cluster is not enough.
+  it.each([
+    [["delete:cluster"], ["delete:cluster"]],
+    [["manage:cluster", "delete:cluster"], ["delete:cluster"]],
+  ])(
+    "hides revocation from a caller with %j, install-wide %j",
+    (permissions, globalPermissions) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      renderWithProviders(
+        <DeleteClusterDialog
+          cluster={cluster({ credential_source: "bootstrap" })}
+          open
+          onOpenChange={() => {}}
+        />,
+      );
+      expect(screen.queryByLabelText(REVOKE)).not.toBeInTheDocument();
+    },
+  );
 
   // Only the name exactly: a prefix of it, or the name in another case, is
   // not it. The server would refuse either (ClusterHandler.Delete); the

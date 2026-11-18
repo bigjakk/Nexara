@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { renderWithProviders } from "@/test/test-utils";
 import { createAppQueryClient } from "@/test/app-query-client";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
+import { grantPermissions } from "@/test/permissions";
 import { AddClusterDialog } from "./AddClusterDialog";
 import type { ApiError } from "@/types/api";
 
@@ -38,6 +40,7 @@ async function openToCredentialStep(user: ReturnType<typeof userEvent.setup>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  grantPermissions("manage:cluster");
   Object.defineProperty(window, "isSecureContext", {
     value: true,
     configurable: true,
@@ -51,6 +54,22 @@ beforeEach(() => {
 });
 
 describe("AddClusterDialog", () => {
+  // Adding a cluster takes manage:cluster install-wide, as the route checks; a
+  // Viewer, or a grant on one cluster, got a form the server refused.
+  it.each([
+    [["manage:cluster"], ["manage:cluster"], true],
+    [["manage:cluster"], [], false],
+  ])(
+    "with %j, install-wide %j, offers Add cluster: %s",
+    (permissions, globalPermissions, offered) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      renderWithProviders(<AddClusterDialog />);
+      expect(
+        screen.queryByRole("button", { name: /add cluster/i }) !== null,
+      ).toBe(offered);
+    },
+  );
+
   it("defaults to letting Nexara create the token, and hides the paste fields", async () => {
     const user = userEvent.setup();
     renderWithProviders(<AddClusterDialog />);
