@@ -80,8 +80,11 @@ function importName(job: VMImportJob): string {
 export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   const { data: jobs, isLoading } = useImportJobs(clusterId);
   const cancelMutation = useCancelImport();
+  const { canManage, canDelete } = usePermissions();
   // Cancelling an import takes manage:vm_import; the page itself only view.
-  const canCancel = usePermissions().canManage("vm_import");
+  const canCancel = canManage("vm_import");
+  // Deleting its VM as well takes delete:vm, as the VM's own delete does.
+  const canDeleteVm = canDelete("vm");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<VMImportJob | null>(null);
   const [deleteVm, setDeleteVm] = useState(false);
@@ -117,7 +120,7 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   function confirmCancel() {
     if (!cancelTarget) return;
     cancelMutation.mutate(
-      { clusterId, id: cancelTarget.id, deleteVm },
+      { clusterId, id: cancelTarget.id, deleteVm: canDeleteVm && deleteVm },
       {
         onSettled: () => {
           setCancelTarget(null);
@@ -202,23 +205,26 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
               .
             </DialogDescription>
           </DialogHeader>
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox
-              checked={deleteVm}
-              onCheckedChange={(v) => {
-                setDeleteVm(v === true);
-              }}
-            />
-            <span>
-              Also delete the partially created VM
-              {cancelTarget?.target_vmid
-                ? ` (VMID ${String(cancelTarget.target_vmid)})`
-                : ""}
-              <span className="block text-xs text-muted-foreground">
-                Leave unchecked to keep the disks created so far for inspection.
+          {canDeleteVm && (
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox
+                checked={deleteVm}
+                onCheckedChange={(v) => {
+                  setDeleteVm(v === true);
+                }}
+              />
+              <span>
+                Also delete the partially created VM
+                {cancelTarget?.target_vmid
+                  ? ` (VMID ${String(cancelTarget.target_vmid)})`
+                  : ""}
+                <span className="block text-xs text-muted-foreground">
+                  Leave unchecked to keep the disks created so far for
+                  inspection.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
           <DialogFooter>
             <Button
               type="button"

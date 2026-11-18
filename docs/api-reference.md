@@ -1342,7 +1342,7 @@ Import VMs from ESXi/vCenter sources or OVA/OVF appliances. Reads require `view:
 | GET | `/clusters/:id/vm-imports` | List import jobs |
 | POST | `/clusters/:id/vm-imports` | Start an import |
 | GET | `/clusters/:id/vm-imports/:id` | Get import job status |
-| POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM) |
+| POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM, which also **requires `delete:vm`**) |
 
 ### Windows Guest Tools
 

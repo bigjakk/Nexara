@@ -1249,7 +1249,7 @@ Proxmox-side defaults that trip up manual imports are handled automatically: UEF
 
 ### Import History
 
-The history table shows **Name**, **Target**, **Source**, **Status** (pending / running / completed / failed / cancelled), and **Created**. Cancelling a running import asks whether to **Also delete the partially created VM**.
+The history table shows **Name**, **Target**, **Source**, **Status** (pending / running / completed / failed / cancelled), and **Created**. Cancelling a running import asks whether to **Also delete the partially created VM**; that option destroys the guest, so it is offered only to a role that also holds `delete:vm`.
 
 ### Permissions
 

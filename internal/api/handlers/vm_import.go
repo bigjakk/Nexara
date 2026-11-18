@@ -687,6 +687,14 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx, p *apischema.Params) error
 	if err != nil {
 		return err
 	}
+	// delete_vm destroys the guest, as its delete route does, so it takes delete:vm too:
+	// checked before the job is read (a 403, not a 404) or Proxmox is asked anything.
+	deleteVM := p.Bool("delete_vm")
+	if deleteVM {
+		if err := requireGuestActionPerm(c, "delete", "vm", clusterID, "Deleting the import's VM"); err != nil {
+			return err
+		}
+	}
 	job, err := h.getJobForCluster(c, p, clusterID)
 	if err != nil {
 		return err
@@ -694,7 +702,6 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx, p *apischema.Params) error
 	if job.Status != "pending" && job.Status != "running" {
 		return fiber.NewError(fiber.StatusBadRequest, "import is not in a cancellable state")
 	}
-	deleteVM := p.Bool("delete_vm")
 
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {

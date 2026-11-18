@@ -275,13 +275,13 @@ func registerVMImportEndpoints(reg *Registry, h *handlers.VMImportHandler) {
 		Method: fiber.MethodPost,
 		Path:   importScope + "/:id/cancel",
 		Description: "Cancel a pending or running import. Best-effort: the running Proxmox task is asked " +
-			"to stop, and delete_vm additionally destroys the partially-created guest.",
+			"to stop, and delete_vm additionally destroys the partially-created guest, which also needs delete:vm.",
 		Group:       "VM Import",
 		Permissions: clusterCheck("manage", "vm_import"),
 		Parameters: clusterParams(apischema.Properties{
 			"id": importJobIDParam,
 			"delete_vm": optFlag(
-				"Destroy the partially-created guest as well. Omitted leaves it in place."),
+				"Destroy the partially-created guest too, which requires delete:vm as well. Omitted leaves it in place."),
 		}),
 		Handler: h.CancelVMImport,
 	})

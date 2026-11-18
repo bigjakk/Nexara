@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { grantPermissions } from "@/test/permissions";
@@ -44,6 +45,32 @@ it.each([
     expect(
       screen.queryByRole("button", { name: "Cancel import of linux01" }) !==
         null,
+    ).toBe(offered);
+  },
+);
+
+// Deleting the VM as well destroys it, which takes delete:vm, as the VM's own
+// delete does.
+it.each([
+  [["manage:vm_import", "delete:vm"], true],
+  [["manage:vm_import"], false],
+])(
+  "with %j offers to delete the VM when cancelling: %s",
+  async (permissions, offered) => {
+    grantPermissions(...permissions);
+    vi.mocked(apiClient.list).mockResolvedValue([job]);
+    renderWithProviders(<ImportHistoryTable clusterId="c1" />);
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Cancel import of linux01" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Cancel import?" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: /Also delete the partially created VM/,
+      }) !== null,
     ).toBe(offered);
   },
 );

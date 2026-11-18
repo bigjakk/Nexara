@@ -1,18 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { ImportsPage } from "./ImportsPage";
 
-// What the signed-in user holds; each case sets it before rendering.
-const held = vi.hoisted(() => ({ manageImport: false }));
-
-vi.mock("@/hooks/usePermissions", () => ({
-  usePermissions: () => ({
-    canManage: (resource: string) =>
-      resource === "vm_import" && held.manageImport,
-    canView: () => false,
-  }),
-}));
 vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
   useClusters: () => ({ data: [{ id: "c1", name: "cluster01" }] }),
 }));
@@ -39,7 +30,7 @@ describe("ImportsPage", () => {
     ["offers Import VM to a user who may manage imports", true],
     ["does not offer it to one who may not", false],
   ])("%s", (_name, granted) => {
-    held.manageImport = granted;
+    grantPermissions(...(granted ? ["manage:vm_import"] : []));
     renderWithProviders(<ImportsPage />);
     // The page has settled on its cluster: the panels are drawn.
     expect(
