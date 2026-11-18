@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { apiClient, ApiClientError } from "@/lib/api-client";
-import { LiveBlockJobRows } from "./LiveBlockJobRows";
+import { LiveBlockJobRows, LiveBlockJobsCard } from "./LiveBlockJobRows";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -110,5 +110,38 @@ describe("LiveBlockJobRows", () => {
     });
     expect(container.querySelectorAll("tr")).toHaveLength(text ? 1 : 0);
     if (text) expect(screen.getByText(text)).toBeInTheDocument();
+  });
+});
+
+// The card read the server's `running` (the monitor answered) as "a job runs",
+// and showed, empty, on every running VM to a user without History.
+describe("LiveBlockJobsCard", () => {
+  it.each([
+    ["no job", [], false],
+    [
+      "a job",
+      [
+        {
+          type: "mirror",
+          device: "mirror-scsi0",
+          completed: 1,
+          total: 2,
+          speed_limit: 0,
+        },
+      ],
+      true,
+    ],
+  ])("on a running VM with %s shows: %s", async (_name, jobs, shown) => {
+    mockedGet.mockReset();
+    mockedGet.mockResolvedValue({ running: true, jobs, unparsed: [] });
+    const client = createTestQueryClient();
+    renderWithProviders(<LiveBlockJobsCard clusterId="c1" vmId="v1" />, {
+      client,
+    });
+    // Asserted once the jobs have been read, so "no card" is not "not yet".
+    await vi.waitFor(() => {
+      expect(client.getQueryCache().findAll()[0]?.state.status).toBe("success");
+    });
+    expect(screen.queryByText("Block jobs") !== null).toBe(shown);
   });
 });

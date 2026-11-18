@@ -86,7 +86,7 @@ async function signInAs(user: User) {
 }
 
 /** Walks the wizard to the end, presses Create VM and waits for the poll to begin. */
-async function createsTheVM() {
+async function createsTheVM({ awaitSearch = true } = {}) {
   const router = createMemoryRouter(
     [
       { path: "/login", element: <p>login page</p> },
@@ -134,6 +134,7 @@ async function createsTheVM() {
   await waitFor(() => {
     expect(server.times(TASK)).toBeGreaterThan(0);
   });
+  if (!awaitSearch) return router;
   await waitFor(() => {
     expect(heldLists.length).toBeGreaterThan(0);
   });
@@ -211,6 +212,35 @@ afterEach(() => {
 });
 
 describe("CreateVMDialog, looking for the VM it created", () => {
+  // A failed create looked for the VM anyway and closed itself after 30 s,
+  // taking Proxmox's message with it.
+  it("stays open on the banner when the task fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      server.routes[TASK] = () =>
+        json({
+          upid: UPID,
+          status: "stopped",
+          exit_status: "unable to create VM",
+        });
+      await signInAs(ADMIN);
+      await createsTheVM({ awaitSearch: false });
+      expect(
+        await screen.findByText("Task failed: unable to create VM"),
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000);
+      });
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(
+        screen.getByText("Task failed: unable to create VM"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not navigate to the VM when the session that created it has ended", async () => {
     await signInAs(ADMIN);
     await createsTheVM();

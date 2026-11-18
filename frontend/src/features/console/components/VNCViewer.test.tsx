@@ -6,6 +6,7 @@ import { VNCViewer } from "./VNCViewer";
 import { useConsoleStore } from "@/stores/console-store";
 import type { ConsoleTab } from "../types/console";
 import { vncTab } from "../console.fixtures";
+import { grantPermissions } from "@/test/permissions";
 import {
   MockWebSocket,
   installMockWebSocket,
@@ -354,5 +355,26 @@ describe("VNCViewer", () => {
     unmount();
 
     expect(tabStatus()).toBe("guest-stopped");
+  });
+});
+
+// A console role need not hold execute: the powered-off overlay offered Start
+// to it anyway, and the click was a 403.
+describe("VNCViewer — the powered-off overlay", () => {
+  it.each([
+    [["console:vm"], false],
+    [["console:vm", "execute:vm"], true],
+  ])("with %j offers Start VM: %s", (permissions, offered) => {
+    grantPermissions(...permissions);
+    seedStore("guest-stopped");
+    renderWithProviders(
+      <VNCViewer
+        tab={{ ...tab, status: "guest-stopped", resourceId: "v1", kind: "vm" }}
+        visible={true}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Start VM" }) !== null).toBe(
+      offered,
+    );
   });
 });

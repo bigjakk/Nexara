@@ -28,6 +28,10 @@ import {
 } from "@/components/ui/dialog";
 import type { Table } from "@tanstack/react-table";
 import { useVMAction, useDestroyVM } from "@/features/vms/api/vm-queries";
+import {
+  useGuestActionAllowed,
+  type GuestAction,
+} from "@/features/vms/lib/vm-action-defs";
 import type { InventoryRow } from "../types/inventory";
 import type { ResourceKind } from "@/features/vms/types/vm";
 import { BulkMigrateDialog } from "./BulkMigrateDialog";
@@ -41,6 +45,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
   const selectedCount = selectedRows.length;
   const actionMutation = useVMAction();
   const destroyMutation = useDestroyVM();
+  const allowed = useGuestActionAllowed();
   const [confirmDelete, setConfirmDelete] = useState(false);
   // `verb` asks the question and labels its button ("Shut down 3 resources");
   // `label` is the noun the title uses.
@@ -122,6 +127,13 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
   const isBusy = progress !== null;
 
   const noGuests = isBusy || vmCtRows.length === 0;
+  // An action is offered only when the role allows it for every kind of guest
+  // selected. A role held on one cluster can still be refused for another's guests.
+  const kinds = [
+    ...new Set(vmCtRows.map((r) => r.original.type as ResourceKind)),
+  ];
+  const can = (action: GuestAction) =>
+    kinds.length > 0 && kinds.every((k) => allowed(action, k));
 
   return (
     <>
@@ -143,96 +155,110 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
           </span>
         ) : (
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={noGuests}
-              onClick={() => {
-                void executeBulkAction("start");
-              }}
-            >
-              <Play />
-              Start
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={noGuests}
-              onClick={() => {
-                setConfirmBulk({
-                  action: "shutdown",
-                  label: "Shutdown",
-                  verb: "Shut down",
-                });
-              }}
-            >
-              <PowerOff />
-              Shutdown
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={noGuests}
-              onClick={() => {
-                void executeBulkAction("reboot");
-              }}
-            >
-              <RotateCcw />
-              Reboot
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={noGuests}
-              onClick={() => {
-                setMigrateOpen(true);
-              }}
-            >
-              <ArrowLeftRight />
-              Migrate
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  aria-label="More bulk actions"
-                  disabled={noGuests}
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="gap-2"
-                  onClick={() => {
-                    setConfirmBulk({
-                      action: "stop",
-                      label: "Stop",
-                      verb: "Stop",
-                    });
-                  }}
-                >
-                  <Square className="h-4 w-4" />
-                  Stop
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="gap-2 text-destructive focus:text-destructive"
-                  onClick={() => {
-                    setConfirmDelete(true);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {can("start") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={noGuests}
+                onClick={() => {
+                  void executeBulkAction("start");
+                }}
+              >
+                <Play />
+                Start
+              </Button>
+            )}
+            {can("shutdown") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={noGuests}
+                onClick={() => {
+                  setConfirmBulk({
+                    action: "shutdown",
+                    label: "Shutdown",
+                    verb: "Shut down",
+                  });
+                }}
+              >
+                <PowerOff />
+                Shutdown
+              </Button>
+            )}
+            {can("reboot") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={noGuests}
+                onClick={() => {
+                  void executeBulkAction("reboot");
+                }}
+              >
+                <RotateCcw />
+                Reboot
+              </Button>
+            )}
+            {can("migrate") && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={noGuests}
+                onClick={() => {
+                  setMigrateOpen(true);
+                }}
+              >
+                <ArrowLeftRight />
+                Migrate
+              </Button>
+            )}
+            {(can("stop") || can("destroy")) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    aria-label="More bulk actions"
+                    disabled={noGuests}
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {can("stop") && (
+                    <DropdownMenuItem
+                      className="gap-2"
+                      onClick={() => {
+                        setConfirmBulk({
+                          action: "stop",
+                          label: "Stop",
+                          verb: "Stop",
+                        });
+                      }}
+                    >
+                      <Square className="h-4 w-4" />
+                      Stop
+                    </DropdownMenuItem>
+                  )}
+                  {can("stop") && can("destroy") && <DropdownMenuSeparator />}
+                  {can("destroy") && (
+                    <DropdownMenuItem
+                      className="gap-2 text-destructive focus:text-destructive"
+                      onClick={() => {
+                        setConfirmDelete(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </>
         )}
         {/* Empties the selection itself, here and after each bulk action:

@@ -99,13 +99,12 @@ func TestConsoleToken_BindsTheCallersCredential(t *testing.T) {
 	}
 }
 
-// TestWSToken_RefusesASessionThatHasEnded is ws-token's wiring to the rule the table
-// above holds for console tokens (LiveCredential): an access token outlives its
-// session, and a hub socket opened with a token minted from it would stream the
-// account's events after the account was cut off. An ended session is 403, not 401,
-// so the SPA's background mint does not sign the owner out (wsTokenRefusal); a token
-// naming no session keeps the 401 a refresh answers; an API key may still mint one.
-// A minted token names the session or key, which the hub socket is held to.
+// TestWSToken_RefusesASessionThatHasEnded is ws-token's own check, behind the
+// InteractiveOnly gate (which this harness does not mount, so a key reaches it): an
+// access token outlives its session, and a hub socket opened with a token minted from
+// it would stream the account's events after the account was cut off. An ended
+// session is the gate's 401, so the two cannot disagree. A minted token names the
+// session or key, which the hub socket is held to.
 func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -116,7 +115,7 @@ func TestWSToken_RefusesASessionThatHasEnded(t *testing.T) {
 		status  int
 	}{
 		{"a live session", false, "X-Test-Session", "", http.StatusOK},
-		{"a session that has ended", true, "X-Test-Session", "", http.StatusForbidden},
+		{"a session that has ended", true, "X-Test-Session", "", http.StatusUnauthorized},
 		{"an access token that names no session", false, "X-Test-Session", "none", http.StatusUnauthorized},
 		{"an API key", true, "X-Test-API-Key", "", http.StatusOK},
 	} {

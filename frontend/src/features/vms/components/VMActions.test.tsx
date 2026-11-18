@@ -1,7 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
+import { apiClient } from "@/lib/api-client";
+import { GUEST_ACTION_PERMISSIONS, grantPermissions } from "@/test/permissions";
 import { VMActions } from "./VMActions";
 
 const defaultProps = {
@@ -19,6 +21,48 @@ const menuItems = () =>
   screen.getAllByRole("menuitem").map((item) => item.textContent);
 
 describe("VMActions", () => {
+  beforeEach(() => {
+    grantPermissions(...GUEST_ACTION_PERMISSIONS);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A failed power task unmounted its banner at once and wrote the status the
+  // action wanted: the header read Running while the VM was still off.
+  it("keeps a failed task's banner and leaves the guest's state alone", async () => {
+    const upid = "UPID:pve-01:00000001:00000002:00000003:qmstart:101:x:";
+    vi.spyOn(apiClient, "post").mockResolvedValue({ upid, status: "OK" });
+    vi.spyOn(apiClient, "get").mockResolvedValue({
+      upid,
+      status: "stopped",
+      exit_status: "start failed: QEMU exited with code 1",
+    });
+    const client = createTestQueryClient({ keepCache: true });
+    const key = ["clusters", "c1", "vms", "vm-1"];
+    client.setQueryData(key, { status: "stopped" });
+    renderWithProviders(<VMActions {...defaultProps} status="stopped" />, {
+      client,
+    });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Start" }));
+
+    expect(
+      await screen.findByText(
+        "Task failed: start failed: QEMU exited with code 1",
+      ),
+    ).toBeInTheDocument();
+    expect(client.getQueryData(key)).toEqual({ status: "stopped" });
+  });
+
+  // Every action was offered whatever the role, and the server refused it.
+  it("offers a user without the permissions no action", () => {
+    grantPermissions("view:vm");
+    renderWithProviders(<VMActions {...defaultProps} onSnapshot={vi.fn()} />);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it.each([
     {
       name: "a running VM leads with Shutdown",

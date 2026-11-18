@@ -135,8 +135,9 @@ export function CloneDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            onComplete={() => {
-              handleClose();
+            onComplete={(success) => {
+              // A failed task stays on the banner, which gives Proxmox's reason.
+              if (success) handleClose();
             }}
             description={`Clone ${sourceName}`}
           />

@@ -343,3 +343,54 @@ describe("useEventInvalidation — ups_change", () => {
     }
   });
 });
+
+// The server published these four and no page heard them; each re-read only
+// at its next poll. The other cluster's import list is the control.
+describe("useEventInvalidation — kinds the pages missed", () => {
+  it.each([
+    [
+      "report_generated",
+      "system:events",
+      undefined,
+      undefined,
+      ["report-runs"],
+    ],
+    [
+      "apt_repo_change",
+      `cluster:${CLUSTER}:events`,
+      CLUSTER,
+      "pve-01",
+      ["clusters", CLUSTER, "nodes", "pve-01", "apt-repositories"],
+    ],
+    [
+      "vm_import",
+      `cluster:${CLUSTER}:events`,
+      CLUSTER,
+      "job-1",
+      ["clusters", CLUSTER, "vm-imports"],
+    ],
+    [
+      "veeam_change",
+      "system:events",
+      undefined,
+      undefined,
+      ["veeam-servers", "s1", "jobs"],
+    ],
+  ])("%s marks its page stale", (kind, channel, cluster, resource, key) => {
+    vi.useFakeTimers();
+    const control = ["clusters", OTHER_CLUSTER, "vm-imports"];
+    const client = mount([key, control]);
+    act(() => {
+      deliver(channel, {
+        kind,
+        cluster_id: cluster,
+        resource_type: "x",
+        resource_id: resource,
+        action: "changed",
+      });
+    });
+    flush();
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(control)?.isInvalidated).toBe(false);
+  });
+});

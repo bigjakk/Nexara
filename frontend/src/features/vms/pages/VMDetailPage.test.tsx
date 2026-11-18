@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { useAuthStore } from "@/stores/auth-store";
+import { GUEST_ACTION_PERMISSIONS, grantPermissions } from "@/test/permissions";
 import { VMDetailPage } from "./VMDetailPage";
 import type { VMResponse } from "@/types/api";
 
@@ -246,6 +247,7 @@ describe("VMDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCurrentVM = mockVM;
+    grantPermissions(...GUEST_ACTION_PERMISSIONS);
   });
 
   // The collector can drop a destroyed guest's row before the destroy dialog

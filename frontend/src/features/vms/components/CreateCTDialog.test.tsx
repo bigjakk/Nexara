@@ -59,14 +59,12 @@ function serve(
 }
 
 /** Opens the dialog with General filled in and a template typed. */
-async function openWithTemplate() {
+async function openWithTemplate(
+  onOpenChange: (open: boolean) => void = () => undefined,
+) {
   const user = userEvent.setup();
   renderWithProviders(
-    <CreateCTDialog
-      open
-      onOpenChange={() => undefined}
-      clusterId="cluster01"
-    />,
+    <CreateCTDialog open onOpenChange={onOpenChange} clusterId="cluster01" />,
   );
   await waitFor(() => {
     expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
@@ -137,6 +135,31 @@ describe("CreateCTDialog", () => {
       ).toBe(offered);
     },
   );
+
+  // A failed create closed the dialog at once, taking Proxmox's message with it.
+  it("stays open on the banner when the create task fails", async () => {
+    serve();
+    const answer = vi.mocked(apiClient.get).getMockImplementation();
+    vi.mocked(apiClient.get).mockImplementation((path: unknown) =>
+      String(path).includes("/tasks/")
+        ? Promise.resolve({
+            upid: "UPID:pve-01:x",
+            status: "stopped",
+            exit_status: "unable to create CT",
+          })
+        : (answer?.(path as never) ?? Promise.resolve([])),
+    );
+    vi.mocked(apiClient.post).mockResolvedValue({ upid: "UPID:pve-01:x" });
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    const user = await openWithTemplate(onOpenChange);
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Create container" }));
+
+    expect(
+      await screen.findByText("Task failed: unable to create CT"),
+    ).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
 
   // "Default" sent neither storage nor rootfs: Proxmox fell back to `local`,
   // which normally refuses container disks. store00 is another node's own.

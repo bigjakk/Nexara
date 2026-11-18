@@ -10,6 +10,7 @@ import {
   useRollbackSnapshot,
 } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
+import { useGuestActionAllowed } from "../lib/vm-action-defs";
 import { CreateSnapshotDialog } from "./CreateSnapshotDialog";
 import type { ResourceKind, Snapshot } from "../types/vm";
 import { formatExactDate } from "@/lib/format";
@@ -31,6 +32,7 @@ export function SnapshotPanel({
 }: SnapshotPanelProps) {
   const { t } = useTranslation("vms");
   const queryClient = useQueryClient();
+  const allowed = useGuestActionAllowed();
   const { data: snapshots, isLoading } = useSnapshots(
     clusterId,
     resourceId,
@@ -151,16 +153,18 @@ export function SnapshotPanel({
                 : t("snapshotPanel.taken", { number: String(taken.length) })
         }
         actions={
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => {
-              setCreateOpen(true);
-            }}
-          >
-            <Camera className="h-4 w-4" />
-            {t("snapshotPanel.takeSnapshot")}
-          </Button>
+          allowed("snapshot", kind) ? (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                setCreateOpen(true);
+              }}
+            >
+              <Camera className="h-4 w-4" />
+              {t("snapshotPanel.takeSnapshot")}
+            </Button>
+          ) : undefined
         }
       >
         {isLoading && (
@@ -191,6 +195,8 @@ export function SnapshotPanel({
                 onRollback={handleRollback}
                 deletePending={deleteMutation.isPending}
                 rollbackPending={rollbackMutation.isPending}
+                canRollback={allowed("rollback", kind)}
+                canDelete={allowed("delete-snapshot", kind)}
                 formatDate={formatDate}
               />
             ))}
@@ -222,6 +228,8 @@ interface SnapshotNodeProps {
   onRollback: (name: string) => void;
   deletePending: boolean;
   rollbackPending: boolean;
+  canRollback: boolean;
+  canDelete: boolean;
   formatDate: (ts: number | undefined) => ReactNode;
 }
 
@@ -237,6 +245,8 @@ function SnapshotNode({
   onRollback,
   deletePending,
   rollbackPending,
+  canRollback,
+  canDelete,
   formatDate,
 }: SnapshotNodeProps) {
   const { t } = useTranslation("vms");
@@ -284,9 +294,9 @@ function SnapshotNode({
           </span>
         )}
 
-        {!isCurrent && (
+        {!isCurrent && (canRollback || canDelete) && (
           <div className="flex gap-1">
-            {confirmRollback === snap.name ? (
+            {!canRollback ? null : confirmRollback === snap.name ? (
               <>
                 <Button
                   size="sm"
@@ -321,7 +331,7 @@ function SnapshotNode({
                 {t("snapshotPanel.rollback")}
               </Button>
             )}
-            {confirmDelete === snap.name ? (
+            {!canDelete ? null : confirmDelete === snap.name ? (
               <>
                 <Button
                   size="sm"
@@ -373,6 +383,8 @@ function SnapshotNode({
           onRollback={onRollback}
           deletePending={deletePending}
           rollbackPending={rollbackPending}
+          canRollback={canRollback}
+          canDelete={canDelete}
           formatDate={formatDate}
         />
       ))}

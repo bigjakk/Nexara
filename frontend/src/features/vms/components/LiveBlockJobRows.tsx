@@ -123,7 +123,10 @@ export function LiveBlockJobsCard({
   vmId: string;
 }) {
   const { data, error } = useBlockJobs(clusterId, vmId, true);
-  if (!error && !data?.running) return null;
+  // `running` says the VM's monitor answered, not that a job runs: the card
+  // showed, empty, on every running VM.
+  const anything = (data?.jobs.length ?? 0) + (data?.unparsed.length ?? 0) > 0;
+  if (!error && !anything) return null;
   return (
     <Panel flush title="Block jobs">
       <table className="w-full">

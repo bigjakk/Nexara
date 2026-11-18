@@ -13,8 +13,10 @@ import {
   FileBox,
   Rocket,
 } from "lucide-react";
+import { useCallback } from "react";
 import type { VMAction, ResourceKind } from "../types/vm";
 import { canResume, isHaltedState } from "@/lib/guest-state";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export interface ActionConfig {
   action: VMAction;
@@ -59,6 +61,52 @@ export interface ManagementActionConfig {
   icon: React.ReactNode;
   variant: "outline" | "destructive";
   showWhen: (status: string, kind: ResourceKind, template?: boolean) => boolean;
+}
+
+/** Also the Snapshots tab's rollback and delete, and a VM's CD-ROM (Media). */
+export type GuestAction =
+  VMAction | ManagementAction | "rollback" | "delete-snapshot" | "media";
+
+/**
+ * The permission an action needs, as its route declares it: the power actions
+ * (the status route), a snapshot, a rollback and a VM's media take execute on the
+ * guest's kind; a clone,
+ * a template and a deploy take manage; a destroy or a snapshot's delete takes
+ * delete; a migration is a
+ * migration job, which takes manage:migration. Every surface that offers a
+ * guest action asks this, so it offers only what the server would accept.
+ */
+export function guestActionPermission(
+  action: GuestAction,
+  kind: ResourceKind,
+): readonly [action: string, resource: string] {
+  const resource = kind === "ct" ? "container" : "vm";
+  switch (action) {
+    case "clone":
+    case "clone-to-template":
+    case "convert-to-template":
+    case "deploy":
+      return ["manage", resource];
+    case "migrate":
+      return ["manage", "migration"];
+    case "destroy":
+    case "delete-snapshot":
+      return ["delete", resource];
+    default:
+      return ["execute", resource];
+  }
+}
+
+/** Whether the signed-in user may run an action on a guest of this kind. */
+export function useGuestActionAllowed(): (
+  action: GuestAction,
+  kind: ResourceKind,
+) => boolean {
+  const { hasPermission } = usePermissions();
+  return useCallback(
+    (action, kind) => hasPermission(...guestActionPermission(action, kind)),
+    [hasPermission],
+  );
 }
 
 export const lifecycleActions: ActionConfig[] = [

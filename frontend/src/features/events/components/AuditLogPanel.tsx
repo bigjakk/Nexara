@@ -49,6 +49,7 @@ import {
 import { SyslogConfigCard } from "./SyslogConfigCard";
 import { detailPairs } from "../lib/audit-details";
 import { resourceTypeLabel, resourceTypes } from "../lib/resource-types";
+import { dayWindow } from "../lib/day-window";
 import { auditClusterLabel } from "@/features/audit/lib/audit-cluster";
 import { DateTime } from "@/components/DateTime";
 
@@ -424,10 +425,7 @@ export function AuditLogPanel() {
     [actions],
   );
 
-  const startTime = startDate ? new Date(startDate).toISOString() : undefined;
-  const endTime = endDate
-    ? new Date(endDate + "T23:59:59").toISOString()
-    : undefined;
+  const { startTime, endTime } = dayWindow(startDate, endDate);
 
   const { data, isLoading, error } = useEvents({
     limit: PAGE_SIZE,

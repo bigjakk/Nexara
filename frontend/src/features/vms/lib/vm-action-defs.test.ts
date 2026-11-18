@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lifecycleActions } from "./vm-action-defs";
+import { guestActionPermission, lifecycleActions } from "./vm-action-defs";
 import type { ResourceKind } from "../types/vm";
 
 const offered = (state: string, kind: ResourceKind = "vm") =>
@@ -27,5 +27,26 @@ describe("lifecycleActions per guest state", () => {
   // Its checkpoint comes back only by resume; a start would boot it afresh.
   it("offers a suspended container Resume, not Start", () => {
     expect(offered("suspended", "ct")).toEqual(["resume"]);
+  });
+});
+
+// Each action is offered only to a role its route accepts (registry_vms.go,
+// registry_containers.go, registry_migrations.go).
+describe("guestActionPermission", () => {
+  it.each([
+    ["start", "vm", "execute:vm"],
+    ["shutdown", "ct", "execute:container"],
+    ["snapshot", "vm", "execute:vm"],
+    ["clone", "ct", "manage:container"],
+    ["clone-to-template", "vm", "manage:vm"],
+    ["convert-to-template", "vm", "manage:vm"],
+    ["deploy", "ct", "manage:container"],
+    ["migrate", "vm", "manage:migration"],
+    ["destroy", "ct", "delete:container"],
+    ["rollback", "vm", "execute:vm"],
+    ["delete-snapshot", "ct", "delete:container"],
+    ["media", "vm", "execute:vm"],
+  ] as const)("%s on a %s takes %s", (action, kind, want) => {
+    expect(guestActionPermission(action, kind).join(":")).toBe(want);
   });
 });

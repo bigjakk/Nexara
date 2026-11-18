@@ -63,6 +63,7 @@ import {
   actionVerb,
   lifecycleActions,
   managementActions,
+  useGuestActionAllowed,
   type ManagementAction,
 } from "@/features/vms/lib/vm-action-defs";
 import { useVMAction } from "@/features/vms/api/vm-queries";
@@ -290,11 +291,16 @@ function RowContextMenu({
   const normalizedStatus = target.status.toLowerCase();
   const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
 
-  const visibleLifecycle = lifecycleActions.filter((a) =>
-    a.showWhen(guestState(target.status, target.runState), target.kind),
+  const allowed = useGuestActionAllowed();
+  const visibleLifecycle = lifecycleActions.filter(
+    (a) =>
+      a.showWhen(guestState(target.status, target.runState), target.kind) &&
+      allowed(a.action, target.kind),
   );
-  const visibleManagement = managementActions.filter((a) =>
-    a.showWhen(normalizedStatus, target.kind, target.template),
+  const visibleManagement = managementActions.filter(
+    (a) =>
+      a.showWhen(normalizedStatus, target.kind, target.template) &&
+      allowed(a.action, target.kind),
   );
 
   useEffect(() => {

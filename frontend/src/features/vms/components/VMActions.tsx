@@ -32,6 +32,7 @@ import { TaskProgressBanner } from "./TaskProgressBanner";
 import {
   actionVerb,
   lifecycleActions,
+  useGuestActionAllowed,
   type ActionConfig,
 } from "../lib/vm-action-defs";
 import type { VMAction, ResourceKind } from "../types/vm";
@@ -101,15 +102,19 @@ export function VMActions({
 }: VMActionsProps) {
   const queryClient = useQueryClient();
   const actionMutation = useVMAction();
+  const allowed = useGuestActionAllowed();
   const [confirmAction, setConfirmAction] = useState<ActionConfig | null>(null);
   const [activeUpid, setActiveUpid] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<VMAction | null>(null);
+  // A failed task's UPID: its banner stays, saying why, until the next action.
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
 
   const normalizedStatus = status.toLowerCase();
   const isPending = actionMutation.isPending || activeUpid !== null;
 
   function dispatchAction(action: VMAction) {
     setLastAction(action);
+    setFailedUpid(null);
     actionMutation.mutate(
       { clusterId, resourceId, kind, action },
       {
@@ -121,11 +126,13 @@ export function VMActions({
     );
   }
 
-  function handleTaskComplete() {
+  function handleTaskComplete(success: boolean) {
     // Optimistically update the cached VM data with the expected status
     // so the page reflects the new state immediately (the collector will
-    // sync the DB on its next cycle).
-    if (lastAction) {
+    // sync the DB on its next cycle). Not for a failed task: the guest is as
+    // it was, and the banner unmounting at once hid Proxmox's reason.
+    if (!success) setFailedUpid((failed) => activeUpid ?? failed);
+    if (success && lastAction) {
       const newStatus = expectedStatus(lastAction);
       if (newStatus) {
         const queryKey = [
@@ -161,20 +168,30 @@ export function VMActions({
   // that fits the guest's state is a button, its alternatives fold in beside
   // it, and what is rarely wanted or cannot be undone sits behind "More".
   // A halted VM is offered what Proxmox does for its QEMU state.
-  const powerActions = lifecycleActions.filter((a) =>
-    a.showWhen(guestState(status, runState), kind),
+  const powerActions = lifecycleActions.filter(
+    (a) =>
+      a.showWhen(guestState(status, runState), kind) && allowed(a.action, kind),
   );
   // Where resuming is offered it leads: it is what the guest waits for.
   const primaryPower =
     powerActions.find((a) => a.action === "resume") ?? powerActions[0];
   const otherPower = powerActions.filter((a) => a !== primaryPower);
   const canConvert =
-    !template && normalizedStatus === "stopped" && onConvertToTemplate;
+    !template &&
+    normalizedStatus === "stopped" &&
+    onConvertToTemplate &&
+    allowed("convert-to-template", kind);
+  const canClone = allowed("clone", kind);
+  const canCloneToTemplate =
+    !template && onCloneToTemplate && allowed("clone-to-template", kind);
+  const canDestroy = allowed("destroy", kind);
+  // What the More menu holds once the role is counted; it goes when that is nothing.
+  const anyMore = canClone || canCloneToTemplate || canConvert || canDestroy;
 
   const banner = (
     <TaskProgressBanner
       clusterId={clusterId}
-      upid={activeUpid}
+      upid={activeUpid ?? failedUpid}
       onComplete={handleTaskComplete}
       description={`${lastAction ?? "action"} ${name}`}
     />
@@ -234,7 +251,7 @@ export function VMActions({
           </div>
         )}
 
-        {!template && onSnapshot && (
+        {!template && onSnapshot && allowed("snapshot", kind) && (
           <Button
             variant="outline"
             size="sm"
@@ -247,7 +264,7 @@ export function VMActions({
           </Button>
         )}
 
-        {template && onDeploy && (
+        {template && onDeploy && allowed("deploy", kind) && (
           <Button
             variant="outline"
             size="sm"
@@ -260,59 +277,72 @@ export function VMActions({
           </Button>
         )}
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          disabled={isPending}
-          onClick={onMigrate}
-        >
-          <ArrowRightLeft className="h-4 w-4" />
-          Migrate
-        </Button>
+        {allowed("migrate", kind) && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={isPending}
+            onClick={onMigrate}
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Migrate
+          </Button>
+        )}
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="px-2"
-              aria-label="More actions"
-              disabled={isPending}
-            >
-              <MoreHorizontal />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem className="gap-2" onClick={onClone}>
-              <Copy className="h-4 w-4" />
-              Clone
-            </DropdownMenuItem>
-            {!template && onCloneToTemplate && (
-              <DropdownMenuItem className="gap-2" onClick={onCloneToTemplate}>
-                <FileBox className="h-4 w-4" />
-                Clone to template
-              </DropdownMenuItem>
-            )}
-            {canConvert && (
-              <DropdownMenuItem className="gap-2" onClick={onConvertToTemplate}>
-                <FileBox className="h-4 w-4" />
-                Convert to template
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            {/* A running guest cannot be destroyed; the item says so by being
-                unavailable rather than by vanishing. */}
-            <DropdownMenuItem
-              className="gap-2 text-destructive focus:text-destructive"
-              disabled={normalizedStatus === "running"}
-              onClick={onDestroy}
-            >
-              <Trash2 className="h-4 w-4" />
-              Destroy
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {anyMore && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="px-2"
+                aria-label="More actions"
+                disabled={isPending}
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {canClone && (
+                <DropdownMenuItem className="gap-2" onClick={onClone}>
+                  <Copy className="h-4 w-4" />
+                  Clone
+                </DropdownMenuItem>
+              )}
+              {canCloneToTemplate && (
+                <DropdownMenuItem className="gap-2" onClick={onCloneToTemplate}>
+                  <FileBox className="h-4 w-4" />
+                  Clone to template
+                </DropdownMenuItem>
+              )}
+              {canConvert && (
+                <DropdownMenuItem
+                  className="gap-2"
+                  onClick={onConvertToTemplate}
+                >
+                  <FileBox className="h-4 w-4" />
+                  Convert to template
+                </DropdownMenuItem>
+              )}
+              {canDestroy && (
+                <>
+                  <DropdownMenuSeparator />
+                  {/* A running guest cannot be destroyed; the item says so by
+                    being unavailable rather than by vanishing. */}
+                  <DropdownMenuItem
+                    className="gap-2 text-destructive focus:text-destructive"
+                    disabled={normalizedStatus === "running"}
+                    onClick={onDestroy}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Destroy
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {bannerContainer != null ? createPortal(banner, bannerContainer) : banner}

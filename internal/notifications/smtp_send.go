@@ -86,7 +86,9 @@ func checkSMTPTarget(ips []string, useSTARTTLS, allowPrivate bool) error {
 				return fmt.Errorf("smtp: host resolves to %w", err)
 			}
 		} else if !ip.IsLoopback() {
-			return fmt.Errorf("smtp: cleartext (TLS=off) is only allowed when host resolves to loopback (got %s)", ip)
+			// No address in the text: it reaches the dead-letter entry, which a
+			// Viewer can read, as TargetAddressError.Error keeps it out too.
+			return errors.New("smtp: cleartext (TLS=off) is only allowed when host resolves to loopback")
 		}
 	}
 	return nil

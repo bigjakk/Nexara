@@ -140,7 +140,9 @@ export function DeployTemplateDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            onComplete={() => {
+            onComplete={(success) => {
+              // A failed task stays on the banner, which gives Proxmox's reason.
+              if (!success) return;
               setUpid(null);
               onOpenChange(false);
             }}

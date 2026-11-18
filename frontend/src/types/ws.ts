@@ -164,7 +164,11 @@ export type EventKind =
   | "acme_change"
   | "snapshot_change"
   | "access_change"
-  | "schedule_change";
+  | "schedule_change"
+  | "report_generated"
+  | "apt_repo_change"
+  | "vm_import"
+  | "veeam_change";
 
 /** Event pushed from the backend through the WS pipeline. */
 export interface NexaraEvent {

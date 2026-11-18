@@ -362,6 +362,35 @@ export function useEventInvalidation(clusterIds: string[]): void {
             scheduleInvalidation(["clusters", cid, "acme"]);
           }
           break;
+
+        // These four were published and never heard, so their pages showed a
+        // change only at their next poll.
+        case "report_generated":
+          scheduleInvalidation(["report-runs"]);
+          break;
+
+        case "apt_repo_change":
+          // resource_id is the node whose repositories changed.
+          if (cid && event.resource_id) {
+            scheduleInvalidation([
+              "clusters",
+              cid,
+              "nodes",
+              event.resource_id,
+              "apt-repositories",
+            ]);
+          }
+          break;
+
+        case "vm_import":
+          if (cid) {
+            scheduleInvalidation(["clusters", cid, "vm-imports"]);
+          }
+          break;
+
+        case "veeam_change":
+          scheduleInvalidation(["veeam-servers"], ["veeam-guest-protection"]);
+          break;
       }
     },
     [

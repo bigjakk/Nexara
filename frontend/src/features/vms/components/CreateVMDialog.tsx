@@ -839,9 +839,12 @@ export function CreateVMDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              onComplete={() => {
-                // After task completes, poll for the new VM record and navigate to it
+              onComplete={(success) => {
                 stopSearch();
+                // A failed create stays open on the banner, which says why;
+                // there is no VM to look for.
+                if (!success) return;
+                // After task completes, poll for the new VM record and navigate to it
                 const search = searchRef.current;
                 const createdVmid = Number(vmid);
                 // The session that created it. A look at the list that is already

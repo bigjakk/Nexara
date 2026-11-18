@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { apiClient } from "@/lib/api-client";
 import { DestroyDialog } from "./DestroyDialog";
 
 const defaultProps = {
@@ -14,6 +15,34 @@ const defaultProps = {
 };
 
 describe("DestroyDialog", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A failed destroy closed the dialog and went to the inventory, as if the
+  // guest had gone; it is still there, and the banner says why.
+  it("stays on the banner when the destroy task fails", async () => {
+    const upid = "UPID:pve-01:00000001:00000002:00000003:qmdestroy:101:x:";
+    vi.spyOn(apiClient, "delete").mockResolvedValue({ upid, status: "OK" });
+    vi.spyOn(apiClient, "get").mockResolvedValue({
+      upid,
+      status: "stopped",
+      exit_status: "VM is locked (backup)",
+    });
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    const user = userEvent.setup();
+    renderWithProviders(
+      <DestroyDialog {...defaultProps} onOpenChange={onOpenChange} />,
+    );
+    await user.type(screen.getByPlaceholderText("my-test-vm"), "my-test-vm");
+    await user.click(screen.getByRole("button", { name: /^destroy$/i }));
+
+    expect(
+      await screen.findByText("Task failed: VM is locked (backup)"),
+    ).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
   it("renders dialog with confirmation prompt", () => {
     renderWithProviders(<DestroyDialog {...defaultProps} />);
     expect(screen.getByText(/destroy vm/i)).toBeInTheDocument();

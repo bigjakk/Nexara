@@ -36,6 +36,7 @@ import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
 import {
   actionVerb,
   lifecycleActions,
+  useGuestActionAllowed,
 } from "@/features/vms/lib/vm-action-defs";
 import type { VMAction } from "@/features/vms/types/vm";
 import { useTaskLogStore } from "@/stores/task-log-store";
@@ -152,8 +153,11 @@ export function VNCToolbar({
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
 
+  const allowed = useGuestActionAllowed();
   const visibleActions = hasResource
-    ? lifecycleActions.filter((a) => a.showWhen(vmStatus, vmKind))
+    ? lifecycleActions.filter(
+        (a) => a.showWhen(vmStatus, vmKind) && allowed(a.action, vmKind),
+      )
     : [];
 
   function executeAction(action: VMAction, label: string) {
@@ -292,8 +296,8 @@ export function VNCToolbar({
         </DropdownMenu>
       )}
 
-      {/* Media (ISO mount/eject) — VM only */}
-      {isVM && tab.resourceId && (
+      {/* Media (ISO mount/eject) — VM only, and execute:vm */}
+      {isVM && tab.resourceId && allowed("media", "vm") && (
         <>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

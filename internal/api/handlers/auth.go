@@ -1915,13 +1915,14 @@ type wsTokenResponse struct {
 // `Sec-WebSocket-Protocol: nexara.token, nexara.token.<jwt>` subprotocol
 // header (preferred — keeps the JWT out of proxy access logs and Referer).
 //
-// An API key may mint one, as it always could. A session must still be live
-// (LiveCredential): its access token outlives a sign-out or a revoke for the rest
-// of its lifetime, and a hub token minted then would open a socket that streams
-// the account's events after the account was cut off. The token names the session
-// or key, and the hub closes a socket that is open when it ends
-// (internal/ws/console_credential.go). The refusal of an ended session is a 403,
-// not a 401: see wsTokenRefusal.
+// The route is InteractiveOnly (registry_auth.go): the gate in front refuses an API
+// key with 403 and a session that has ended with 401, before this runs. The checks
+// here are for the instant since the gate: an account deactivated, or a session
+// ended, meanwhile is answered as the gate answers it. A session must stay live
+// (LiveCredential) because its access token outlives a sign-out or a revoke, and a
+// hub token minted then would open a socket that streams the account's events after
+// the account was cut off. The token names the session, and the hub closes a socket
+// that is open when it ends (internal/ws/console_credential.go).
 func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 	userID, ok := c.Locals("user_id").(uuid.UUID)
 	if !ok {
@@ -1941,7 +1942,7 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 	}
 	cred, err := LiveCredential(c, h.queries)
 	if err != nil {
-		return wsTokenRefusal(err)
+		return err
 	}
 
 	const wsHubTokenTTL = 60 * time.Second
@@ -1954,26 +1955,6 @@ func (h *AuthHandler) WSToken(c fiber.Ctx, _ *apischema.Params) error {
 		Token:     token,
 		ExpiresIn: int(wsHubTokenTTL.Seconds()),
 	})
-}
-
-// wsTokenRefusal answers a hub token refused by LiveCredential. A session that has
-// ended is 403, not the helper's 401: the SPA mints a hub token in the background, at
-// every load and every reconnect (websocket-store.ts), and a 403 only makes the hub
-// back off, where a 401 would start a refresh of its own. That no longer keeps the
-// owner signed in: an open hub socket is closed with 3000 when its session ends
-// (internal/ws/server.go, handleWS), on which the SPA asks its session to refresh,
-// which is refused, and the app signs out within seconds, as it does on the next
-// request any other route refuses. The operator chose that, and left the owner's
-// remedies (Endpoint.AdmitsEndedSession: sign out everywhere, change the password)
-// to the window they already had. An access token that names no session
-// (errNoSession: issued before tokens named their session) keeps the 401, whose
-// refresh replaces it with one that does, and every other refusal (503, 500) is the
-// helper's own.
-func wsTokenRefusal(err error) error {
-	if errors.Is(err, errSessionEnded) {
-		return fiber.NewError(fiber.StatusForbidden, sessionEndedMessage)
-	}
-	return err
 }
 
 // Refresh exchanges a valid refresh token for a new token pair. The refresh

@@ -81,7 +81,10 @@ export function DestroyDialog({
           <TaskProgressBanner
             clusterId={clusterId}
             upid={upid}
-            onComplete={() => {
+            onComplete={(success) => {
+              // A failed destroy leaves the guest, and the banner says why:
+              // stay, rather than leave for the inventory as if it had gone.
+              if (!success) return;
               handleClose();
               void navigate("/inventory");
             }}

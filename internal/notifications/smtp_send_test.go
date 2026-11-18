@@ -181,6 +181,10 @@ func TestSendSMTPMessage_RejectsCleartextToNonLoopback(t *testing.T) {
 	if !strings.Contains(err.Error(), "loopback") {
 		t.Fatalf("expected loopback gate error, got: %v", err)
 	}
+	// The text reaches a Viewer-readable dead-letter entry: it names no address.
+	if strings.Contains(err.Error(), "1.1.1.1") {
+		t.Fatalf("the refusal names the address: %v", err)
+	}
 }
 
 func dialFake(t *testing.T, addr string) net.Conn {

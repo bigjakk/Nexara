@@ -29,6 +29,7 @@ import {
 } from "@/features/backup/api/backup-queries";
 import { useClusterStorage } from "@/features/clusters/api/cluster-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
 import { RestoreDialog } from "@/features/backup/components/RestoreDialog";
 import { TaskProgressBanner } from "./TaskProgressBanner";
@@ -62,6 +63,10 @@ export function BackupPanel({
   kind,
 }: BackupPanelProps) {
   const { t } = useTranslation("backup");
+  // A backup and a restore take manage:backup, a delete delete:backup.
+  const { hasPermission } = usePermissions();
+  const canBackUp = hasPermission("manage", "backup");
+  const canDeleteBackup = hasPermission("delete", "backup");
   const backupId = String(vmid);
   const {
     data: backups,
@@ -133,7 +138,7 @@ export function BackupPanel({
         }
         actions={
           // As before the rebuild: a list that failed to load offers nothing.
-          error ? undefined : (
+          error || !canBackUp ? undefined : (
             <Button
               size="sm"
               className="gap-1.5"
@@ -241,25 +246,29 @@ export function BackupPanel({
                             data, so nothing is restored or deleted from here. */}
                         {!backups.storage_unread && (
                           <div className="flex items-center justify-end gap-1">
-                            <RestoreDialog
-                              snapshot={snap}
-                              pbsId={snap.pbs_server_id}
-                              defaultClusterId={clusterId}
-                              defaultNode={nodeName}
-                            />
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                              title="Delete backup"
-                              aria-label="Delete backup"
-                              onClick={() => {
-                                setDeleteTarget(snap);
-                              }}
-                              disabled={snap.protected}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {canBackUp && (
+                              <RestoreDialog
+                                snapshot={snap}
+                                pbsId={snap.pbs_server_id}
+                                defaultClusterId={clusterId}
+                                defaultNode={nodeName}
+                              />
+                            )}
+                            {canDeleteBackup && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                                title="Delete backup"
+                                aria-label="Delete backup"
+                                onClick={() => {
+                                  setDeleteTarget(snap);
+                                }}
+                                disabled={snap.protected}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </div>
                         )}
                       </TableCell>

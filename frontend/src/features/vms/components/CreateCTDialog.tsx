@@ -484,8 +484,9 @@ export function CreateCTDialog({
             <TaskProgressBanner
               clusterId={clusterId}
               upid={upid}
-              onComplete={() => {
-                handleClose();
+              onComplete={(success) => {
+                // A failed create stays open on the banner, which says why.
+                if (success) handleClose();
               }}
               description={`Create CT ${hostname || vmid}`}
             />

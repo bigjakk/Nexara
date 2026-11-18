@@ -259,7 +259,7 @@ describe("websocket-store", () => {
   });
 
   // The server closed it because its session ended: the app is asked to check
-  // its session (which signs out), and the mint's 403 keeps backing off.
+  // its session (which signs out), and the refused mint keeps backing off.
   it("asks the app to check its session when the server ends it, then backs off", async () => {
     sessionEndedSpy.mockClear();
     useWebSocketStore.getState().connect();
@@ -274,7 +274,7 @@ describe("websocket-store", () => {
     MockWebSocket.instances[1]?.simulateOpen();
     MockWebSocket.instances[1]?.simulateMessage({ type: "welcome" });
 
-    mintSpy.mockRejectedValue(new Error("403"));
+    mintSpy.mockRejectedValue(new Error("401"));
     MockWebSocket.instances[1]?.simulateClose(3000);
     expect(sessionEndedSpy).toHaveBeenCalledTimes(1);
 

@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type RFB from "@novnc/novnc";
 import { renderWithProviders } from "@/test/test-utils";
+import { GUEST_ACTION_PERMISSIONS, grantPermissions } from "@/test/permissions";
 import { stubApi } from "@/test/fetch-stub";
 import { makeVM } from "@/test/cluster.fixtures";
 import type { ConsoleTab } from "../types/console";
@@ -76,6 +77,28 @@ describe("VNCToolbar — paste", () => {
 });
 
 describe("VNCToolbar — power", () => {
+  beforeEach(() => {
+    grantPermissions(...GUEST_ACTION_PERMISSIONS);
+  });
+
+  it("offers no power action to a user without execute", async () => {
+    grantPermissions("view:vm");
+    const api = stubApi({
+      "/api/v1/clusters/c1/vms/v1": makeVM({ status: "running" }),
+    });
+    renderWithProviders(
+      <VNCToolbar
+        rfb={fakeConsole().rfb}
+        tab={{ ...TAB, resourceId: "v1", kind: "vm" }}
+      />,
+    );
+    await waitFor(() => {
+      expect(api.sent).toContain("GET /api/v1/clusters/c1/vms/v1");
+    });
+    expect(screen.queryByRole("button", { name: "Power" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Media/ })).toBeNull();
+  });
+
   it("offers a VM asleep in S3 the actions its QEMU state allows", async () => {
     stubApi({
       "/api/v1/clusters/c1/vms/v1": makeVM({
@@ -90,7 +113,10 @@ describe("VNCToolbar — power", () => {
         tab={{ ...TAB, resourceId: "v1", kind: "vm" }}
       />,
     );
-    await user.click(await screen.findByRole("button", { name: "Power" }));
+    const power = await screen.findByRole("button", { name: "Power" });
+    // Media too: an open menu hides the rest of the toolbar from the queries.
+    expect(screen.getByRole("button", { name: "Media" })).toBeInTheDocument();
+    await user.click(power);
     const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
     expect(items).toEqual(["Stop", "Reset", "Resume"]);
   });

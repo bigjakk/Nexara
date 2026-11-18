@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { GUEST_ACTION_PERMISSIONS, grantPermissions } from "@/test/permissions";
 import { fireEvent, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
@@ -70,9 +71,33 @@ function generateRows(count: number): InventoryRow[] {
   );
 }
 
+beforeEach(() => {
+  grantPermissions(...GUEST_ACTION_PERMISSIONS);
+});
+
 describe("ResourceTable", () => {
   beforeEach(() => {
     localStorageMock.clear();
+  });
+
+  // Both offered every action whatever the role, and the server refused it.
+  it("offers a user without the permissions no guest action, in the row menu or the bulk toolbar", async () => {
+    grantPermissions("view:vm");
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceTable data={[makeRow({ key: "c1:vm:0" })]} />);
+    await user.click(screen.getByRole("checkbox", { name: "Select row" }));
+    const bulk = screen.getByRole("group", { name: "Bulk actions" });
+    expect(
+      within(bulk)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Clear"]);
+    await user.click(
+      screen.getByRole("button", { name: "Actions for test-vm" }),
+    );
+    for (const name of ["Shutdown", "Clone", "Migrate", "Destroy"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
   it("renders empty state when no data", () => {

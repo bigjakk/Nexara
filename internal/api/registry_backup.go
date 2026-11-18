@@ -871,7 +871,8 @@ func restoreBackupParams() apischema.Properties {
 		"force": optFlag("Overwrite an existing guest with this VMID. Requires delete:vm (delete:container for a ct) " +
 			"on this cluster, whether or not a guest holds the VMID. The guest is stopped first, as a task of its own, " +
 			"once the storage the archive is read through has been found."),
-		"unique": optFlag("Assign fresh MAC addresses to the restored guest's network devices."),
+		"unique": optFlag("Assign fresh MAC addresses to the restored guest's network devices, and a VM a new " +
+			"SMBIOS UUID (qemu-server's restore does both), which is what Veeam matches a guest on."),
 		"start_after_restore": optFlag(
 			"Start the guest once the restore finishes. Proxmox starts it at the end of the restore task " +
 				"(its \"start\" option), which then needs VM.PowerMgmt on the guest as well."),

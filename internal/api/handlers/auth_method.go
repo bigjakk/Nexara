@@ -72,8 +72,8 @@ const sessionEndedMessage = "Session has ended"
 // errSessionEnded and errNoSession are LiveCredential's two refusals: the session the
 // access token names has ended, or the token names none (it was issued before tokens
 // named their session). Both are 401 "Session has ended"; they are two values so that
-// a caller can tell them apart with errors.Is, as wsTokenRefusal does, without reading
-// the status code — which another refusal could share.
+// a caller can tell them apart with errors.Is without reading the status code — which
+// another refusal could share.
 var (
 	errSessionEnded = fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)
 	errNoSession    = fiber.NewError(fiber.StatusUnauthorized, sessionEndedMessage)

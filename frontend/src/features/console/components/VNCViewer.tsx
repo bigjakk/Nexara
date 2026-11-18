@@ -10,6 +10,7 @@ import {
 import { useConsoleSession, useConsoleStoreApi } from "@/stores/console-store";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useVMAction } from "@/features/vms/api/vm-queries";
+import { useGuestActionAllowed } from "@/features/vms/lib/vm-action-defs";
 import { useGuestPowerSync } from "../hooks/useGuestPowerSync";
 import { useIdleTabOnUnmount } from "../hooks/useIdleTabOnUnmount";
 import {
@@ -395,6 +396,7 @@ function ConsoleStateOverlay({
   const actionMutation = useVMAction();
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
+  const allowed = useGuestActionAllowed();
 
   const status = tab.status;
   if (status === "connected") return null;
@@ -459,7 +461,8 @@ function ConsoleStateOverlay({
             : undefined
         }
       >
-        {hasResource && (
+        {/* A console role need not hold execute: the start is offered to one that does. */}
+        {hasResource && tab.kind && allowed("start", tab.kind) && (
           <Button
             size="sm"
             className="gap-1.5"

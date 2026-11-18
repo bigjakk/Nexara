@@ -194,7 +194,7 @@ export const useWebSocketStore = create<WebSocketState & WebSocketActions>()(
           // The server closed it because the sign-in that opened it has
           // ended (internal/ws/server.go, handleWS). Ask the app's session to
           // check itself: the refresh is refused and the app signs out. The
-          // reconnect below still backs off, as the mint now answers 403.
+          // reconnect below still backs off, as a refused mint (401) does.
           if (event.code === SESSION_ENDED_CLOSE) {
             consoleSessionEnded();
           }
