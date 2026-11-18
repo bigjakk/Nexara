@@ -210,7 +210,9 @@ const GLOBAL_PAGES: PageEntry[] = [
     description: "App branding and logo",
     icon: <Palette className="h-4 w-4" />,
     path: "/admin/branding",
-    requiredPermission: "manage:user",
+    // As the route and the branding writes take it.
+    requiredPermission: "manage:settings",
+    global: true,
   },
   {
     keywords: ["appearance", "theme", "dark", "light", "accent", "color"],

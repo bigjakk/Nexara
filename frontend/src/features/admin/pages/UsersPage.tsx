@@ -33,6 +33,7 @@ import { RoleAssignDialog } from "../components/RoleAssignDialog";
 import { CreateUserDialog } from "../components/CreateUserDialog";
 import { AdminNav } from "../components/AdminNav";
 import { SYSTEM_USER_ID } from "@/lib/constants";
+import { useAuthStore } from "@/stores/auth-store";
 
 const SOURCE_LABEL_KEYS: Record<string, "local" | "ldap" | "oidc"> = {
   local: "local",
@@ -44,6 +45,9 @@ export function UsersPage() {
   const { t } = useTranslation("admin");
   const { data: rawUsers, isLoading } = useUsers();
   const users = rawUsers?.filter((u) => u.id !== SYSTEM_USER_ID);
+  // Your own row offers nothing the server refuses on your own account:
+  // the active switch, the resets and the delete.
+  const me = useAuthStore((s) => s.user?.id);
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const resetTotp = useAdminResetTOTP();
@@ -159,6 +163,7 @@ export function UsersPage() {
                         email: user.email,
                       })}
                       checked={user.is_active}
+                      disabled={user.id === me}
                       onCheckedChange={(checked) => {
                         updateUser.mutate({ id: user.id, is_active: checked });
                       }}
@@ -178,87 +183,96 @@ export function UsersPage() {
                       >
                         {t("manageRoles")}
                       </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            aria-label={t("usersPage.moreActionsFor", {
-                              email: user.email,
-                            })}
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                          >
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {user.totp_enabled && (
+                      {user.id !== me && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              aria-label={t("usersPage.moreActionsFor", {
+                                email: user.email,
+                              })}
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {user.totp_enabled && (
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      t("reset2FAConfirm", {
+                                        email: user.email,
+                                      }),
+                                    )
+                                  ) {
+                                    resetTotp.mutate(user.id);
+                                  }
+                                }}
+                              >
+                                {t("reset2FA")}
+                              </DropdownMenuItem>
+                            )}
+                            {user.auth_source === "oidc" &&
+                              user.sso_linked === true && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    if (
+                                      confirm(
+                                        t("usersPage.resetSSOLinkConfirm", {
+                                          email: user.email,
+                                        }),
+                                      )
+                                    ) {
+                                      resetSSOLink.mutate(user.id);
+                                    }
+                                  }}
+                                >
+                                  {t("usersPage.resetSSOLink")}
+                                </DropdownMenuItem>
+                              )}
+                            {user.auth_source === "ldap" &&
+                              user.directory_linked === true && (
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    if (
+                                      confirm(
+                                        t(
+                                          "usersPage.resetDirectoryLinkConfirm",
+                                          {
+                                            email: user.email,
+                                          },
+                                        ),
+                                      )
+                                    ) {
+                                      resetDirectoryLink.mutate(user.id);
+                                    }
+                                  }}
+                                >
+                                  {t("usersPage.resetDirectoryLink")}
+                                </DropdownMenuItem>
+                              )}
                             <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
                               onClick={() => {
                                 if (
                                   confirm(
-                                    t("reset2FAConfirm", { email: user.email }),
+                                    t("deleteUserConfirm", {
+                                      email: user.email,
+                                    }),
                                   )
                                 ) {
-                                  resetTotp.mutate(user.id);
+                                  deleteUser.mutate(user.id);
                                 }
                               }}
                             >
-                              {t("reset2FA")}
+                              {t("deleteUser")}
                             </DropdownMenuItem>
-                          )}
-                          {user.auth_source === "oidc" &&
-                            user.sso_linked === true && (
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  if (
-                                    confirm(
-                                      t("usersPage.resetSSOLinkConfirm", {
-                                        email: user.email,
-                                      }),
-                                    )
-                                  ) {
-                                    resetSSOLink.mutate(user.id);
-                                  }
-                                }}
-                              >
-                                {t("usersPage.resetSSOLink")}
-                              </DropdownMenuItem>
-                            )}
-                          {user.auth_source === "ldap" &&
-                            user.directory_linked === true && (
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  if (
-                                    confirm(
-                                      t("usersPage.resetDirectoryLinkConfirm", {
-                                        email: user.email,
-                                      }),
-                                    )
-                                  ) {
-                                    resetDirectoryLink.mutate(user.id);
-                                  }
-                                }}
-                              >
-                                {t("usersPage.resetDirectoryLink")}
-                              </DropdownMenuItem>
-                            )}
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  t("deleteUserConfirm", { email: user.email }),
-                                )
-                              ) {
-                                deleteUser.mutate(user.id);
-                              }
-                            }}
-                          >
-                            {t("deleteUser")}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

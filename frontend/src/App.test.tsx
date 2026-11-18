@@ -168,8 +168,15 @@ describe("the app when the session changes hands", () => {
 });
 
 describe("the router's gates", () => {
-  // /clusters had no gate of its own, unlike its gated siblings.
-  it("refuses /clusters to a caller without view:cluster", async () => {
+  // Each had no gate of its own, unlike its gated siblings; the rail hid the
+  // link, but a typed address still opened the page.
+  it.each([
+    ["/clusters", "view:cluster"],
+    ["/events", "view:audit"],
+    ["/admin/branding", "manage:settings"],
+    ["/reports", "view:report"],
+    ["/reports/runs/run-1", "view:report"],
+  ])("refuses %s to a caller without %s", async (path, permission) => {
     act(() => {
       storeTokens(authResponse(VIEWER));
       useAuthStore.getState().setAuthFromResponse(authResponse(VIEWER));
@@ -177,11 +184,11 @@ describe("the router's gates", () => {
     renderTheApp();
     // The router reads the address at import, so this goes as a Back would.
     act(() => {
-      window.history.pushState({}, "", "/clusters");
+      window.history.pushState({}, "", path);
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     try {
-      expect(await screen.findByText("view:cluster")).toBeInTheDocument();
+      expect(await screen.findByText(permission)).toBeInTheDocument();
     } finally {
       act(() => {
         window.history.pushState({}, "", "/");

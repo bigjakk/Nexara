@@ -92,8 +92,9 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 			"manage:role IN ADDITION. Every field is optional and an omitted one is left alone. A caller " +
 			"cannot change their own role or their own active status, the system account cannot be " +
 			"edited, and deactivating an account ends every one of its sessions at once, so none of its " +
-			"refresh tokens works afterwards. It does not recall an access token the account was already " +
-			"issued: that stays valid until it expires (15 minutes by default). The deactivation and the " +
+			"refresh tokens works afterwards; an access token it was already issued is refused at its next " +
+			"request, except on the owner's remedies (sign out everywhere, end a session, change the password), " +
+			"which admit an ended session. The deactivation and the " +
 			"end of the account's sessions are one transaction: when the sessions cannot be ended the " +
 			"account stays active and the answer (503, or 500) says it was NOT changed; an answer that " +
 			"says the change could not be confirmed means it may have taken effect, and repeating it is " +
@@ -120,7 +121,8 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Description: "Reset a single sign-on account's link to its identity provider: the stored issuer and " +
 			"subject are cleared, so the account's next SSO sign-in links again to whichever identity " +
 			"presents its address, and every session of the account ends at once (an access token " +
-			"already issued stays valid until it expires). 400 when the account has no link (a local or " +
+			"already issued is refused at its next request, except on the owner's remedies, which admit an " +
+			"ended session). 400 when the account has no link (a local or " +
 			"LDAP account never has one). A caller cannot reset their own. The reset and the end of the " +
 			"sessions are one transaction: an answer that says the link was NOT reset changed nothing; " +
 			"one that says it could not be confirmed may have taken effect, and repeating it is safe.",
@@ -135,7 +137,8 @@ func registerUserEndpoints(reg *Registry, h *handlers.UserHandler) {
 		Description: "Reset a directory (LDAP) account's link to its directory entry: the stored entry " +
 			"identifier (entryUUID or objectGUID) is cleared, so the account's next sign-in or sync binds it " +
 			"again to whichever entry presents its address, and every session of the account ends at once " +
-			"(an access token already issued stays valid until it expires). 400 when the account has no link " +
+			"(an access token already issued is refused at its next request, except on the owner's remedies, " +
+			"which admit an ended session). 400 when the account has no link " +
 			"(a local or SSO account never has one). A caller cannot reset their own. The reset and the end of " +
 			"the sessions are one transaction: an answer that says the link was NOT reset changed nothing; one " +
 			"that says it could not be confirmed may have taken effect, and repeating it is safe.",
@@ -188,8 +191,9 @@ func updateUserParams() apischema.Properties {
 			// document every edit that never mentioned it as flipping it.
 			Typetext: "<boolean>",
 			Description: "Whether the account may sign in. Omitted, it is left as it is. Setting it false " +
-				"ends the account's sessions at once (an access token already issued stays valid until " +
-				"it expires). A caller cannot change their own.",
+				"ends the account's sessions at once (an access token already issued is refused at its next " +
+				"request, except on the owner's remedies, which admit an ended session). A caller cannot change " +
+				"their own.",
 		},
 		"role": {
 			Type:     apischema.String,

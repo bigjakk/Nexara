@@ -2067,8 +2067,8 @@ after the node is back).
 | GET | `/migrations` | List migrations the caller can view on either endpoint cluster |
 | GET | `/migrations/:id` | Get migration details |
 | POST | `/migrations/:id/check` | Run pre-migration check |
-| POST | `/migrations/:id/execute` | Execute migration |
-| POST | `/migrations/:id/cancel` | Cancel migration |
+| POST | `/migrations/:id/execute` | Execute migration; `409` unless the job is pending or checking, a start by another request included |
+| POST | `/migrations/:id/cancel` | Cancel a pending job, one not yet started; `409` for any other, a job being checked included |
 | GET | `/clusters/:id/migrations` | List migrations for a cluster |
 
 ### CVE Scanning

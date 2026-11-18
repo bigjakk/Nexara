@@ -13,15 +13,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const cancelMigrationJob = `-- name: CancelMigrationJob :exec
+const cancelMigrationJob = `-- name: CancelMigrationJob :execrows
 UPDATE migration_jobs
 SET status = 'cancelled'
+WHERE id = $1 AND status = 'pending'
+`
+
+// Only a pending job: a check in progress would write its result over the
+// cancel, and a claimed job is already on its way to Proxmox.
+func (q *Queries) CancelMigrationJob(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelMigrationJob, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const claimMigrationJob = `-- name: ClaimMigrationJob :execrows
+UPDATE migration_jobs
+SET status = 'migrating'
 WHERE id = $1 AND status IN ('pending', 'checking')
 `
 
-func (q *Queries) CancelMigrationJob(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, cancelMigrationJob, id)
-	return err
+// Execute's claim: only one request starts a job, and from here a cancel finds
+// it started, although the orchestrator records the task only once Proxmox
+// has answered.
+func (q *Queries) ClaimMigrationJob(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, claimMigrationJob, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const completeMigrationJob = `-- name: CompleteMigrationJob :exec

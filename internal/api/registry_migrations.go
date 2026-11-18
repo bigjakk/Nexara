@@ -157,8 +157,9 @@ func registerMigrationEndpoints(reg *Registry, h *handlers.MigrationHandler) {
 		Method: fiber.MethodPost,
 		Path:   migrationScope + "/:id/execute",
 		Description: "Start a migration job. It runs detached, so the response says only that it started; " +
-			"poll the job for progress. Requires manage:migration on the job's source cluster, and on its " +
-			"target cluster as well when the two differ.",
+			"poll the job for progress. 409 unless the job is pending or checking, a start by another request " +
+			"included. Requires " +
+			"manage:migration on the job's source cluster, and on its target cluster as well when the two differ.",
 		Group:       "Migrations",
 		Permissions: Permissions{Deferred: migrationJobReason},
 		Parameters:  apischema.Properties{"id": migrationJobIDParam},
@@ -167,7 +168,8 @@ func registerMigrationEndpoints(reg *Registry, h *handlers.MigrationHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   migrationScope + "/:id/cancel",
-		Description: "Cancel a migration job. Requires manage:migration on the job's source cluster, and " +
+		Description: "Cancel a pending migration job, one not yet started; any other, a job being checked " +
+			"included, answers 409 and is left as it is. Requires manage:migration on the job's source cluster, and " +
 			"on its target cluster as well when the two differ.",
 		Group:       "Migrations",
 		Permissions: Permissions{Deferred: migrationJobReason},

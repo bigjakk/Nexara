@@ -494,6 +494,21 @@ func (h *MigrationHandler) Execute(c fiber.Ctx, p *apischema.Params) error {
 			"too many migrations in flight (max "+strconv.Itoa(MigrationConcurrencyLimit)+"); wait for one to finish before starting another")
 	}
 
+	// Claim the job: the status read above is not a lock, and two requests
+	// that both passed it would start it twice.
+	claimed, err := h.queries.ClaimMigrationJob(c.Context(), jobID)
+	if err != nil || claimed == 0 {
+		<-h.slots
+		if err != nil {
+			return fiber.NewError(fiber.StatusInternalServerError, "Failed to start migration job")
+		}
+		status := job.Status
+		if now, err := h.queries.GetMigrationJob(c.Context(), jobID); err == nil {
+			status = now.Status
+		}
+		return fiber.NewError(fiber.StatusConflict, "Job is not in a state that can be executed (status: "+status+")")
+	}
+
 	orch := h.newOrchestrator(c)
 
 	// Launch execution in a background goroutine rooted in shutdownCtx so a
@@ -552,8 +567,18 @@ func (h *MigrationHandler) Cancel(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	orch := h.newOrchestrator(c)
-	if err := orch.Cancel(c.Context(), jobID); err != nil {
+	cancelled, err := orch.Cancel(c.Context(), jobID)
+	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to cancel migration job")
+	}
+	if !cancelled {
+		// Only a job that has not started can be cancelled. This one had, or
+		// did since it was read: name what it is now, and audit nothing.
+		status := job.Status
+		if now, err := h.queries.GetMigrationJob(c.Context(), jobID); err == nil {
+			status = now.Status
+		}
+		return fiber.NewError(fiber.StatusConflict, "Job is not in a state that can be cancelled (status: "+status+")")
 	}
 
 	resourceIDCancel := jobID.String()

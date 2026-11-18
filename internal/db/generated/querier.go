@@ -57,7 +57,9 @@ type Querier interface {
 	// transaction the lock is held until that transaction ends, so the sign-ins that
 	// raced it decide after the whole revoke-all, not between its statements.
 	BumpUserAuthEpoch(ctx context.Context, id uuid.UUID) (int64, error)
-	CancelMigrationJob(ctx context.Context, id uuid.UUID) error
+	// Only a pending job: a check in progress would write its result over the
+	// cancel, and a claimed job is already on its way to Proxmox.
+	CancelMigrationJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CancelVMImportJob(ctx context.Context, id uuid.UUID) error
 	CheckUserPermission(ctx context.Context, arg CheckUserPermissionParams) (bool, error)
@@ -84,6 +86,10 @@ type Querier interface {
 	// still running, and returns the config; no row when another sync holds it (or the
 	// config is gone). One sync per config at a time, whichever replica runs it.
 	ClaimLDAPSyncLease(ctx context.Context, arg ClaimLDAPSyncLeaseParams) (LdapConfig, error)
+	// Execute's claim: only one request starts a job, and from here a cancel finds
+	// it started, although the orchestrator records the task only once Proxmox
+	// has answered.
+	ClaimMigrationJob(ctx context.Context, id uuid.UUID) (int64, error)
 	// ClassifyClusterObjectChanges decides, once, whether something on record
 	// explains each settled change, and which audit row does (explained_by). A change
 	// is explained only by an audit row whose action does what changed, for each

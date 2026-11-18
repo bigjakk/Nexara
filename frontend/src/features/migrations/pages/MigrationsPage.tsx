@@ -1,4 +1,5 @@
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -12,7 +13,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { UsageBar } from "@/components/UsageBar";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
+  useCancelMigration,
   useMigrationGuestNames,
   useMigrationJobs,
 } from "../api/migration-queries";
@@ -51,6 +54,9 @@ function MigrationProgress({ job }: { job: MigrationJob }) {
 export function MigrationsPage() {
   const { data: jobs, isLoading } = useMigrationJobs();
   const guestNames = useMigrationGuestNames(jobs);
+  const cancel = useCancelMigration();
+  const { hasPermission } = usePermissions();
+  const canCancel = hasPermission("manage", "migration");
   const summary =
     jobSummary(
       "migration",
@@ -93,46 +99,67 @@ export function MigrationsPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Progress</TableHead>
                 <TableHead>Created</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {jobs.map((job) => (
-                <TableRow key={job.id}>
-                  <TableCell className="whitespace-nowrap py-2">
-                    {guestNames.get(
-                      `${job.source_cluster_id}:${String(job.vmid)}`,
-                    ) !== undefined && (
-                      <span className="mr-1.5 font-medium">
-                        {guestNames.get(
-                          `${job.source_cluster_id}:${String(job.vmid)}`,
-                        )}
+              {jobs.map((job) => {
+                const name = guestNames.get(
+                  `${job.source_cluster_id}:${String(job.vmid)}`,
+                );
+                const kind = job.vm_type === "lxc" ? "CT" : "VM";
+                return (
+                  <TableRow key={job.id}>
+                    <TableCell className="whitespace-nowrap py-2">
+                      {name !== undefined && (
+                        <span className="mr-1.5 font-medium">{name}</span>
+                      )}
+                      <span className="tabular-nums">{job.vmid}</span>{" "}
+                      <span className="text-[12.5px] text-muted-foreground">
+                        {kind}
                       </span>
-                    )}
-                    <span className="tabular-nums">{job.vmid}</span>{" "}
-                    <span className="text-[12.5px] text-muted-foreground">
-                      {job.vm_type === "lxc" ? "CT" : "VM"}
-                    </span>
-                  </TableCell>
-                  <TableCell className="py-2">{job.source_node}</TableCell>
-                  <TableCell className="py-2">
-                    {job.target_node || (
-                      <span className="text-muted-foreground/60">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="py-2 text-muted-foreground">
-                    {TYPE_LABEL[job.migration_type]}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <MigrationStatusText status={job.status} />
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <MigrationProgress job={job} />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
-                    <DateTime value={job.created_at} />
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="py-2">{job.source_node}</TableCell>
+                    <TableCell className="py-2">
+                      {job.target_node || (
+                        <span className="text-muted-foreground/60">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-2 text-muted-foreground">
+                      {TYPE_LABEL[job.migration_type]}
+                    </TableCell>
+                    <TableCell className="py-2">
+                      <MigrationStatusText status={job.status} />
+                    </TableCell>
+                    <TableCell className="py-2">
+                      <MigrationProgress job={job} />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap py-2 text-[12.5px] text-muted-foreground">
+                      <DateTime value={job.created_at} />
+                    </TableCell>
+                    <TableCell className="py-1 text-right">
+                      {/* Only a job not yet run: the server refuses one that
+                        has started, and a check would put one back. */}
+                      {canCancel && job.status === "pending" && (
+                        <Button
+                          aria-label={`Cancel the migration of ${name ?? `${kind} ${String(job.vmid)}`}`}
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0"
+                          disabled={
+                            cancel.isPending && cancel.variables === job.id
+                          }
+                          onClick={() => {
+                            cancel.mutate(job.id);
+                          }}
+                        >
+                          <X />
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </Panel>

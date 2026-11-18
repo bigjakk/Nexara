@@ -314,9 +314,11 @@ const router = createBrowserRouter([
           {
             path: "events",
             element: (
-              <LazyPage>
-                <EventsPage />
-              </LazyPage>
+              <RequirePermission action="view" resource="audit">
+                <LazyPage>
+                  <EventsPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {
@@ -370,9 +372,11 @@ const router = createBrowserRouter([
           {
             path: "admin/branding",
             element: (
-              <LazyPage>
-                <BrandingPage />
-              </LazyPage>
+              <RequirePermission action="manage" resource="settings" global>
+                <LazyPage>
+                  <BrandingPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {
@@ -388,17 +392,21 @@ const router = createBrowserRouter([
           {
             path: "reports",
             element: (
-              <LazyPage>
-                <ReportsPage />
-              </LazyPage>
+              <RequirePermission action="view" resource="report">
+                <LazyPage>
+                  <ReportsPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {
             path: "reports/runs/:runId",
             element: (
-              <LazyPage>
-                <ReportViewerPage />
-              </LazyPage>
+              <RequirePermission action="view" resource="report">
+                <LazyPage>
+                  <ReportViewerPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {

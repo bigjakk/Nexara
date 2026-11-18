@@ -59,7 +59,7 @@ function stripQuotes(s: string): string {
  *
  * Supported syntax:
  * - `field:value`        — equality match (e.g. `type:vm`, `status:running`)
- * - `field:val1,val2`    — match any value (e.g. `status:running,paused`)
+ * - `field:val1,val2`    — match any value (e.g. `status:running,suspended`)
  * - `!field:value`       — negated match (e.g. `!status:stopped`)
  * - `field>N%`           — greater-than comparison (e.g. `cpu>80%`)
  * - `field<N%`           — less-than comparison (e.g. `mem<50%`)

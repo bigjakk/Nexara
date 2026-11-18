@@ -131,7 +131,7 @@
     "tlsFingerprint": "TLS fingerprint",
     "associatedClusterOptional": "Associated cluster (optional)",
     "associatedCluster": "Associated cluster",
-    "associatedClusterHint": "(used to scope backup coverage by cluster)",
+    "associatedClusterHint": "(roles on this cluster can see and manage it; with none, only install-wide roles can)",
     "none": "None",
     "selfSignedDescription": "The server at <url>{{url}}</url> uses a self-signed certificate. Verify this fingerprint matches your PBS host before accepting.",
     "fetchCertificateFailed": "Failed to fetch TLS certificate",

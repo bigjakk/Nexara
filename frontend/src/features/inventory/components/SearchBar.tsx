@@ -36,7 +36,8 @@ function SearchHelp() {
                 <code>type:vm</code> — vm, ct, lxc, qemu, node
               </div>
               <div>
-                <code>status:running</code> — running, stopped, paused, online…
+                <code>status:running</code> — running, stopped, suspended,
+                online…
               </div>
               <div>
                 <code>cluster:prod</code> — cluster name contains "prod"
@@ -83,7 +84,7 @@ function SearchHelp() {
             <span className="font-medium text-foreground">Advanced</span>
             <div className="mt-1 space-y-0.5">
               <div>
-                <code>status:running,paused</code> — match any (OR)
+                <code>status:running,suspended</code> — match any (OR)
               </div>
               <div>
                 <code>!status:stopped</code> — negation

@@ -63,7 +63,17 @@ UPDATE migration_jobs
 SET status = 'migrating', started_at = $2, upid = $3
 WHERE id = $1;
 
--- name: CancelMigrationJob :exec
+-- name: ClaimMigrationJob :execrows
+-- Execute's claim: only one request starts a job, and from here a cancel finds
+-- it started, although the orchestrator records the task only once Proxmox
+-- has answered.
+UPDATE migration_jobs
+SET status = 'migrating'
+WHERE id = $1 AND status IN ('pending', 'checking');
+
+-- name: CancelMigrationJob :execrows
+-- Only a pending job: a check in progress would write its result over the
+-- cancel, and a claimed job is already on its way to Proxmox.
 UPDATE migration_jobs
 SET status = 'cancelled'
-WHERE id = $1 AND status IN ('pending', 'checking');
+WHERE id = $1 AND status = 'pending';

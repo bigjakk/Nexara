@@ -116,7 +116,8 @@ export function useCancelMigration() {
       apiClient.post<{ status: string }>(
         apiPath`/api/v1/migrations/${id}/cancel`,
       ),
-    onSuccess: (_data, id) => {
+    // A 409 means the job moved on since the list was read: refresh it too.
+    onSettled: (_data, _error, id) => {
       void queryClient.invalidateQueries({ queryKey: ["migrations", id] });
       void queryClient.invalidateQueries({ queryKey: ["migrations"] });
     },

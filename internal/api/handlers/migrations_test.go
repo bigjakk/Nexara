@@ -2,7 +2,19 @@ package handlers
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/migration"
 )
 
 // TestNewMigrationHandler_SlotCapacity asserts the slot semaphore has the
@@ -64,5 +76,86 @@ func TestMigrationSlots_NonBlockingSendRejectsWhenFull(t *testing.T) {
 		// expected — slot was released.
 	default:
 		t.Fatal("expected non-blocking send to succeed after a slot is released")
+	}
+}
+
+// migrationJobDBTX serves one migration job in status, answers the cancel and
+// the claim as their WHERE clauses do (matching nothing once taken, when the job
+// moved on after the handler read it), and notes whether an audit row was written.
+type migrationJobDBTX struct {
+	cluster uuid.UUID
+	status  string
+	taken   bool
+	audited bool
+}
+
+func (d *migrationJobDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	rows := func(ok bool) (pgconn.CommandTag, error) {
+		if ok && !d.taken {
+			return pgconn.NewCommandTag("UPDATE 1"), nil
+		}
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}
+	switch {
+	case strings.Contains(sql, "-- name: CancelMigrationJob "):
+		return rows(d.status == migration.StatusPending)
+	case strings.Contains(sql, "-- name: ClaimMigrationJob "):
+		return rows(d.status == migration.StatusPending || d.status == migration.StatusChecking)
+	case strings.Contains(sql, "-- name: InsertAuditLog "):
+		d.audited = true
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func (*migrationJobDBTX) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errCaptured
+}
+
+func (d *migrationJobDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	if strings.Contains(sql, "-- name: GetMigrationJob ") {
+		return replayRow{row: db.MigrationJob{SourceClusterID: d.cluster, TargetClusterID: d.cluster,
+			Status: d.status, Vmid: 100}}
+	}
+	return failRow{err: pgx.ErrNoRows}
+}
+
+// A cancel that changed nothing answered "cancelled" and audited it, for a job
+// already migrating; two Executes that both read "pending" both started the job.
+// The first row proves the fake cancels and audits at all.
+func TestMigrationJob_RefusesAJobThatHasStarted(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, action, status string
+		taken                bool
+		want                 int
+		audited              bool
+	}{
+		{"cancel pending", "cancel", migration.StatusPending, false, fiber.StatusOK, true},
+		{"cancel migrating", "cancel", migration.StatusMigrating, false, fiber.StatusConflict, false},
+		{"execute started by another request", "execute", migration.StatusPending, true, fiber.StatusConflict, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			d := &migrationJobDBTX{cluster: uuid.New(), status: tt.status, taken: tt.taken}
+			h := NewMigrationHandler(context.Background(), db.New(d), "", nil)
+			app := fiber.New(fiber.Config{ErrorHandler: testErrorHandler})
+			app.Use(func(c fiber.Ctx) error {
+				c.Locals("user_id", uuid.New())
+				c.Locals("rbac_engine", clusterGrantEngine{"manage", "migration", d.cluster})
+				return c.Next()
+			})
+			id := apischema.Properties{"id": {Type: apischema.String, Format: "uuid"}}
+			app.Post("/migrations/:id/cancel", withRequestParams(t, id, []string{"id"}, h.Cancel))
+			app.Post("/migrations/:id/execute", withRequestParams(t, id, []string{"id"}, h.Execute))
+			resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/migrations/"+uuid.NewString()+"/"+tt.action, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != tt.want || d.audited != tt.audited || len(h.slots) != 0 {
+				t.Errorf("status %d, audited %v, %d slots held; want %d, %v, none",
+					resp.StatusCode, d.audited, len(h.slots), tt.want, tt.audited)
+			}
+		})
 	}
 }

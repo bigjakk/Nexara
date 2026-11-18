@@ -1436,9 +1436,14 @@ func (o *Orchestrator) recordDiskMove(ctx context.Context, mc *migrationContext,
 	o.eventPub.ClusterEvent(ctx, mc.job.SourceClusterID.String(), events.KindTaskCreated, "task", upid, "move_disk")
 }
 
-// Cancel cancels a pending or checking job.
-func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) error {
-	return o.queries.CancelMigrationJob(ctx, jobID)
+// Cancel cancels a pending job, and reports whether it did: a job being checked,
+// started or ended is left as it is.
+func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) (bool, error) {
+	n, err := o.queries.CancelMigrationJob(ctx, jobID)
+	if err != nil {
+		return false, fmt.Errorf("cancel migration job: %w", err)
+	}
+	return n > 0, nil
 }
 
 // formatMapping converts a map to Proxmox's "src:tgt,src2:tgt2" format.

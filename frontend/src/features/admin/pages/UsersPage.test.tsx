@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import type { UserListItem } from "@/types/api";
+import { useAuthStore } from "@/stores/auth-store";
 import { UsersPage } from "./UsersPage";
 
 const account = (
@@ -50,6 +51,10 @@ vi.mock("@/features/settings/api/totp-queries", () => ({
 }));
 
 describe("UsersPage", () => {
+  afterEach(() => {
+    useAuthStore.setState({ user: null });
+  });
+
   // Each reset is offered for a linked account of its source only, and confirms first.
   it.each([
     ["Reset SSO link", "alice@example.com", "carol@example.com", resetSSOLink],
@@ -81,4 +86,30 @@ describe("UsersPage", () => {
       confirm.mockRestore();
     },
   );
+
+  // Each of these is refused on your own account; the row offered them all.
+  it("offers no reset, delete or deactivation on your own row", () => {
+    useAuthStore.setState({
+      user: {
+        id: "alice@example.com",
+        email: "alice@example.com",
+        display_name: "",
+        role: "admin",
+      },
+    });
+    renderWithProviders(<UsersPage />);
+    expect(
+      screen.queryByRole("button", {
+        name: "More actions for alice@example.com",
+      }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("switch", { name: "alice@example.com is active" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: "More actions for carol@example.com",
+      }),
+    ).toBeInTheDocument();
+  });
 });
