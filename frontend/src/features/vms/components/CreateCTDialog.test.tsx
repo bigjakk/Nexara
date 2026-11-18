@@ -5,6 +5,7 @@ import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { makeStorage } from "@/test/storage.fixtures";
 import type { StorageResponse } from "@/types/api";
+import type { StorageContentItem } from "@/features/storage/types/storage";
 import { useAuthStore } from "@/stores/auth-store";
 import { CreateCTDialog } from "./CreateCTDialog";
 
@@ -31,12 +32,26 @@ const ROOTDIR = makeStorage({
   content: "rootdir,images",
 });
 
-/** Answers the dialog's reads: `nodes`, and `storage` for the stores. */
-function serve(storage: StorageResponse[] = [ROOTDIR], nodes = [NODE]) {
+/**
+ * Answers the dialog's reads: `nodes`, `storage` for the stores, and
+ * `content` by store row id for a store's template list.
+ */
+function serve(
+  storage: StorageResponse[] = [ROOTDIR],
+  nodes = [NODE],
+  content: Record<string, StorageContentItem[]> = {},
+) {
   const answer = (path: unknown) => {
     const p = String(path);
+    const row = /\/storage\/([^/]+)\/content$/.exec(p)?.[1];
     return Promise.resolve(
-      p.endsWith("/nodes") ? nodes : p.endsWith("/storage") ? storage : [],
+      row !== undefined
+        ? (content[row] ?? [])
+        : p.endsWith("/nodes")
+          ? nodes
+          : p.endsWith("/storage")
+            ? storage
+            : [],
     );
   };
   vi.mocked(apiClient.list).mockImplementation(answer);
@@ -169,6 +184,62 @@ describe("CreateCTDialog", () => {
 
     expect(screen.getByLabelText<HTMLSelectElement>("Storage").value).toBe(
       "store01",
+    );
+  });
+
+  // A template list is read on the node that has the store: after a node
+  // change the list was still pve-01's, and its template was sent to pve-02.
+  it("drops a template chosen from a store the new node lacks, and keeps a typed one", async () => {
+    const node2 = { ...NODE, id: "node-02", name: "pve-02" };
+    const local = makeStorage({
+      cluster_id: "cluster01",
+      storage: "local",
+      content: "vztmpl",
+    });
+    const template: StorageContentItem = {
+      volid: "local:vztmpl/debian-12.tar.zst",
+      format: "tzst",
+      size: 1,
+      ctime: 1,
+      content: "vztmpl",
+    };
+    serve(
+      [
+        ROOTDIR,
+        { ...ROOTDIR, id: "st-02", node_id: "node-02" },
+        { ...local, id: "t1", node_id: "node-01" },
+        { ...local, id: "t2", node_id: "node-02" },
+      ],
+      [NODE, node2],
+      { t1: [template] },
+    );
+    const user = await openWithTemplate();
+    await user.clear(screen.getByLabelText("Template path"));
+    await user.selectOptions(screen.getByLabelText("Template storage"), ["t1"]);
+    await user.selectOptions(await screen.findByLabelText("Template"), [
+      template.volid,
+    ]);
+    const toNode = async (name: string) => {
+      await user.click(screen.getByRole("button", { name: /^General/ }));
+      await user.selectOptions(screen.getByLabelText("Node"), [name]);
+      await user.click(screen.getByRole("button", { name: /^Template/ }));
+    };
+
+    await toNode("pve-02");
+    expect(screen.getByLabelText<HTMLInputElement>("Template path").value).toBe(
+      "",
+    );
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.type(
+      screen.getByLabelText("Template path"),
+      "local:vztmpl/alpine.tar.zst",
+    );
+    // There and back: on pve-02, where the store is gone, only typing keeps it.
+    await toNode("pve-01");
+    await toNode("pve-02");
+    expect(screen.getByLabelText<HTMLInputElement>("Template path").value).toBe(
+      "local:vztmpl/alpine.tar.zst",
     );
   });
 

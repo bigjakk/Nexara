@@ -116,10 +116,6 @@ export function CreateCTDialog({
   const [node, setNode] = useState("");
 
   const [templateStorageId, setTemplateStorageId] = useState("");
-  const { data: templateContent } = useStorageContent(
-    clusterId,
-    templateStorageId,
-  );
 
   // Storages are filtered by both content type AND target-node reachability.
   // A storage is reachable from the target node iff it's marked shared (visible
@@ -132,6 +128,15 @@ export function CreateCTDialog({
     () => filterStorageByContent(storageList, "vztmpl", nodes, node),
     [storageList, nodes, node],
   );
+  // A store pick the chosen node does not have counts as none: its list was
+  // read on the node that has it (by row id), and a template chosen from it
+  // goes with it.
+  const templateStore = templateStoragePools.some(
+    (p) => p.id === templateStorageId,
+  )
+    ? templateStorageId
+    : "";
+  const { data: templateContent } = useStorageContent(clusterId, templateStore);
 
   const templates = useMemo(() => {
     if (!templateContent) return [];
@@ -197,6 +202,10 @@ export function CreateCTDialog({
 
   // Step 2: Template
   const [selectedTemplate, setSelectedTemplate] = useState("");
+  // Typed as a path, a template names its own store and stays whatever the
+  // node; chosen from the list, it is sent only while its store is on the node.
+  const [templateTyped, setTemplateTyped] = useState(false);
+  const ostemplate = templateTyped || templateStore ? selectedTemplate : "";
 
   // Step 3: Root Disk
   // The root disk's store, by name (a node's own store has a row per node):
@@ -327,7 +336,7 @@ export function CreateCTDialog({
           vmid: Number(vmid),
           hostname,
           node,
-          ostemplate: selectedTemplate,
+          ostemplate,
           storage: rootName,
           rootfs,
           memory: Number(memory),
@@ -367,6 +376,7 @@ export function CreateCTDialog({
     setNesting(false);
     setTemplateStorageId("");
     setSelectedTemplate("");
+    setTemplateTyped(false);
     setRootStorageName("");
     setDiskSize("8");
     setCores("1");
@@ -412,7 +422,7 @@ export function CreateCTDialog({
       case "general":
         return Number(vmid) > 0 && node !== "";
       case "template":
-        return selectedTemplate !== "";
+        return ostemplate !== "";
       case "rootdisk":
         return Number(diskSize) > 0 && rootStore !== undefined;
       case "cpu_memory":
@@ -638,10 +648,11 @@ export function CreateCTDialog({
                 <Field label="Template storage" htmlFor="ct-template-storage">
                   <NativeSelect
                     id="ct-template-storage"
-                    value={templateStorageId}
+                    value={templateStore}
                     onChange={(e) => {
                       setTemplateStorageId(e.target.value);
                       setSelectedTemplate("");
+                      setTemplateTyped(false);
                     }}
                   >
                     <option value="">Select storage</option>
@@ -652,7 +663,7 @@ export function CreateCTDialog({
                     ))}
                   </NativeSelect>
                 </Field>
-                {templateStorageId && (
+                {templateStore && (
                   <Field
                     label="Template"
                     htmlFor="ct-template"
@@ -666,6 +677,7 @@ export function CreateCTDialog({
                       value={selectedTemplate}
                       onChange={(e) => {
                         setSelectedTemplate(e.target.value);
+                        setTemplateTyped(false);
                       }}
                     >
                       <option value="">Select template</option>
@@ -678,17 +690,14 @@ export function CreateCTDialog({
                     </NativeSelect>
                   </Field>
                 )}
-                {templateStorageId &&
-                  selectedTemplate &&
-                  looksLikeOCI(selectedTemplate) && (
-                    <WarningCallout title="OCI image (tech preview)">
-                      <p>
-                        Layers are squashed on create. In-place updates are not
-                        supported: re-create the container to apply image
-                        changes.
-                      </p>
-                    </WarningCallout>
-                  )}
+                {ostemplate && looksLikeOCI(ostemplate) && (
+                  <WarningCallout title="OCI image (tech preview)">
+                    <p>
+                      Layers are squashed on create. In-place updates are not
+                      supported: re-create the container to apply image changes.
+                    </p>
+                  </WarningCallout>
+                )}
                 <Field
                   label="Template path"
                   htmlFor="ct-template-path"
@@ -696,9 +705,10 @@ export function CreateCTDialog({
                 >
                   <Input
                     id="ct-template-path"
-                    value={selectedTemplate}
+                    value={ostemplate}
                     onChange={(e) => {
                       setSelectedTemplate(e.target.value);
+                      setTemplateTyped(true);
                     }}
                     placeholder="local:vztmpl/ubuntu-22.04-standard_22.04-1_amd64.tar.zst"
                   />
@@ -1207,9 +1217,7 @@ export function CreateCTDialog({
                   action={editStep("template")}
                 >
                   <PropertyList>
-                    <PropertyRow label="Template">
-                      {selectedTemplate}
-                    </PropertyRow>
+                    <PropertyRow label="Template">{ostemplate}</PropertyRow>
                     <PropertyRow label="Root disk">
                       {diskSize} GiB
                       {rootStore ? ` on ${rootStore.storage}` : ""}
