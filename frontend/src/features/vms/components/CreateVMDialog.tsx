@@ -142,6 +142,11 @@ export function CreateVMDialog({
   const createMutation = useCreateVM();
   const settle = useSaveOutcome(open);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which look for a created VM is current. A closed dialog, or the next
+  // create, ends the last one: its poll and timeout must not act on what the
+  // dialog holds now (they wiped a second VM's wizard and went to the first).
+  const searchRef = useRef(0);
 
   const [node, setNode] = useState("");
   // The stores that hold disk images on the chosen node: one only another
@@ -177,19 +182,12 @@ export function CreateVMDialog({
     return diskFormatFor(diskStoreType(disk), disk.format);
   }
 
-  // Storage pools filtered for ISO images — track id+name for API calls
-  const isoStoragePools = useMemo(() => {
-    if (!storageList) return [];
-    const seen = new Set<string>();
-    return storageList
-      .filter((s) => {
-        if (!s.active || !s.enabled || !s.content.includes("iso")) return false;
-        if (seen.has(s.storage)) return false;
-        seen.add(s.storage);
-        return true;
-      })
-      .sort((a, b) => a.storage.localeCompare(b.storage));
-  }, [storageList]);
+  // ISO stores on the chosen node, by row id (content is read through it): an
+  // image listed from another node's own store is not there at create.
+  const isoStoragePools = useMemo(
+    () => filterStorageByContent(storageList, "iso", nodes, node),
+    [storageList, nodes, node],
+  );
 
   // Best available node: sort by available resources (total - allocated)
   const bestNode = useMemo(() => {
@@ -319,8 +317,17 @@ export function CreateVMDialog({
   const canStart = canExecute("vm");
   const [onboot, setOnboot] = useState(false);
 
-  // Fetch ISO content when isoStorage selected (using UUID)
-  const { data: isoContent } = useStorageContent(clusterId, isoStorageId);
+  // A pick the chosen node does not have counts as none, and its image with it.
+  // Content is read through the picked row.
+  const isoStore = isoStoragePools.some((p) => p.id === isoStorageId)
+    ? isoStorageId
+    : "";
+  const isoPicked = isoStore ? isoImage : "";
+  const virtioStore = isoStoragePools.some((p) => p.id === virtioIsoStorageId)
+    ? virtioIsoStorageId
+    : "";
+  const virtioPicked = virtioStore ? virtioIsoImage : "";
+  const { data: isoContent } = useStorageContent(clusterId, isoStore);
   const isoList = useMemo(
     () =>
       isoContent ? isoContent.filter((item) => item.content === "iso") : [],
@@ -328,10 +335,7 @@ export function CreateVMDialog({
   );
 
   // Fetch VirtIO drivers ISO content
-  const { data: virtioIsoContent } = useStorageContent(
-    clusterId,
-    virtioIsoStorageId,
-  );
+  const { data: virtioIsoContent } = useStorageContent(clusterId, virtioStore);
   const virtioIsoList = useMemo(
     () =>
       virtioIsoContent
@@ -470,10 +474,20 @@ export function CreateVMDialog({
     }
   }
 
+  /** Ends the current look for a created VM. */
+  function stopSearch() {
+    searchRef.current += 1;
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollTimerRef.current = null;
+    if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
+    safetyTimerRef.current = null;
+  }
+
   // Cleanup poll timer on unmount
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (safetyTimerRef.current) clearTimeout(safetyTimerRef.current);
     };
   }, []);
 
@@ -610,11 +624,11 @@ export function CreateVMDialog({
     }
 
     // OS ISO on ide2
-    const ide2 = isoImage ? `${isoImage},media=cdrom` : "";
+    const ide2 = isoPicked ? `${isoPicked},media=cdrom` : "";
 
     // VirtIO drivers ISO on ide3
-    if (virtioDrivers && virtioIsoImage) {
-      extra["ide3"] = `${virtioIsoImage},media=cdrom`;
+    if (virtioDrivers && virtioPicked) {
+      extra["ide3"] = `${virtioPicked},media=cdrom`;
     }
 
     // Build boot order from disk device names
@@ -686,6 +700,7 @@ export function CreateVMDialog({
   }
 
   function handleClose() {
+    stopSearch();
     setStep("general");
     setUpid(null);
     setVmid("");
@@ -826,6 +841,8 @@ export function CreateVMDialog({
               upid={upid}
               onComplete={() => {
                 // After task completes, poll for the new VM record and navigate to it
+                stopSearch();
+                const search = searchRef.current;
                 const createdVmid = Number(vmid);
                 // The session that created it. A look at the list that is already
                 // out when it ends is answered all the same, and what it finds is
@@ -843,15 +860,13 @@ export function CreateVMDialog({
                       ),
                     )
                     .then((vms) => {
-                      if (ended()) return;
+                      if (ended() || search !== searchRef.current) return;
                       const found = vms.find((v) => v.vmid === createdVmid);
                       if (found) {
-                        if (pollTimerRef.current)
-                          clearInterval(pollTimerRef.current);
-                        pollTimerRef.current = null;
-                        // Reset dialog state without closing
-                        createMutation.reset();
-                        onOpenChange(false);
+                        // Reset as well as close: the dialog is mounted once,
+                        // in AppShell, and kept the task, so the next Create
+                        // VM opened on it and went to this VM again.
+                        handleClose();
                         void navigate(`/inventory/vm/${clusterId}/${found.id}`);
                       }
                     })
@@ -863,12 +878,8 @@ export function CreateVMDialog({
                 pollForVM();
                 pollTimerRef.current = setInterval(pollForVM, 3000);
                 // Safety: stop polling after 30s and just close
-                setTimeout(() => {
-                  if (pollTimerRef.current) {
-                    clearInterval(pollTimerRef.current);
-                    pollTimerRef.current = null;
-                    handleClose();
-                  }
+                safetyTimerRef.current = setTimeout(() => {
+                  if (search === searchRef.current) handleClose();
                 }, 30000);
               }}
               description={`Create VM ${name || vmid}`}
@@ -1068,7 +1079,7 @@ export function CreateVMDialog({
                 <Field label="ISO storage" htmlFor="vm-iso-storage">
                   <NativeSelect
                     id="vm-iso-storage"
-                    value={isoStorageId}
+                    value={isoStore}
                     onChange={(e) => {
                       const selectedId = e.target.value;
                       setIsoStorageId(selectedId);
@@ -1086,14 +1097,14 @@ export function CreateVMDialog({
                 <Field label="ISO image" htmlFor="vm-iso-image">
                   <NativeSelect
                     id="vm-iso-image"
-                    value={isoImage}
+                    value={isoPicked}
                     onChange={(e) => {
                       setIsoImage(e.target.value);
                     }}
-                    disabled={!isoStorageId}
+                    disabled={!isoStore}
                   >
                     <option value="">
-                      {isoStorageId
+                      {isoStore
                         ? isoList.length === 0
                           ? "No ISOs found"
                           : "Select ISO"
@@ -1155,7 +1166,7 @@ export function CreateVMDialog({
                         >
                           <NativeSelect
                             id="vm-virtio-storage"
-                            value={virtioIsoStorageId}
+                            value={virtioStore}
                             onChange={(e) => {
                               setVirtioIsoStorageId(e.target.value);
                               setVirtioIsoImage("");
@@ -1175,14 +1186,14 @@ export function CreateVMDialog({
                         >
                           <NativeSelect
                             id="vm-virtio-image"
-                            value={virtioIsoImage}
+                            value={virtioPicked}
                             onChange={(e) => {
                               setVirtioIsoImage(e.target.value);
                             }}
-                            disabled={!virtioIsoStorageId}
+                            disabled={!virtioStore}
                           >
                             <option value="">
-                              {virtioIsoStorageId
+                              {virtioStore
                                 ? virtioIsoList.length === 0
                                   ? "No ISOs found"
                                   : "Select VirtIO ISO"
@@ -1847,14 +1858,14 @@ export function CreateVMDialog({
                 <FormSection title="Operating system" action={editStep("os")}>
                   <PropertyList>
                     <PropertyRow label="OS type">{osLabel}</PropertyRow>
-                    {isoImage && (
+                    {isoPicked && (
                       <PropertyRow label="ISO">
-                        {isoImage.split("/").pop()}
+                        {isoPicked.split("/").pop()}
                       </PropertyRow>
                     )}
-                    {virtioDrivers && virtioIsoImage && (
+                    {virtioDrivers && virtioPicked && (
                       <PropertyRow label="VirtIO ISO">
-                        {virtioIsoImage.split("/").pop()}
+                        {virtioPicked.split("/").pop()}
                       </PropertyRow>
                     )}
                   </PropertyList>

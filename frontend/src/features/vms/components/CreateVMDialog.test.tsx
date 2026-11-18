@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -25,6 +26,7 @@ import {
 } from "@/test/fake-server";
 import { emptyPerSessionStores } from "@/test/per-session-stores";
 import { renderWithProviders } from "@/test/test-utils";
+import { makeStorage } from "@/test/storage.fixtures";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import type { CreateVMRequest } from "../types/vm";
@@ -47,15 +49,12 @@ const CREATE = `POST /api/v1/clusters/${CLUSTER}/vms`;
 const TASK = `GET ${apiPath`/api/v1/clusters/${CLUSTER}/tasks/${UPID}`}`;
 const STORAGE = `GET /api/v1/clusters/${CLUSTER}/storage`;
 // A thin LVM store of pve-01's own (node-01), as storage_pools holds it.
-const THIN = {
+const THIN = makeStorage({
   storage: "store01",
   type: "lvmthin",
   content: "images,rootdir",
-  active: true,
-  enabled: true,
-  shared: false,
   node_id: "node-01",
-};
+});
 
 const VM = {
   id: "guest-01",
@@ -225,6 +224,23 @@ describe("CreateVMDialog, looking for the VM it created", () => {
 
     expect(visited.filter((path) => path.startsWith("/inventory"))).toEqual([]);
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  // A search left over from the last create acted on the next one: it wiped
+  // the wizard being filled in and went to the earlier VM.
+  it("leaves the next VM alone when the last create's search answers after a close", async () => {
+    await signInAs(ADMIN);
+    await createsTheVM();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "linux02" },
+    });
+    await theListAnswers();
+
+    expect(screen.getByLabelText("Name")).toHaveValue("linux02");
+    expect(visited.filter((path) => path.startsWith("/inventory"))).toEqual([]);
   });
 
   it("control: navigates to the VM, and closes, when the session goes on", async () => {
@@ -401,5 +417,54 @@ describe("CreateVMDialog, stores left unset", () => {
     // A VM without a disk is a choice of its own.
     await user.click(screen.getByRole("button", { name: "Remove disk 1" }));
     expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+  });
+});
+
+describe("CreateVMDialog, reopened and on its node", () => {
+  // The dialog is mounted once, in AppShell: closed after a create without a
+  // reset, it reopened on that task and went to the same VM again.
+  it("starts afresh after a create it has navigated away from", async () => {
+    const { user, next } = await openFilledIn();
+    for (let step = 0; step < 8; step++) await next();
+    listPhase = "with";
+    await user.click(screen.getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(await screen.findByLabelText("Node")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create VM" })).toBeNull();
+  });
+
+  // An ISO listed from another node's own store is not there at create.
+  it("offers only the ISO stores the chosen node has", async () => {
+    server.routes[STORAGE] = () =>
+      json({
+        items: [
+          THIN,
+          makeStorage({
+            id: "iso-n2",
+            storage: "store04",
+            content: "iso",
+            node_id: "node-02",
+          }),
+          makeStorage({
+            id: "iso-sh",
+            storage: "store03",
+            content: "iso",
+            shared: true,
+            node_id: "node-02",
+          }),
+        ],
+        total: 3,
+      });
+    const { next } = await openFilledIn();
+    await next(); // OS
+
+    const isoStores = within(screen.getByLabelText("ISO storage"))
+      .getAllByRole("option")
+      .map((o) => o.textContent);
+    expect(isoStores).toContain("store03");
+    expect(isoStores).not.toContain("store04");
   });
 });

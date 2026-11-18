@@ -102,7 +102,8 @@ export function CreateCTDialog({
 }: CreateCTDialogProps) {
   const { t } = useTranslation("vms");
   const { data: nodes } = useClusterNodes(clusterId);
-  const { data: storageList } = useClusterStorage(clusterId);
+  const { data: storageList, isPending: storagePending } =
+    useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
   const { data: pools } = useResourcePools(clusterId);
   const { data: clusterVMs } = useClusterVMs(clusterId);
@@ -198,8 +199,15 @@ export function CreateCTDialog({
   const [selectedTemplate, setSelectedTemplate] = useState("");
 
   // Step 3: Root Disk
-  const [rootStorageId, setRootStorageId] = useState(""); // UUID for display
-  const [rootStorageName, setRootStorageName] = useState(""); // name for Proxmox API
+  // The root disk's store, by name (a node's own store has a row per node):
+  // the pick where this node has it, else the node's first that holds
+  // container disks. "Default" sent neither storage nor rootfs, and Proxmox
+  // fell back to `local`, which normally refuses them.
+  const [rootStorageName, setRootStorageName] = useState("");
+  const rootStore =
+    rootdirStoragePools.find((p) => p.storage === rootStorageName) ??
+    rootdirStoragePools[0];
+  const noRootStore = !storagePending && rootStore === undefined;
   const [diskSize, setDiskSize] = useState("8");
 
   // Step 4: CPU & Memory
@@ -291,8 +299,8 @@ export function CreateCTDialog({
   }
 
   function handleSubmit() {
-    const rootfs =
-      rootStorageName && diskSize ? `${rootStorageName}:${diskSize}` : "";
+    const rootName = rootStore?.storage ?? "";
+    const rootfs = rootName && diskSize ? `${rootName}:${diskSize}` : "";
 
     const extra: Record<string, string> = {};
 
@@ -320,7 +328,7 @@ export function CreateCTDialog({
           hostname,
           node,
           ostemplate: selectedTemplate,
-          storage: rootStorageName,
+          storage: rootName,
           rootfs,
           memory: Number(memory),
           swap: Number(swap),
@@ -359,7 +367,6 @@ export function CreateCTDialog({
     setNesting(false);
     setTemplateStorageId("");
     setSelectedTemplate("");
-    setRootStorageId("");
     setRootStorageName("");
     setDiskSize("8");
     setCores("1");
@@ -407,7 +414,7 @@ export function CreateCTDialog({
       case "template":
         return selectedTemplate !== "";
       case "rootdisk":
-        return Number(diskSize) > 0;
+        return Number(diskSize) > 0 && rootStore !== undefined;
       case "cpu_memory":
         return Number(cores) > 0 && Number(memory) > 0;
       case "network":
@@ -487,12 +494,17 @@ export function CreateCTDialog({
               ) : (
                 // Why Next is held, said where it shows: the field that says
                 // it sits below the fold of this step.
-                step === "dns_options" &&
-                passwordMismatch && (
+                (step === "dns_options" && passwordMismatch && (
                   <p className="text-sm text-destructive">
                     Passwords do not match
                   </p>
-                )
+                )) ||
+                (step === "rootdisk" && noRootStore && (
+                  <p className="text-sm text-muted-foreground">
+                    No storage for container disks is available on{" "}
+                    {node || "this cluster"}.
+                  </p>
+                ))
               )
             }
             footer={
@@ -700,19 +712,16 @@ export function CreateCTDialog({
                 <Field label="Storage" htmlFor="ct-root-storage">
                   <NativeSelect
                     id="ct-root-storage"
-                    value={rootStorageId}
+                    value={rootStore?.storage ?? ""}
                     onChange={(e) => {
-                      const id = e.target.value;
-                      setRootStorageId(id);
-                      const found = rootdirStoragePools.find(
-                        (p) => p.id === id,
-                      );
-                      setRootStorageName(found ? found.storage : "");
+                      setRootStorageName(e.target.value);
                     }}
                   >
-                    <option value="">Default</option>
+                    <option value="" disabled>
+                      Select storage
+                    </option>
                     {rootdirStoragePools.map((p) => (
-                      <option key={p.id} value={p.id}>
+                      <option key={p.storage} value={p.storage}>
                         {p.storage}
                       </option>
                     ))}
@@ -1203,7 +1212,7 @@ export function CreateCTDialog({
                     </PropertyRow>
                     <PropertyRow label="Root disk">
                       {diskSize} GiB
-                      {rootStorageName ? ` on ${rootStorageName}` : ""}
+                      {rootStore ? ` on ${rootStore.storage}` : ""}
                     </PropertyRow>
                   </PropertyList>
                 </FormSection>
