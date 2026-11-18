@@ -19,6 +19,9 @@ import type { NodeResponse, StorageResponse } from "@/types/api";
  *  - Must support the requested content type.
  *  - Must be reachable from the target node — either marked shared, or its
  *    `node_id` matches the target node.
+ *  - Where the target node has a row of its own for the storage, that row
+ *    decides: a shared store disabled or unmounted on that node is left out,
+ *    though another node's row for it says it is fine.
  *  - When the target node cannot be resolved (e.g. before the user picks one)
  *    we skip the node-reachability filter to avoid an empty dropdown.
  *  - Results are deduped by storage name and sorted alphabetically.
@@ -36,10 +39,23 @@ export function filterStorageByContent(
       ? (nodes.find((n) => n.name === targetNodeName)?.id ?? null)
       : null;
 
+  const ownRow = new Map<string, StorageResponse>();
+  if (targetNodeId) {
+    for (const s of storageList) {
+      if (s.node_id === targetNodeId) ownRow.set(s.storage, s);
+    }
+  }
+
   const seen = new Set<string>();
   return storageList
     .filter((s) => {
+      // A row must be usable on its own node (its id is how a template list
+      // is read), and on the target node, whose own row says so. The first
+      // such row does not depend on the target, so a pick keyed by row id
+      // survives a node change.
       if (!s.active || !s.enabled) return false;
+      const own = ownRow.get(s.storage);
+      if (own && (!own.active || !own.enabled)) return false;
       if (
         !s.content
           .split(",")

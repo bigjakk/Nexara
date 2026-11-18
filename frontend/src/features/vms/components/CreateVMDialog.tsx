@@ -52,11 +52,13 @@ import {
   diskFormatFor,
   diskFormatToSend,
   diskFormatsForStorageType,
+  busTakes,
   cacheModes,
   diskBusTypes,
   osDefaults,
   isWindowsOS,
 } from "../lib/vm-config-constants";
+import { filterStorageByContent } from "../lib/storage-filter";
 
 interface CreateVMDialogProps {
   open: boolean;
@@ -132,7 +134,8 @@ export function CreateVMDialog({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: nodes } = useClusterNodes(clusterId);
-  const { data: storageList } = useClusterStorage(clusterId);
+  const { data: storageList, isPending: storagePending } =
+    useClusterStorage(clusterId);
   const { data: usedVMIDs } = useClusterVMIDs(clusterId);
   const { data: clusterVMs } = useClusterVMs(clusterId);
   const { data: resourcePools } = useResourcePools(clusterId);
@@ -140,21 +143,15 @@ export function CreateVMDialog({
   const settle = useSaveOutcome(open);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Storage pools filtered for disk images
+  const [node, setNode] = useState("");
+  // The stores that hold disk images on the chosen node: one only another
+  // node has would be refused at create (see filterStorageByContent).
   const imageStorageOptions = useMemo(
     () =>
-      storageList
-        ? [
-            ...new Set(
-              storageList
-                .filter(
-                  (s) => s.active && s.enabled && s.content.includes("images"),
-                )
-                .map((s) => s.storage),
-            ),
-          ].sort()
-        : [],
-    [storageList],
+      filterStorageByContent(storageList, "images", nodes, node).map(
+        (s) => s.storage,
+      ),
+    [storageList, nodes, node],
   );
 
   // Each store's type, for the disk formats it takes.
@@ -163,12 +160,21 @@ export function CreateVMDialog({
     [storageList],
   );
 
+  // A disk, EFI disk or TPM state left without a store was not sent at all, so
+  // the VM was made without it ("Default" meant nothing to Proxmox). One left
+  // unset goes to the first store that holds images, as Proxmox's wizard does.
+  // A pick the node does not have falls back too, so a select always shows
+  // the store that will be sent.
+  const firstImageStore = imageStorageOptions[0] ?? "";
+  const storeOf = (picked: string) =>
+    imageStorageOptions.includes(picked) ? picked : firstImageStore;
+  const noImageStore = !storagePending && imageStorageOptions.length === 0;
+  const diskStoreType = (disk: DiskEntry) =>
+    storageTypes.get(storeOf(disk.storage));
+
   /** The format a disk gets: its choice if its store takes it, else raw. */
   function effectiveFormat(disk: DiskEntry): string {
-    return diskFormatFor(
-      disk.storage ? storageTypes.get(disk.storage) : undefined,
-      disk.format,
-    );
+    return diskFormatFor(diskStoreType(disk), disk.format);
   }
 
   // Storage pools filtered for ISO images — track id+name for API calls
@@ -235,7 +241,6 @@ export function CreateVMDialog({
   // General
   const [vmid, setVmid] = useState("");
   const [name, setName] = useState("");
-  const [node, setNode] = useState("");
   const [pool, setPool] = useState("");
   const [tags, setTags] = useState("");
   const [description, setDescription] = useState("");
@@ -482,7 +487,13 @@ export function CreateVMDialog({
       ...prev,
       {
         id: nextDiskId,
-        bus: prev[0]?.bus ?? "scsi",
+        // With none left, the bus the OS defaults (or the VirtIO ISO) give a
+        // first disk: a Windows guest without VirtIO drivers sees no SCSI disk.
+        bus:
+          prev[0]?.bus ??
+          (virtioDrivers
+            ? "scsi"
+            : ((osDefaults[ostype] ?? osDefaults["other"])?.diskBus ?? "scsi")),
         size: "32",
         storage: prev[0]?.storage ?? "",
         format: "qcow2",
@@ -507,17 +518,17 @@ export function CreateVMDialog({
 
   // Build disk string for Proxmox
   function buildDiskString(disk: DiskEntry): string {
-    if (!disk.storage || !disk.size) return "";
-    const parts = [`${disk.storage}:${disk.size}`];
-    const format = diskFormatToSend(
-      storageTypes.get(disk.storage),
-      disk.format,
-    );
+    const store = storeOf(disk.storage);
+    if (!store || !disk.size) return "";
+    const parts = [`${store}:${disk.size}`];
+    const format = diskFormatToSend(diskStoreType(disk), disk.format);
     if (format) parts.push(`format=${format}`);
     if (disk.cache !== "none") parts.push(`cache=${disk.cache}`);
     if (disk.discard) parts.push("discard=on");
-    if (disk.ssd) parts.push("ssd=1");
-    if (disk.iothread) parts.push("iothread=1");
+    if (disk.ssd && busTakes(disk.bus, "ssd")) parts.push("ssd=1");
+    if (disk.iothread && busTakes(disk.bus, "iothread")) {
+      parts.push("iothread=1");
+    }
     return parts.join(",");
   }
 
@@ -568,15 +579,17 @@ export function CreateVMDialog({
   }
 
   function buildEfiDisk0(): string {
-    if (!efiDisk || !efiStorage) return "";
-    const format = diskFormatToSend(storageTypes.get(efiStorage), "qcow2");
+    const store = storeOf(efiStorage);
+    if (!efiDisk || !store) return "";
+    const format = diskFormatToSend(storageTypes.get(store), "qcow2");
     const formatPart = format ? `,format=${format}` : "";
-    return `${efiStorage}:1${formatPart},efitype=4m,pre-enrolled-keys=1`;
+    return `${store}:1${formatPart},efitype=4m,pre-enrolled-keys=1`;
   }
 
   function buildTpmState0(): string {
-    if (!tpmEnabled || !tpmStorage) return "";
-    return `${tpmStorage}:1,version=v2.0`;
+    const store = storeOf(tpmStorage);
+    if (!tpmEnabled || !store) return "";
+    return `${store}:1,version=v2.0`;
   }
 
   function handleSubmit() {
@@ -737,14 +750,36 @@ export function CreateVMDialog({
     onOpenChange(false);
   }
 
-  const canProceed =
-    step === "general"
-      ? Number(vmid) > 0 && node !== ""
-      : step === "cpu"
-        ? Number(cores) > 0
-        : step === "memory"
-          ? Number(memory) > 0
-          : true;
+  /**
+   * Whether a step's fields are complete. Next, the step list and Create hold
+   * at the first one that is not, so no disk the dialog shows is left out.
+   */
+  function stepComplete(id: Step): boolean {
+    switch (id) {
+      case "general":
+        return Number(vmid) > 0 && node !== "";
+      case "system":
+        return (
+          (!efiDisk || storeOf(efiStorage) !== "") &&
+          (!tpmEnabled || storeOf(tpmStorage) !== "")
+        );
+      case "disks":
+        return disks.every(
+          (d) => storeOf(d.storage) !== "" && Number(d.size) > 0,
+        );
+      case "cpu":
+        return Number(cores) > 0;
+      case "memory":
+        return Number(memory) > 0;
+      default:
+        return true;
+    }
+  }
+  const canProceed = stepComplete(step);
+  const firstIncomplete = steps.findIndex((s) => !stepComplete(s.id));
+  const canGoTo = (id: Step) =>
+    firstIncomplete < 0 ||
+    steps.findIndex((s) => s.id === id) <= firstIncomplete;
 
   const diskDevices = assignDiskDeviceNames();
   const osLabel = osTypes.find((o) => o.value === ostype)?.label ?? ostype;
@@ -844,11 +879,23 @@ export function CreateVMDialog({
             steps={steps}
             current={step}
             onStepChange={setStep}
+            canGoTo={canGoTo}
             notice={
-              createMutation.isError && (
+              createMutation.isError ? (
                 <p className="text-sm text-destructive">
                   {createMutation.error.message}
                 </p>
+              ) : (
+                noImageStore &&
+                (step === "system" ||
+                  step === "disks" ||
+                  step === "confirm") && (
+                  <p className="text-sm text-muted-foreground">
+                    No storage for disk images is available on{" "}
+                    {node || "this cluster"}, so the VM can only be made without
+                    a disk, an EFI disk or a TPM state.
+                  </p>
+                )
               )
             }
             footer={
@@ -887,7 +934,7 @@ export function CreateVMDialog({
                 ) : (
                   <Button
                     type="button"
-                    disabled={createMutation.isPending}
+                    disabled={createMutation.isPending || firstIncomplete >= 0}
                     onClick={handleSubmit}
                   >
                     {createMutation.isPending ? "Creating..." : "Create VM"}
@@ -1221,12 +1268,14 @@ export function CreateVMDialog({
                     >
                       <NativeSelect
                         id="vm-efi-storage"
-                        value={efiStorage}
+                        value={storeOf(efiStorage)}
                         onChange={(e) => {
                           setEfiStorage(e.target.value);
                         }}
                       >
-                        <option value="">Select storage</option>
+                        <option value="" disabled>
+                          Select storage
+                        </option>
                         {imageStorageOptions.map((s) => (
                           <option key={s} value={s}>
                             {s}
@@ -1267,12 +1316,14 @@ export function CreateVMDialog({
                     <Field label="TPM storage" htmlFor="vm-tpm-storage">
                       <NativeSelect
                         id="vm-tpm-storage"
-                        value={tpmStorage}
+                        value={storeOf(tpmStorage)}
                         onChange={(e) => {
                           setTpmStorage(e.target.value);
                         }}
                       >
-                        <option value="">Select storage for TPM</option>
+                        <option value="" disabled>
+                          Select storage for TPM
+                        </option>
                         {imageStorageOptions.map((s) => (
                           <option key={s} value={s}>
                             {s}
@@ -1298,20 +1349,20 @@ export function CreateVMDialog({
                       </span>
                     }
                     action={
-                      disks.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-muted-foreground"
-                          aria-label={`Remove disk ${String(idx + 1)}`}
-                          onClick={() => {
-                            removeDisk(disk.id);
-                          }}
-                        >
-                          Remove
-                        </Button>
-                      )
+                      // The last one too: a VM without a disk is a choice
+                      // (PXE, or a disk attached later).
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-muted-foreground"
+                        aria-label={`Remove disk ${String(idx + 1)}`}
+                        onClick={() => {
+                          removeDisk(disk.id);
+                        }}
+                      >
+                        Remove
+                      </Button>
                     }
                   >
                     <FieldGrid>
@@ -1321,12 +1372,14 @@ export function CreateVMDialog({
                       >
                         <NativeSelect
                           id={`vm-disk-storage-${String(disk.id)}`}
-                          value={disk.storage}
+                          value={storeOf(disk.storage)}
                           onChange={(e) => {
                             updateDisk(disk.id, { storage: e.target.value });
                           }}
                         >
-                          <option value="">Default</option>
+                          <option value="" disabled>
+                            Select storage
+                          </option>
                           {imageStorageOptions.map((s) => (
                             <option key={s} value={s}>
                               {s}
@@ -1376,11 +1429,8 @@ export function CreateVMDialog({
                           id={`vm-disk-format-${String(disk.id)}`}
                           value={effectiveFormat(disk)}
                           disabled={
-                            diskFormatsForStorageType(
-                              disk.storage
-                                ? storageTypes.get(disk.storage)
-                                : undefined,
-                            ).length === 1
+                            diskFormatsForStorageType(diskStoreType(disk))
+                              .length === 1
                           }
                           onChange={(e) => {
                             updateDisk(disk.id, { format: e.target.value });
@@ -1389,9 +1439,7 @@ export function CreateVMDialog({
                           {diskFormats
                             .filter((f) =>
                               diskFormatsForStorageType(
-                                disk.storage
-                                  ? storageTypes.get(disk.storage)
-                                  : undefined,
+                                diskStoreType(disk),
                               ).includes(f.value),
                             )
                             .map((f) => (
@@ -1432,7 +1480,8 @@ export function CreateVMDialog({
                           <CheckField
                             id={`ssd-${String(disk.id)}`}
                             label="SSD"
-                            checked={disk.ssd}
+                            checked={disk.ssd && busTakes(disk.bus, "ssd")}
+                            disabled={!busTakes(disk.bus, "ssd")}
                             onCheckedChange={(checked) => {
                               updateDisk(disk.id, { ssd: checked });
                             }}
@@ -1440,7 +1489,10 @@ export function CreateVMDialog({
                           <CheckField
                             id={`io-${String(disk.id)}`}
                             label="IO thread"
-                            checked={disk.iothread}
+                            checked={
+                              disk.iothread && busTakes(disk.bus, "iothread")
+                            }
+                            disabled={!busTakes(disk.bus, "iothread")}
                             onCheckedChange={(checked) => {
                               updateDisk(disk.id, { iothread: checked });
                             }}
@@ -1824,18 +1876,23 @@ export function CreateVMDialog({
                         Enabled{agentFstrim ? ", TRIM on clone" : ""}
                       </PropertyRow>
                     )}
-                    {efiDisk && efiStorage && (
-                      <PropertyRow label="EFI disk">{efiStorage}</PropertyRow>
+                    {efiDisk && (
+                      <PropertyRow label="EFI disk">
+                        {storeOf(efiStorage)}
+                      </PropertyRow>
                     )}
-                    {tpmEnabled && tpmStorage && (
+                    {tpmEnabled && (
                       <PropertyRow label="TPM">
-                        v2.0 on {tpmStorage}
+                        v2.0 on {storeOf(tpmStorage)}
                       </PropertyRow>
                     )}
                   </PropertyList>
                 </FormSection>
                 <FormSection title="Disks" action={editStep("disks")}>
                   <PropertyList>
+                    {disks.length === 0 && (
+                      <PropertyRow label="Disks">None</PropertyRow>
+                    )}
                     {disks.map((disk, idx) => (
                       <PropertyRow
                         key={disk.id}
@@ -1846,10 +1903,12 @@ export function CreateVMDialog({
                         }
                       >
                         {disk.size} GiB
-                        {disk.storage ? ` on ${disk.storage}` : ""} (
+                        {` on ${storeOf(disk.storage)}`} (
                         {effectiveFormat(disk)}){disk.discard ? ", TRIM" : ""}
-                        {disk.ssd ? ", SSD" : ""}
-                        {disk.iothread ? ", IO thread" : ""}
+                        {disk.ssd && busTakes(disk.bus, "ssd") ? ", SSD" : ""}
+                        {disk.iothread && busTakes(disk.bus, "iothread")
+                          ? ", IO thread"
+                          : ""}
                       </PropertyRow>
                     ))}
                   </PropertyList>

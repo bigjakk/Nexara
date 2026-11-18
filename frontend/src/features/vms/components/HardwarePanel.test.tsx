@@ -186,6 +186,33 @@ beforeEach(() => {
   serveConfig();
 });
 
+// IDE takes no iothread; a disk added with it was refused at Save ("property
+// is not defined in schema").
+describe("HardwarePanel add disk", () => {
+  it("sends a disk added on IDE without the IO thread it cannot take", async () => {
+    mockedPut.mockResolvedValue({ status: "ok" });
+    renderWithProviders(<HardwarePanel {...props} />);
+    await screen.findByText("unused0");
+    await user.click(screen.getByRole("button", { name: "Add disk" }));
+    const form = screen.getByText("New hard disk").parentElement;
+    if (!form) throw new Error("Add Disk form not found");
+    fill(within(form).getByDisplayValue("Select..."), "store01");
+    await user.click(within(form).getByRole("checkbox", { name: "IO thread" }));
+    fill(within(form).getByDisplayValue("SCSI"), "ide");
+    await user.click(within(form).getByRole("button", { name: "Add" }));
+    await user.click(screen.getByText("Save changes", { selector: "button" }));
+
+    await vi.waitFor(() => {
+      expect(mockedPut).toHaveBeenCalled();
+    });
+    const { fields } = mockedPut.mock.calls[0]?.[1] as {
+      fields: Record<string, string>;
+    };
+    const added = Object.entries(fields).find(([k]) => k.startsWith("ide"));
+    expect(added?.[1]).toBe("store01:32");
+  });
+});
+
 describe("HardwarePanel unused disk removal", () => {
   it("asks before deleting, naming the volume and saying it is permanent, sends nothing when cancelled, and still stages a live disk's removal for Save without asking", async () => {
     renderWithProviders(<HardwarePanel {...props} />);
@@ -646,6 +673,23 @@ describe("HardwarePanel dirty check", () => {
     expect(await saveAndGetFields(save)).toEqual([
       [CONFIG_URL, { fields: { delete: "cores,sockets" } }],
     ]);
+  });
+
+  // IDE takes no iothread and VirtIO Block no ssd: one ticked on such a disk
+  // failed the whole Save.
+  it("offers SSD and IO thread only on a disk whose bus takes them", async () => {
+    await renderPanel(
+      nicVM({
+        ide0: "store01:vm-101-disk-3,size=8G",
+        virtio0: "store01:vm-101-disk-4,size=8G",
+      }),
+    );
+    const box = (key: string, name: string) =>
+      within(diskCard(key)).getByRole("checkbox", { name });
+    expect(box("ide0", "IO thread")).toBeDisabled();
+    expect(box("ide0", "SSD emulation")).toBeEnabled();
+    expect(box("virtio0", "SSD emulation")).toBeDisabled();
+    expect(box("virtio0", "IO thread")).toBeEnabled();
   });
 
   // ssd=on is as true to Proxmox as ssd=1 (parse_boolean): the disk opens

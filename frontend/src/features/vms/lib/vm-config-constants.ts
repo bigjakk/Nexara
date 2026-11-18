@@ -484,6 +484,16 @@ export function diskFormatToSend(
     : undefined;
 }
 
+/**
+ * Whether a disk on `bus` takes the ssd or iothread flag, as qemu-server's drive
+ * formats define them: IDE and SATA have no iothread, VirtIO Block no ssd. One
+ * the bus lacks fails the whole create ("property is not defined in schema"),
+ * which every Windows VM made without the VirtIO ISO hit (IDE, both flags on).
+ */
+export function busTakes(bus: string, flag: "ssd" | "iothread"): boolean {
+  return flag === "ssd" ? bus !== "virtio" : bus === "scsi" || bus === "virtio";
+}
+
 export const cacheModes = [
   {
     value: "none",

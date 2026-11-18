@@ -85,6 +85,7 @@ import {
   vgaTypes,
   biosOptions,
   machineTypes as fallbackMachineTypes,
+  busTakes,
   cacheModes,
   diskFormatFor,
   diskFormatToSend,
@@ -845,8 +846,8 @@ export function HardwarePanel({
         format: diskFormatToSend(addDiskType, addDiskFormat) ?? "",
         cache: addDiskCache,
         discard: addDiskDiscard,
-        ssd: addDiskSsd,
-        iothread: addDiskIothread,
+        ssd: addDiskSsd && busTakes(addDiskBus, "ssd"),
+        iothread: addDiskIothread && busTakes(addDiskBus, "iothread"),
       },
     ]);
     setShowAddDisk(false);
@@ -2344,6 +2345,7 @@ export function HardwarePanel({
                             id={`hw-disk-${key}-ssd`}
                             label={t("hardwarePanel.ssdEmulation")}
                             checked={edit.ssd}
+                            disabled={!busTakes(key.replace(/\d+$/, ""), "ssd")}
                             onCheckedChange={(v) => {
                               updateDiskEdit(key, { ssd: v === true });
                             }}
@@ -2352,6 +2354,9 @@ export function HardwarePanel({
                             id={`hw-disk-${key}-iothread`}
                             label={t("hardwarePanel.ioThread")}
                             checked={edit.iothread}
+                            disabled={
+                              !busTakes(key.replace(/\d+$/, ""), "iothread")
+                            }
                             onCheckedChange={(v) => {
                               updateDiskEdit(key, { iothread: v === true });
                             }}
@@ -2492,7 +2497,8 @@ export function HardwarePanel({
                   <Check
                     id="hw-add-disk-ssd"
                     label={t("hardwarePanel.ssdEmulation")}
-                    checked={addDiskSsd}
+                    checked={addDiskSsd && busTakes(addDiskBus, "ssd")}
+                    disabled={!busTakes(addDiskBus, "ssd")}
                     onCheckedChange={(v) => {
                       setAddDiskSsd(v === true);
                     }}
@@ -2500,7 +2506,10 @@ export function HardwarePanel({
                   <Check
                     id="hw-add-disk-iothread"
                     label={t("hardwarePanel.ioThread")}
-                    checked={addDiskIothread}
+                    checked={
+                      addDiskIothread && busTakes(addDiskBus, "iothread")
+                    }
+                    disabled={!busTakes(addDiskBus, "iothread")}
                     onCheckedChange={(v) => {
                       setAddDiskIothread(v === true);
                     }}

@@ -130,6 +130,56 @@ describe("filterStorageByContent", () => {
     expect(result.map((s) => s.storage)).toEqual(["shared-nfs"]);
   });
 
+  // A shared store unmounted on the target node passed on another node's row,
+  // and became a create's default store there.
+  it("reads a shared store from the target node's own row when it has one", () => {
+    const list = [
+      makeStorage({
+        storage: "shared-nfs",
+        content: "rootdir",
+        node_id: "n1",
+        shared: true,
+        active: false,
+      }),
+      makeStorage({
+        storage: "shared-nfs",
+        content: "rootdir",
+        node_id: "n2",
+        shared: true,
+      }),
+    ];
+    const on = (n: string) =>
+      filterStorageByContent(list, "rootdir", [node1, node2], n);
+    expect(on("pve1")).toEqual([]);
+    // Elsewhere the row returned is one usable on its own node.
+    expect(on("pve2").map((s) => s.node_id)).toEqual(["n2"]);
+  });
+
+  // Create CT keys its store selects by row id: the row must not change with
+  // the node, or a pick reads "Select storage" after a node change.
+  it("returns the same row for a shared store whichever node asks", () => {
+    const list = [
+      makeStorage({
+        id: "a",
+        storage: "shared-nfs",
+        content: "images",
+        node_id: "n2",
+        shared: true,
+      }),
+      makeStorage({
+        id: "b",
+        storage: "shared-nfs",
+        content: "images",
+        node_id: "n1",
+        shared: true,
+      }),
+    ];
+    const ids = ["pve1", "pve2"].map(
+      (n) => filterStorageByContent(list, "images", [node1, node2], n)[0]?.id,
+    );
+    expect(ids).toEqual(["a", "a"]);
+  });
+
   it("dedupes by storage name (one entry per name)", () => {
     // Shared storage typically appears once per node — we should collapse those.
     const list = [

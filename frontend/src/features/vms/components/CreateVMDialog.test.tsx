@@ -45,6 +45,17 @@ const UPID =
 const LIST = `GET /api/v1/clusters/${CLUSTER}/vms`;
 const CREATE = `POST /api/v1/clusters/${CLUSTER}/vms`;
 const TASK = `GET ${apiPath`/api/v1/clusters/${CLUSTER}/tasks/${UPID}`}`;
+const STORAGE = `GET /api/v1/clusters/${CLUSTER}/storage`;
+// A thin LVM store of pve-01's own (node-01), as storage_pools holds it.
+const THIN = {
+  storage: "store01",
+  type: "lvmthin",
+  content: "images,rootdir",
+  active: true,
+  enabled: true,
+  shared: false,
+  node_id: "node-01",
+};
 
 const VM = {
   id: "guest-01",
@@ -189,6 +200,7 @@ beforeEach(() => {
   server.routes[CREATE] = () => json({ upid: UPID });
   server.routes[TASK] = () =>
     json({ upid: UPID, status: "stopped", exit_status: "OK" });
+  server.routes[STORAGE] = () => json({ items: [THIN], total: 1 });
 });
 
 afterEach(() => {
@@ -235,19 +247,8 @@ describe("CreateVMDialog, Start after creation", () => {
     [["manage:vm"], false],
     [["manage:vm", "execute:vm"], true],
   ])("with %j is offered: %s", async (permissions, offered) => {
-    useAuthStore.setState({ permissions });
-    renderWithProviders(
-      <CreateVMDialog open onOpenChange={onOpenChange} clusterId={CLUSTER} />,
-    );
-    const user = userEvent.setup();
-    await screen.findByRole("option", { name: /pve-01/ });
-    await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
-    fireEvent.change(screen.getByRole("spinbutton"), {
-      target: { value: "101" },
-    });
-    for (let step = 0; step < 8; step++) {
-      await user.click(screen.getByRole("button", { name: "Next" }));
-    }
+    const { next } = await openFilledIn(permissions);
+    for (let step = 0; step < 8; step++) await next();
 
     const tick = screen.getByRole("checkbox", { name: "Start after creation" });
     if (offered) expect(tick).toBeEnabled();
@@ -258,48 +259,55 @@ describe("CreateVMDialog, Start after creation", () => {
   });
 });
 
+/** Renders the dialog for a holder of `permissions` with General filled in. */
+async function openFilledIn(permissions = ["manage:vm"]) {
+  useAuthStore.setState({ permissions });
+  renderWithProviders(
+    <CreateVMDialog open onOpenChange={onOpenChange} clusterId={CLUSTER} />,
+  );
+  const user = userEvent.setup();
+  await screen.findByRole("option", { name: /pve-01/ });
+  await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
+  fireEvent.change(screen.getByRole("spinbutton"), {
+    target: { value: "101" },
+  });
+  const next = () => user.click(screen.getByRole("button", { name: "Next" }));
+  return { user, next };
+}
+
+/** Records the body of the create request. */
+function captureCreate() {
+  const sent: { body?: CreateVMRequest } = {};
+  server.routes[CREATE] = (init) => {
+    sent.body = JSON.parse(
+      typeof init?.body === "string" ? init.body : "{}",
+    ) as CreateVMRequest;
+    return json({ upid: UPID });
+  };
+  return sent;
+}
+
 // Left out, a file store made the disk raw whatever the dialog said; sent to
 // thin LVM, the EFI disk's fixed qcow2 was refused, so a UEFI VM was never made.
 describe("CreateVMDialog, disk formats", () => {
   it("sends each disk's format as its store takes it", async () => {
-    let body: CreateVMRequest | undefined;
-    server.routes[CREATE] = (init) => {
-      body = JSON.parse(
-        typeof init?.body === "string" ? init.body : "{}",
-      ) as CreateVMRequest;
-      return json({ upid: UPID });
-    };
-    server.routes[`GET /api/v1/clusters/${CLUSTER}/storage`] = () =>
+    const sent = captureCreate();
+    server.routes[STORAGE] = () =>
       json({
         items: [
-          {
-            storage: "store01",
-            type: "lvmthin",
-            content: "images,rootdir",
-            active: true,
-            enabled: true,
-          },
+          THIN,
           {
             storage: "store02",
             type: "nfs",
             content: "images",
             active: true,
             enabled: true,
+            shared: true,
           },
         ],
         total: 2,
       });
-    useAuthStore.setState({ permissions: ["manage:vm"] });
-    renderWithProviders(
-      <CreateVMDialog open onOpenChange={onOpenChange} clusterId={CLUSTER} />,
-    );
-    const user = userEvent.setup();
-    const next = () => user.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByRole("option", { name: /pve-01/ });
-    await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
-    fireEvent.change(screen.getByRole("spinbutton"), {
-      target: { value: "101" },
-    });
+    const { user, next } = await openFilledIn();
     await next(); // OS
     await next(); // System
     await user.selectOptions(screen.getByLabelText("BIOS"), ["ovmf"]);
@@ -313,9 +321,85 @@ describe("CreateVMDialog, disk formats", () => {
     await user.click(screen.getByRole("button", { name: "Create VM" }));
 
     await waitFor(() => {
-      expect(body).toBeDefined();
+      expect(sent.body).toBeDefined();
     });
-    expect(body?.scsi0).toMatch(/^store02:32,format=qcow2,/);
-    expect(body?.efidisk0).toBe("store01:1,efitype=4m,pre-enrolled-keys=1");
+    expect(sent.body?.scsi0).toMatch(/^store02:32,format=qcow2,/);
+    expect(sent.body?.efidisk0).toBe(
+      "store01:1,efitype=4m,pre-enrolled-keys=1",
+    );
+  });
+});
+
+// A disk or EFI disk left on "Default" was not sent at all, so the VM was made
+// without it.
+describe("CreateVMDialog, stores left unset", () => {
+  it("sends a disk and an EFI disk left unset on the node's first image store", async () => {
+    // store00 sorts first but is another node's: Proxmox would refuse it.
+    server.routes[STORAGE] = () =>
+      json({
+        items: [{ ...THIN, storage: "store00", node_id: "node-02" }, THIN],
+        total: 2,
+      });
+    const sent = captureCreate();
+    const { user, next } = await openFilledIn();
+    await next(); // OS
+    await next(); // System
+    await user.selectOptions(screen.getByLabelText("BIOS"), ["ovmf"]);
+    for (let step = 0; step < 6; step++) await next();
+    await user.click(screen.getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => {
+      expect(sent.body).toBeDefined();
+    });
+    expect(sent.body?.scsi0).toMatch(/^store01:32,/);
+    expect(sent.body?.efidisk0).toMatch(/^store01:1,/);
+  });
+
+  // IDE takes no iothread: every Windows VM made without the VirtIO ISO (IDE,
+  // IO thread on by default) was refused ("not defined in schema").
+  it("sends an IDE disk without the IO thread it cannot take", async () => {
+    const sent = captureCreate();
+    const { user, next } = await openFilledIn();
+    await next(); // OS
+    await user.selectOptions(screen.getByLabelText("OS type"), ["l24"]);
+    for (let step = 0; step < 7; step++) await next();
+    await user.click(screen.getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => {
+      expect(sent.body).toBeDefined();
+    });
+    expect(sent.body?.extra?.["ide0"]).toBe("store01:32,discard=on,ssd=1");
+  });
+
+  // A disk added back after the last was removed took SCSI whatever the OS.
+  it("gives a disk added after the last was removed the OS's bus", async () => {
+    const { user, next } = await openFilledIn();
+    await next(); // OS
+    await user.selectOptions(screen.getByLabelText("OS type"), ["l24"]);
+    await next(); // System
+    await next(); // Disks
+    await user.click(screen.getByRole("button", { name: "Remove disk 1" }));
+    await user.click(screen.getByRole("button", { name: /Add disk/ }));
+
+    expect(screen.getByLabelText<HTMLSelectElement>("Bus type").value).toBe(
+      "ide",
+    );
+  });
+
+  it("holds the wizard at Disks while no store holds images, and says why, until the disk is removed", async () => {
+    server.routes[STORAGE] = () => json({ items: [], total: 0 });
+    const { user, next } = await openFilledIn();
+    await next(); // OS
+    await next(); // System
+    await next(); // Disks
+
+    expect(screen.getByLabelText("Storage")).toBeInTheDocument();
+    expect(screen.getByText(/No storage for disk images/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Review/ })).toBeDisabled();
+
+    // A VM without a disk is a choice of its own.
+    await user.click(screen.getByRole("button", { name: "Remove disk 1" }));
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  busTakes,
   diskFormatFor,
   diskFormatToSend,
   diskFormatsForStorageType,
@@ -32,4 +33,18 @@ describe("diskFormatFor and diskFormatToSend", () => {
       expect(diskFormatToSend(type, chosen)).toBe(sent);
     },
   );
+});
+
+// qemu-server's drive formats: IDE and SATA take no iothread, VirtIO Block no
+// ssd, and a flag the bus lacks fails the whole create.
+describe("busTakes", () => {
+  it.each([
+    ["scsi", true, true],
+    ["ide", true, false],
+    ["sata", true, false],
+    ["virtio", false, true],
+  ])("a %s disk takes ssd: %s, iothread: %s", (bus, ssd, iothread) => {
+    expect(busTakes(bus, "ssd")).toBe(ssd);
+    expect(busTakes(bus, "iothread")).toBe(iothread);
+  });
 });
