@@ -399,7 +399,7 @@ describe("HardwarePanel unused disk removal", () => {
         {
           fields: {
             delete: "efidisk0,scsi0",
-            scsi1: "store01:32,format=qcow2",
+            scsi1: "store01:32", // thin LVM: no format, so its own raw
             serial0: "socket",
           },
         },

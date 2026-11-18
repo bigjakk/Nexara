@@ -27,6 +27,7 @@ import { emptyPerSessionStores } from "@/test/per-session-stores";
 import { renderWithProviders } from "@/test/test-utils";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
+import type { CreateVMRequest } from "../types/vm";
 import { CreateVMDialog } from "./CreateVMDialog";
 
 /**
@@ -254,5 +255,67 @@ describe("CreateVMDialog, Start after creation", () => {
     expect(screen.queryByText(/needs the execute:vm permission/) === null).toBe(
       offered,
     );
+  });
+});
+
+// Left out, a file store made the disk raw whatever the dialog said; sent to
+// thin LVM, the EFI disk's fixed qcow2 was refused, so a UEFI VM was never made.
+describe("CreateVMDialog, disk formats", () => {
+  it("sends each disk's format as its store takes it", async () => {
+    let body: CreateVMRequest | undefined;
+    server.routes[CREATE] = (init) => {
+      body = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as CreateVMRequest;
+      return json({ upid: UPID });
+    };
+    server.routes[`GET /api/v1/clusters/${CLUSTER}/storage`] = () =>
+      json({
+        items: [
+          {
+            storage: "store01",
+            type: "lvmthin",
+            content: "images,rootdir",
+            active: true,
+            enabled: true,
+          },
+          {
+            storage: "store02",
+            type: "nfs",
+            content: "images",
+            active: true,
+            enabled: true,
+          },
+        ],
+        total: 2,
+      });
+    useAuthStore.setState({ permissions: ["manage:vm"] });
+    renderWithProviders(
+      <CreateVMDialog open onOpenChange={onOpenChange} clusterId={CLUSTER} />,
+    );
+    const user = userEvent.setup();
+    const next = () => user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("option", { name: /pve-01/ });
+    await user.selectOptions(screen.getByLabelText("Node"), ["pve-01"]);
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "101" },
+    });
+    await next(); // OS
+    await next(); // System
+    await user.selectOptions(screen.getByLabelText("BIOS"), ["ovmf"]);
+    await screen.findByRole("option", { name: "store01" });
+    await user.selectOptions(screen.getByLabelText("EFI disk storage"), [
+      "store01",
+    ]);
+    await next(); // Disks
+    await user.selectOptions(screen.getByLabelText("Storage"), ["store02"]);
+    for (let step = 0; step < 5; step++) await next();
+    await user.click(screen.getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => {
+      expect(body).toBeDefined();
+    });
+    expect(body?.scsi0).toMatch(/^store02:32,format=qcow2,/);
+    expect(body?.efidisk0).toBe("store01:1,efitype=4m,pre-enrolled-keys=1");
   });
 });

@@ -86,7 +86,10 @@ import {
   biosOptions,
   machineTypes as fallbackMachineTypes,
   cacheModes,
+  diskFormatFor,
+  diskFormatToSend,
   diskFormats,
+  diskFormatsForStorageType,
   osTypes,
   audioDevices,
 } from "../lib/vm-config-constants";
@@ -742,6 +745,12 @@ export function HardwarePanel({
       return true;
     });
   }, [storages]);
+  // The new disk's store type decides the formats it offers and sends: qcow2
+  // sent to thin LVM, RBD or ZFS was refused ("unsupported format 'qcow2'").
+  const addDiskType = diskStorages.find(
+    (s) => s.storage === addDiskStorage,
+  )?.type;
+  const addDiskFormats = diskFormatsForStorageType(addDiskType);
 
   // Filter storages that support ISO content, deduplicated by storage name
   const isoStorages = useMemo(() => {
@@ -833,7 +842,7 @@ export function HardwarePanel({
         key,
         storage: addDiskStorage,
         size: addDiskSize,
-        format: addDiskFormat,
+        format: diskFormatToSend(addDiskType, addDiskFormat) ?? "",
         cache: addDiskCache,
         discard: addDiskDiscard,
         ssd: addDiskSsd,
@@ -2439,16 +2448,19 @@ export function HardwarePanel({
                   <Field label={t("hardwarePanel.format")}>
                     <select
                       className={fieldSelectClass}
-                      value={addDiskFormat}
+                      value={diskFormatFor(addDiskType, addDiskFormat)}
+                      disabled={addDiskFormats.length === 1}
                       onChange={(e) => {
                         setAddDiskFormat(e.target.value);
                       }}
                     >
-                      {diskFormats.map((f) => (
-                        <option key={f.value} value={f.value}>
-                          {f.label}
-                        </option>
-                      ))}
+                      {diskFormats
+                        .filter((f) => addDiskFormats.includes(f.value))
+                        .map((f) => (
+                          <option key={f.value} value={f.value}>
+                            {f.label}
+                          </option>
+                        ))}
                     </select>
                   </Field>
                   <Field label={t("hardwarePanel.cache")}>

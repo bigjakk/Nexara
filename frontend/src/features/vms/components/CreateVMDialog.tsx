@@ -49,6 +49,9 @@ import {
   scsiControllers,
   netModels,
   diskFormats,
+  diskFormatFor,
+  diskFormatToSend,
+  diskFormatsForStorageType,
   cacheModes,
   diskBusTypes,
   osDefaults,
@@ -153,6 +156,20 @@ export function CreateVMDialog({
         : [],
     [storageList],
   );
+
+  // Each store's type, for the disk formats it takes.
+  const storageTypes = useMemo(
+    () => new Map((storageList ?? []).map((s) => [s.storage, s.type])),
+    [storageList],
+  );
+
+  /** The format a disk gets: its choice if its store takes it, else raw. */
+  function effectiveFormat(disk: DiskEntry): string {
+    return diskFormatFor(
+      disk.storage ? storageTypes.get(disk.storage) : undefined,
+      disk.format,
+    );
+  }
 
   // Storage pools filtered for ISO images — track id+name for API calls
   const isoStoragePools = useMemo(() => {
@@ -492,7 +509,11 @@ export function CreateVMDialog({
   function buildDiskString(disk: DiskEntry): string {
     if (!disk.storage || !disk.size) return "";
     const parts = [`${disk.storage}:${disk.size}`];
-    if (disk.format !== "qcow2") parts.push(`format=${disk.format}`);
+    const format = diskFormatToSend(
+      storageTypes.get(disk.storage),
+      disk.format,
+    );
+    if (format) parts.push(`format=${format}`);
     if (disk.cache !== "none") parts.push(`cache=${disk.cache}`);
     if (disk.discard) parts.push("discard=on");
     if (disk.ssd) parts.push("ssd=1");
@@ -548,7 +569,9 @@ export function CreateVMDialog({
 
   function buildEfiDisk0(): string {
     if (!efiDisk || !efiStorage) return "";
-    return `${efiStorage}:1,format=qcow2,efitype=4m,pre-enrolled-keys=1`;
+    const format = diskFormatToSend(storageTypes.get(efiStorage), "qcow2");
+    const formatPart = format ? `,format=${format}` : "";
+    return `${efiStorage}:1${formatPart},efitype=4m,pre-enrolled-keys=1`;
   }
 
   function buildTpmState0(): string {
@@ -1351,16 +1374,31 @@ export function CreateVMDialog({
                       >
                         <NativeSelect
                           id={`vm-disk-format-${String(disk.id)}`}
-                          value={disk.format}
+                          value={effectiveFormat(disk)}
+                          disabled={
+                            diskFormatsForStorageType(
+                              disk.storage
+                                ? storageTypes.get(disk.storage)
+                                : undefined,
+                            ).length === 1
+                          }
                           onChange={(e) => {
                             updateDisk(disk.id, { format: e.target.value });
                           }}
                         >
-                          {diskFormats.map((f) => (
-                            <option key={f.value} value={f.value}>
-                              {f.label}
-                            </option>
-                          ))}
+                          {diskFormats
+                            .filter((f) =>
+                              diskFormatsForStorageType(
+                                disk.storage
+                                  ? storageTypes.get(disk.storage)
+                                  : undefined,
+                              ).includes(f.value),
+                            )
+                            .map((f) => (
+                              <option key={f.value} value={f.value}>
+                                {f.label}
+                              </option>
+                            ))}
                         </NativeSelect>
                       </Field>
                       <Field
@@ -1809,7 +1847,7 @@ export function CreateVMDialog({
                       >
                         {disk.size} GiB
                         {disk.storage ? ` on ${disk.storage}` : ""} (
-                        {disk.format}){disk.discard ? ", TRIM" : ""}
+                        {effectiveFormat(disk)}){disk.discard ? ", TRIM" : ""}
                         {disk.ssd ? ", SSD" : ""}
                         {disk.iothread ? ", IO thread" : ""}
                       </PropertyRow>
@@ -1819,7 +1857,9 @@ export function CreateVMDialog({
                 <FormSection title="CPU and memory" action={editStep("cpu")}>
                   <PropertyList>
                     <PropertyRow label="CPU">
-                      {cores} cores × {sockets} sockets, {cpuType}
+                      {cores} {Number(cores) === 1 ? "core" : "cores"} ×{" "}
+                      {sockets} {Number(sockets) === 1 ? "socket" : "sockets"},{" "}
+                      {cpuType}
                       {numa ? ", NUMA" : ""}
                     </PropertyRow>
                     <PropertyRow label="Memory">

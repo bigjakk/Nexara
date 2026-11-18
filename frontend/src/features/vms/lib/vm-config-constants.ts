@@ -439,6 +439,51 @@ export const diskFormats = [
   },
 ] as const;
 
+// The storage types that keep a VM disk as a file, and so take qcow2 and vmdk
+// as well as raw. Every other type (rbd, lvm, lvmthin, zfspool, iscsi, btrfs …)
+// takes raw only, and Proxmox refuses another format there ("unsupported
+// format 'qcow2'"): a UEFI VM whose EFI disk went to thin LVM was never made.
+const FILE_IMAGE_STORAGE_TYPES = new Set(["dir", "nfs", "cifs", "glusterfs"]);
+
+/**
+ * The disk formats a store of this type takes, the default first. Unknown
+ * (the node's default storage, or a list not loaded yet) offers them all.
+ */
+export function diskFormatsForStorageType(type: string | undefined): string[] {
+  if (type === undefined || FILE_IMAGE_STORAGE_TYPES.has(type)) {
+    return diskFormats.map((f) => f.value);
+  }
+  return ["raw"];
+}
+
+/**
+ * The format a new disk is shown in on a store of this type: `chosen` where
+ * the store takes it, else the store's own.
+ */
+export function diskFormatFor(
+  type: string | undefined,
+  chosen: string,
+): string {
+  const allowed = diskFormatsForStorageType(type);
+  return allowed.includes(chosen) ? chosen : (allowed[0] ?? "raw");
+}
+
+/**
+ * The format= to send for a new disk, or undefined to leave it to the store. A
+ * file store needs it: left out, it makes the disk in its default, raw,
+ * whatever was chosen. Any other store is left to its own default, which it is
+ * certain to take (raw; on Proxmox VE 9, qcow2 for an LVM store with
+ * snapshot-as-volume-chain, which this list cannot tell apart).
+ */
+export function diskFormatToSend(
+  type: string | undefined,
+  chosen: string,
+): string | undefined {
+  return type !== undefined && FILE_IMAGE_STORAGE_TYPES.has(type)
+    ? diskFormatFor(type, chosen)
+    : undefined;
+}
+
 export const cacheModes = [
   {
     value: "none",
