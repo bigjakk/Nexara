@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -262,6 +263,85 @@ func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
 				t.Errorf("answered %d %s, deleted %t, sent content %q, audited %v; want %d naming %s, deleted %t, "+
 					"sent %q, audited %v", status, body, deleted, sent, audits, tt.status, tt.need, tt.deleted,
 					tt.sent, tt.audits)
+			}
+		})
+	}
+}
+
+// A cancel asks Proxmox only for what the caller may do there. delete_vm destroys
+// the guest, so it needs delete:vm, checked before the job is read; a live
+// import's VM stops with its task, so that cancel needs execute:vm; and an import
+// whose create never reached Proxmox has no guest of its own, so nothing is destroyed.
+func TestCancellingAnImportSendsOnlyWhatTheCallerMay(t *testing.T) {
+	t.Parallel()
+	running := db.VmImportJob{ID: uuid.MustParse(testImportJobID), ClusterID: uuid.MustParse(testClusterID),
+		TargetNode: "pve-01", TargetVmid: 101, Status: "running",
+		Upid: "UPID:pve-01:0000A1B2:00C0FFEE:66F1A2B3:qmcreate:101:user@pam!test:"}
+	live := running
+	live.OptionsJson = json.RawMessage(`{"live_import":true}`)
+	unsent := running
+	unsent.Status, unsent.Upid = "pending", ""
+	both := grantsOf("manage:vm_import", "delete:vm")
+	tests := []struct {
+		name   string
+		grants map[string]bool
+		body   string
+		job    db.VmImportJob
+		status int
+		need   string   // in the answer
+		sent   []string // what Proxmox was asked, in order
+		read   bool     // whether the job was read
+	}{
+		{"delete_vm without delete:vm: refused before the job is read", grantsOf("manage:vm_import"),
+			`{"delete_vm":true}`, running, 403, "delete:vm", nil, false},
+		{"a live import without execute:vm: refused, and its VM is not stopped", grantsOf("manage:vm_import"),
+			`{}`, live, 403, "execute:vm", nil, true},
+		{"delete_vm on an import that never reached Proxmox destroys nothing", both,
+			`{"delete_vm":true}`, unsent, 200, `"cancelled"`, nil, true},
+		{"delete_vm on a running import: its task stopped, then its VM destroyed", both,
+			`{"delete_vm":true}`, running, 200, `"cancelled"`, []string{"stop", "destroy"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			var sent []string
+			pve := &backupRunPVE{handle: func(w http.ResponseWriter, r *http.Request) bool {
+				what, answer := "", `{"data":null}`
+				switch {
+				case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api2/json/nodes/pve-01/tasks/"):
+					what = "stop"
+				case r.Method == http.MethodDelete && r.URL.Path == "/api2/json/nodes/pve-01/qemu/101":
+					what, answer = "destroy", `{"data":"UPID:pve-01:0000A1B3:00C0FFEF:66F1A2B4:qmdestroy:101:user@pam!test:"}`
+				default:
+					return false
+				}
+				mu.Lock()
+				sent = append(sent, what)
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(answer))
+				return true
+			}}
+			path := importScope + "/:id/cancel"
+			app, dbtx := newPVEAppAs(t, pve, tt.grants, fiber.MethodPost, path,
+				func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+					return handlers.NewVMImportHandler(q, backupRunEncKey, nil).CancelVMImport
+				})
+			dbtx.lookups = map[string]any{"GetVMImportJob": tt.job, "GetCluster": db.Cluster{ID: uuid.MustParse(testClusterID)}}
+			dbtx.execs = []string{"CancelVMImportJob"}
+			req := httptest.NewRequest(http.MethodPost, vmImportRoute(path), strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Test-User", "yes")
+			status, body := sendBody(t, app, req)
+			mu.Lock()
+			defer mu.Unlock()
+			cancelled := slices.Contains(dbtx.executed, "CancelVMImportJob")
+			read := slices.Contains(dbtx.asked, "GetVMImportJob")
+			if status != tt.status || !strings.Contains(string(body), tt.need) || !slices.Equal(sent, tt.sent) ||
+				cancelled != (tt.status == 200) || read != tt.read {
+				t.Errorf("answered %d %s after asking Proxmox %v, job read %t, cancelled %t; want %d naming %s "+
+					"after %v, read %t", status, body, sent, read, cancelled, tt.status, tt.need, tt.sent, tt.read)
 			}
 		})
 	}

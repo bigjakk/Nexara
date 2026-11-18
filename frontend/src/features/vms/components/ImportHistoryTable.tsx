@@ -77,17 +77,27 @@ function importName(job: VMImportJob): string {
   return job.name || `VM ${String(job.target_vmid)}`;
 }
 
+/** A live import's VM runs while it imports, and stops with its task. */
+function stopsItsVm(job: VMImportJob): boolean {
+  return Boolean(job.upid) && job.options["live_import"] === true;
+}
+
 export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   const { data: jobs, isLoading } = useImportJobs(clusterId);
   const cancelMutation = useCancelImport();
-  const { canManage, canDelete } = usePermissions();
+  const { canManage, canDelete, canExecute } = usePermissions();
   // Cancelling an import takes manage:vm_import; the page itself only view.
   const canCancel = canManage("vm_import");
-  // Deleting its VM as well takes delete:vm, as the VM's own delete does.
+  // Deleting its VM as well takes delete:vm, as the VM's own delete does, and
+  // stopping a live import's VM takes execute:vm, as the power route does.
   const canDeleteVm = canDelete("vm");
+  const canStopVm = canExecute("vm");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<VMImportJob | null>(null);
   const [deleteVm, setDeleteVm] = useState(false);
+  // An import whose create has not reached Proxmox (no UPID) has no VM of its
+  // own to delete; its VMID may be another guest's.
+  const offerDelete = canDeleteVm && Boolean(cancelTarget?.upid);
   // Where focus goes when Cancel import closes: the table, whose X button
   // goes once the job is no longer running.
   const table = useRef<HTMLDivElement>(null);
@@ -120,7 +130,7 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   function confirmCancel() {
     if (!cancelTarget) return;
     cancelMutation.mutate(
-      { clusterId, id: cancelTarget.id, deleteVm: canDeleteVm && deleteVm },
+      { clusterId, id: cancelTarget.id, deleteVm: offerDelete && deleteVm },
       {
         onSettled: () => {
           setCancelTarget(null);
@@ -164,7 +174,8 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
                 const isOpen = expanded === job.id;
                 const cancellable =
                   canCancel &&
-                  (job.status === "pending" || job.status === "running");
+                  (job.status === "pending" || job.status === "running") &&
+                  (canStopVm || !stopsItsVm(job));
                 return (
                   <RowGroup
                     key={job.id}
@@ -203,9 +214,12 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
               {cancelTarget?.name ||
                 `VM ${String(cancelTarget?.target_vmid ?? "")}`}
               .
+              {cancelTarget &&
+                stopsItsVm(cancelTarget) &&
+                " It is a live import, so its VM, which runs while it imports, stops too."}
             </DialogDescription>
           </DialogHeader>
-          {canDeleteVm && (
+          {offerDelete && (
             <label className="flex items-start gap-2 text-sm">
               <Checkbox
                 checked={deleteVm}

@@ -1203,9 +1203,10 @@ stops a guest needs what its power route (`POST …/vms/:vm_id/status`,
 `POST …/containers/:ct_id/status`) needs: `execute:vm` for a VM,
 `execute:container` for a container, on the cluster. That covers `start` on a
 VM or container create, `start_after` and `live_import` on a VM import,
-`start_after_restore` on a restore, and a `force` restore over a guest that is
-not stopped. Without it the answer is `403` naming the permission, and nothing is
-asked of Proxmox.
+`start_after_restore` on a restore, a `force` restore over a guest that is
+not stopped, and cancelling a live import whose task has reached Proxmox (its VM
+stops with the task). Without it the answer is `403` naming the permission, and
+nothing is asked of Proxmox.
 
 **A create's `extra` cannot stand in for its typed parameters.** A key in
 `extra` that a typed parameter of the same create sets (`start`, `vmid`,
@@ -1342,7 +1343,7 @@ Import VMs from ESXi/vCenter sources or OVA/OVF appliances. Reads require `view:
 | GET | `/clusters/:id/vm-imports` | List import jobs |
 | POST | `/clusters/:id/vm-imports` | Start an import |
 | GET | `/clusters/:id/vm-imports/:id` | Get import job status |
-| POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM, which also **requires `delete:vm`**) |
+| POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM, which also **requires `delete:vm`**; cancelling a live import also **requires `execute:vm`**, since its VM stops with it; `delete_vm` destroys nothing for an import whose create has not reached Proxmox) |
 
 ### Windows Guest Tools
 

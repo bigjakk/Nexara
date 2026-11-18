@@ -1251,7 +1251,7 @@ Proxmox-side defaults that trip up manual imports are handled automatically: UEF
 
 ### Import History
 
-The history table shows **Name**, **Target**, **Source**, **Status** (pending / running / completed / failed / cancelled), and **Created**. Cancelling a running import asks whether to **Also delete the partially created VM**; that option destroys the guest, so it is offered only to a role that also holds `delete:vm`.
+The history table shows **Name**, **Target**, **Source**, **Status** (pending / running / completed / failed / cancelled), and **Created**. Cancelling a running import asks whether to **Also delete the partially created VM**; that option destroys the guest, so it is offered only to a role that also holds `delete:vm`, and not for an import whose task has not reached Proxmox yet, which has no VM of its own. A live import's VM runs while it imports and stops when the import is cancelled, so cancelling one also needs `execute:vm`.
 
 ### Permissions
 

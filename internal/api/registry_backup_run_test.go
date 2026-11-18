@@ -275,11 +275,19 @@ type backupRunDBTX struct {
 	askedWith map[string][]any
 	// queried is the arguments of the last :many query run, by its sqlc name.
 	queried map[string][]any
+	// execs names the :exec queries, by their sqlc name, that succeed; executed is each
+	// one run, in order. Any other statement but an audit insert fails.
+	execs    []string
+	executed []string
 }
 
 func (d *backupRunDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if name := stmtName(sql); slices.Contains(d.execs, name) {
+		d.executed = append(d.executed, name)
+		return pgconn.NewCommandTag("UPDATE 1"), nil
+	}
 	if !strings.Contains(sql, "INSERT INTO audit_log") {
 		d.other = append(d.other, sql)
 		return pgconn.CommandTag{}, errBackupRunUnexpectedQuery

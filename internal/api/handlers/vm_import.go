@@ -702,6 +702,13 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx, p *apischema.Params) error
 	if job.Status != "pending" && job.Status != "running" {
 		return fiber.NewError(fiber.StatusBadRequest, "import is not in a cancellable state")
 	}
+	// A live import's VM runs while its disks stream in, and stopping its task stops the
+	// VM, so that cancel takes what the power route takes.
+	if job.Upid != "" && importIsLive(job) {
+		if err := requireGuestPowerPerm(c, "vm", clusterID, "Cancelling a live import, which stops its VM"); err != nil {
+			return err
+		}
+	}
 
 	cluster, err := h.queries.GetCluster(c.Context(), clusterID)
 	if err != nil {
@@ -717,8 +724,9 @@ func (h *VMImportHandler) CancelVMImport(c fiber.Ctx, p *apischema.Params) error
 		_ = pxClient.StopNodeTask(c.Context(), job.TargetNode, job.Upid)
 	}
 
-	// Optional cleanup of the partially-created guest.
-	if deleteVM && job.TargetVmid > 0 {
+	// Optional cleanup of the partially-created guest. A job with no UPID never reached
+	// Proxmox, so its VMID names no guest of this import: one another guest may hold.
+	if deleteVM && job.TargetVmid > 0 && job.Upid != "" {
 		if upid, destroyErr := pxClient.DestroyVM(c.Context(), job.TargetNode, int(job.TargetVmid)); destroyErr == nil {
 			TrackTask(c, h.queries, h.eventPub, TrackTaskParams{
 				ClusterID:    cluster.ID,
@@ -904,6 +912,21 @@ func mergeContent(content, want string) string {
 		return want
 	}
 	return content + "," + want
+}
+
+// importIsLive reports whether the job was started as a live import, from the options it
+// was started with. Options that cannot be read count as live, the stricter answer.
+func importIsLive(job db.VmImportJob) bool {
+	var opts struct {
+		LiveImport bool `json:"live_import"`
+	}
+	if len(job.OptionsJson) == 0 {
+		return false
+	}
+	if err := json.Unmarshal(job.OptionsJson, &opts); err != nil {
+		return true
+	}
+	return opts.LiveImport
 }
 
 // withoutContent is a comma-separated PVE content list without drop, the other entries kept
