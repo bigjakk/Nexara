@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  getBreakpointFromWidth,
   ResponsiveGridLayout,
   useContainerWidth,
   type LayoutItem,
@@ -29,6 +30,12 @@ import {
 import { cn } from "@/lib/utils";
 
 export type { LayoutItem };
+
+// The grid's breakpoints, by the container's width. lg and md both lay the
+// widgets out on 12 columns, so the saved layout (kept as lg) is what either
+// shows; the narrower ones refit it to fewer columns.
+const BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 } as const;
+const COLS = { lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 } as const;
 
 interface DashboardGridProps {
   preset: DashboardPreset;
@@ -80,18 +87,24 @@ export function DashboardGrid({
     [editMode, onLayoutChange, activeWidgetIds],
   );
 
+  // Whether the grid is wide enough to lay out the saved 12 columns as they
+  // are. Only then can a drag or resize be kept; narrower, editing is off.
+  // The library's own rule decides it (a width equal to md's is still sm).
+  const fullWidth =
+    width === 0 || COLS[getBreakpointFromWidth(BREAKPOINTS, width)] === COLS.lg;
+
   const handleResponsiveLayoutChange = useCallback(
     (...args: [Layout, Partial<Record<string, Layout>>]) => {
-      // When the viewport crosses a breakpoint (e.g. lg → md), react-grid-layout
-      // generates a layout fitted to the new breakpoint and fires this callback
-      // with that derived layout as args[0]. Saving it back overwrites our
-      // canonical `lg` layout, so on the way back up the dashboard renders with
-      // the compacted small-breakpoint layout — the "stuck after resize" bug.
-      // args[1].lg is preserved across breakpoint changes; only real drag/resize
-      // at the lg breakpoint mutates it.
-      handleLayoutChange(args[1]["lg"] ?? args[0]);
+      // When the viewport crosses into a narrower breakpoint, react-grid-layout
+      // refits the layout to fewer columns and fires this callback with that
+      // derived layout as args[0]; saving it would overwrite the canonical
+      // 12-column layout, which then stays small (the "stuck after resize"
+      // bug). On 12 columns (lg, and md: a 1440 px window with the tree open)
+      // args[0] is the layout as shown, user edits included; keeping only
+      // args[1].lg there dropped every drag and resize made at md.
+      handleLayoutChange(fullWidth ? args[0] : (args[1]["lg"] ?? args[0]));
     },
-    [handleLayoutChange],
+    [handleLayoutChange, fullWidth],
   );
 
   const addWidget = useCallback(
@@ -159,8 +172,9 @@ export function DashboardGrid({
       {editMode && (
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="mr-auto text-[12.5px] text-muted-foreground">
-            Drag a widget by its bar to move it, and by its corner to resize it.
-            Lock to save the layout.
+            {fullWidth
+              ? "Drag a widget by its bar to move it, and by its corner to resize it. Lock to save the layout."
+              : "Widen the window to move or resize widgets. Adding and removing them works at any width."}
           </p>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -215,14 +229,14 @@ export function DashboardGrid({
           className="layout"
           width={width}
           layouts={{ lg: currentLayouts }}
-          breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-          cols={{ lg: 12, md: 12, sm: 6, xs: 4, xxs: 2 }}
+          breakpoints={BREAKPOINTS}
+          cols={COLS}
           rowHeight={30}
           dragConfig={{
-            enabled: editMode,
+            enabled: editMode && fullWidth,
             handle: ".widget-drag-handle",
           }}
-          resizeConfig={{ enabled: editMode }}
+          resizeConfig={{ enabled: editMode && fullWidth }}
           margin={[16, 16]}
           containerPadding={[0, 0]}
           onLayoutChange={handleResponsiveLayoutChange}

@@ -76,7 +76,12 @@ vi.mock("../api/historical-queries", () => ({
 
 vi.mock("react-grid-layout", async () => {
   const React = await import("react");
+  const actual =
+    await vi.importActual<typeof import("react-grid-layout")>(
+      "react-grid-layout",
+    );
   return {
+    getBreakpointFromWidth: actual.getBreakpointFromWidth,
     ResponsiveGridLayout: ({ children }: { children: React.ReactNode }) =>
       React.createElement("div", { "data-testid": "grid-layout" }, children),
     useContainerWidth: () => ({
