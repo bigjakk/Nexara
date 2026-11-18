@@ -27,6 +27,22 @@ interface SourceGroup {
   type: string;
   shared: boolean;
   nodes: string[];
+  removesStore: boolean;
+}
+
+/**
+ * Whether removing a source deletes its storage definition: an ESXi source, or
+ * a store holding nothing but imports. A store that holds other content too
+ * loses only the import content type, which takes manage:storage.
+ */
+function removesStore(source: ImportSource): boolean {
+  return (
+    source.type === "esxi" ||
+    source.content
+      .split(",")
+      .map((c) => c.trim())
+      .every((c) => c === "" || c === "import")
+  );
 }
 
 export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
@@ -53,6 +69,7 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
           type: s.type,
           shared: s.shared,
           nodes: [s.node],
+          removesStore: removesStore(s),
         });
       }
     });
@@ -62,8 +79,10 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   }, [sources]);
 
   const canManageImport = canManage("vm_import");
-  // Enabling the import content type edits a store.
+  // Enabling the import content type edits a store, and so does removing it
+  // from a store that holds other content.
   const canManageStorage = canManage("storage");
+  const target = groups.find((g) => g.storage === deleteTarget);
 
   function confirmDelete() {
     if (!deleteTarget) return;
@@ -148,9 +167,13 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
                         : g.nodes.join(", ")}
                   </div>
                 </div>
-                {canManageImport && (
+                {canManageImport && (g.removesStore || canManageStorage) && (
                   <Button
-                    aria-label={`Delete ${g.storage}`}
+                    aria-label={
+                      g.removesStore
+                        ? `Delete ${g.storage}`
+                        : `Remove import from ${g.storage}`
+                    }
                     variant="ghost"
                     size="sm"
                     className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
@@ -182,9 +205,19 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
           <DialogHeader>
             <DialogTitle>Remove import source?</DialogTitle>
             <DialogDescription>
-              This removes the storage definition{" "}
-              <span className="font-mono">{deleteTarget}</span> from Proxmox.
-              Guests already imported from it are unaffected.
+              {target?.removesStore === false ? (
+                <>
+                  <span className="font-mono">{deleteTarget}</span> holds other
+                  content as well, so it stays: this only takes the import
+                  content type off it. Nothing stored on it is touched.
+                </>
+              ) : (
+                <>
+                  This removes the storage definition{" "}
+                  <span className="font-mono">{deleteTarget}</span> from
+                  Proxmox. Guests already imported from it are unaffected.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           {deleteMutation.isError && (

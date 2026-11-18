@@ -15,6 +15,7 @@
     "create_import_source": "Import source added",
     "delete_import_source": "Import source removed",
     "enable_import_content": "Import content enabled",
+    "remove_import_content": "Import content removed",
     "create_lvm": "LVM volume group created",
     "create_lvmthin": "LVM thin pool created",
     "create_directory": "Directory created",

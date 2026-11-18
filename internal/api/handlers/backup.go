@@ -2204,9 +2204,10 @@ func refuseExtraRestoreKeys(extra map[string]string, container bool) error {
 	return nil
 }
 
-// requireGuestActionPerm refuses what a guest's own route would refuse:
-// action:<resource> on the cluster, with a 403 naming what needed it and the
-// permission. A lookup that could not answer is returned as it is, not as "no".
+// requireGuestActionPerm refuses what the object's own route would refuse (a
+// guest's, or a store's edit): action:<resource> on the cluster, with a 403
+// naming what needed it and the permission. A lookup that could not answer is
+// returned as it is, not as "no".
 func requireGuestActionPerm(c fiber.Ctx, action, resource string, clusterID uuid.UUID, what string) error {
 	allowed, err := hasClusterPerm(c, action, resource, clusterID)
 	if err != nil {

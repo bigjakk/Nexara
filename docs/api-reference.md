@@ -1338,7 +1338,7 @@ Import VMs from ESXi/vCenter sources or OVA/OVF appliances. Reads require `view:
 | GET | `/clusters/:id/vm-import-sources/content` | List importable content across sources |
 | POST | `/clusters/:id/vm-import-sources/esxi` | Register an ESXi/vCenter source |
 | POST | `/clusters/:id/vm-import-sources/enable-content` | Enable `import` content on an existing storage — **requires `manage:storage`** |
-| DELETE | `/clusters/:id/vm-import-sources/:storage` | Unregister an import source (only accepts import-source storages) |
+| DELETE | `/clusters/:id/vm-import-sources/:storage` | Unregister an import source (only accepts import-source storages): an ESXi source or a store holding only imports is deleted; a store holding other content too loses only its `import` content type, which also **requires `manage:storage`** |
 | GET | `/clusters/:id/vm-imports` | List import jobs |
 | POST | `/clusters/:id/vm-imports` | Start an import |
 | GET | `/clusters/:id/vm-imports/:id` | Get import job status |

@@ -291,8 +291,9 @@ var observedChangeRules = slices.Concat(
 	},
 
 	// A storage, created, edited and removed through Nexara — an ESXi import
-	// source is one, and enabling import content edits its content — and by
-	// the disk and Ceph tasks that define, extend or remove the one they name.
+	// source is one, and enabling or removing import content edits its
+	// content — and by the disk and Ceph tasks that define, extend or remove
+	// the one they name.
 	// An edit writes the fields it sent and deletes those it cleared, and no
 	// plugin writes another (pve-storage API2/Storage/Config.pm update; the
 	// on_update_hook of PBSPlugin.pm stores the encryption-key and
@@ -301,7 +302,7 @@ var observedChangeRules = slices.Concat(
 	[]explainRule{
 		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id", ActionRe: `^update$`, FieldsFrom: "fields"},
 		{Kind: "storage", Change: "changed", AuditType: "storage", MatchKey: "id",
-			ActionRe: `^enable_import_content$`, FieldRe: `^content$`},
+			ActionRe: `^(enable|remove)_import_content$`, FieldRe: `^content$`},
 		{Kind: "storage", Change: "added", MatchKey: "cluster",
 			WorkerRe: anyOf(slices.Concat(diskCreateWorkers, cephCreateWorkers)...), Object: "upid:%s"},
 		{Kind: "storage", Change: "changed", MatchKey: "cluster",

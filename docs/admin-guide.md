@@ -1235,6 +1235,8 @@ Open **Imports** in the navigation rail to see imports and register sources for 
 
 The source is registered as a special storage on the cluster, and the VMs it exposes become selectable when importing.
 
+The bin icon on a source in **Import sources** removes it. An ESXi source, or a store that holds nothing but imports, has its storage definition removed from Proxmox. A store that holds other content as well (an ordinary directory or NFS store that the import content type was enabled on) keeps its definition and everything on it, and loses only the import content type; that also needs `manage:storage`, so a role without it is not offered the icon on such a store.
+
 ### Importing a VM
 
 1. Click **Import VM** on the Imports page or **Create** → **Import VM** in the top bar, right-click a cluster in the inventory tree, or use the Ctrl+K command palette. The wizard's steps are Source, Inspect, Target, Customize and Review
@@ -1253,7 +1255,7 @@ The history table shows **Name**, **Target**, **Source**, **Status** (pending / 
 
 ### Permissions
 
-Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Three operations additionally require storage-management rights (`manage:storage`) because they exercise or change storage configuration: probing a download URL, downloading it to storage, and enabling import content on an existing storage. **Upload OVA** takes either permission.
+Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Four operations additionally require storage-management rights (`manage:storage`) because they exercise or change storage configuration: probing a download URL, downloading it to storage, enabling import content on an existing storage, and removing it from a store that holds other content. **Upload OVA** takes either permission.
 
 ---
 

@@ -45,7 +45,7 @@ var storageHistoryRules = []HistoryRule{
 		"create", "delete", "create_import_source", "delete_import_source",
 		"create_lvm", "create_lvmthin", "create_directory"}},
 	{Category: "config", Field: HistoryFieldAction, Equals: []string{
-		"update", "enable_import_content", "virtio_win_config_update"}},
+		"update", "enable_import_content", "remove_import_content", "virtio_win_config_update"}},
 	// A resource pool's update, which is how a storage joins or leaves one.
 	{Category: "config", Field: HistoryFieldAction, Equals: []string{"updated"}},
 	{Category: "content", Field: HistoryFieldAction, Equals: []string{

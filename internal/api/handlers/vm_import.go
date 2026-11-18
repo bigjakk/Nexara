@@ -801,10 +801,12 @@ func (h *VMImportHandler) RegisterEsxiSource(c fiber.Ctx, p *apischema.Params) e
 }
 
 // DeleteImportSource handles DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage.
-// The param is the Proxmox storage name. The import-source-only guard is enforced against
-// the *live* storage config so a just-registered ESXi source (not yet in inventory) can be
-// removed, and so a role holding only manage:vm_import cannot delete arbitrary production
-// storage — that still requires manage:storage via the storage management endpoint.
+// The param is the Proxmox storage name, checked against the *live* storage config so a
+// just-registered ESXi source (not yet in inventory) can be removed. Only an ESXi source or a
+// store holding nothing but imports is deleted. A store that holds other content too (the
+// wizard's enable-content step adds import to an ordinary dir or NFS store) loses only the
+// import content type, which takes manage:storage as enable-content does: deleting its
+// definition would cut off every guest with a disk on it.
 func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx, p *apischema.Params) error {
 	clusterID, err := parseParamUUID(p.String("cluster_id"))
 	if err != nil {
@@ -825,6 +827,21 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx, p *apischema.Params) e
 	}
 	if cfg.Type != "esxi" && !storageHasContent(cfg.Content, "import") {
 		return fiber.NewError(fiber.StatusBadRequest, "storage is not an import source; use the storage management endpoint")
+	}
+	if rest := withoutContent(cfg.Content, "import"); cfg.Type != "esxi" && rest != "" {
+		if err := requireGuestActionPerm(c, "manage", "storage", clusterID,
+			"Removing the import content type from a store that holds other content"); err != nil {
+			return err
+		}
+		form := url.Values{}
+		form.Set("content", rest)
+		if _, err := pxClient.UpdateStorage(c.Context(), storageName, form, nil); err != nil {
+			return mapProxmoxError(err)
+		}
+		details, _ := json.Marshal(map[string]any{"storage": storageName, "resource_name": storageName, "content": rest})
+		AuditLog(c, h.queries, h.eventPub, ClusterUUID(clusterID), "storage", storageName, "remove_import_content", details)
+		h.eventPub.ClusterEvent(c.Context(), cluster.ID.String(), events.KindInventoryChange, "storage", storageName, "update")
+		return c.JSON(fiber.Map{"status": "updated", "storage": storageName, "content": rest})
 	}
 	if err := pxClient.DeleteStorage(c.Context(), storageName); err != nil {
 		return mapProxmoxError(err)
@@ -887,6 +904,18 @@ func mergeContent(content, want string) string {
 		return want
 	}
 	return content + "," + want
+}
+
+// withoutContent is a comma-separated PVE content list without drop, the other entries kept
+// in their order; empty when drop was the only one.
+func withoutContent(content, drop string) string {
+	kept := make([]string, 0, strings.Count(content, ",")+1)
+	for _, part := range strings.Split(content, ",") {
+		if part = strings.TrimSpace(part); part != "" && part != drop {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, ",")
 }
 
 // --- helpers ---------------------------------------------------------------------------

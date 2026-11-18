@@ -204,9 +204,11 @@ func registerVMImportEndpoints(reg *Registry, h *handlers.VMImportHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodDelete,
 		Path:   importSourceScope + "/:storage",
-		Description: "Remove an import source. Refused for a storage that is not one — the check runs " +
-			"against Proxmox's live config, so a role holding only manage:vm_import cannot delete " +
-			"production storage through this route.",
+		Description: "Remove an import source. An ESXi source, or a store holding nothing but imports, is " +
+			"deleted; a store that holds other content too keeps its definition and loses only the import " +
+			"content type, which requires manage:storage as well. Refused for a storage that is not an " +
+			"import source. Both checks run against Proxmox's live config, so a role holding only " +
+			"manage:vm_import cannot delete or change production storage through this route.",
 		Group:       "VM Import",
 		Permissions: clusterCheck("manage", "vm_import"),
 		Parameters:  clusterParams(apischema.Properties{"storage": importSourceStorageParam}),

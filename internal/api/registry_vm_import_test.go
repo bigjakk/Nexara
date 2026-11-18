@@ -7,9 +7,15 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
+
+	"github.com/bigjakk/nexara/internal/api/apischema"
+	"github.com/bigjakk/nexara/internal/api/handlers"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // These tests drive the REAL declarations — the ones setupRoutes mounts —
@@ -185,6 +191,79 @@ func TestImportSourceDeleteAnchorsItsStorageSegment(t *testing.T) {
 	}
 	if cap.called {
 		t.Error("the handler ran for a traversal segment")
+	}
+}
+
+// Removing an import source deletes only a store that holds nothing but imports.
+// One that holds other content too (enable-content adds import to an ordinary
+// store) loses only the import content type, which takes manage:storage:
+// deleting its definition would cut off every guest with a disk on it.
+func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, content string
+		grants        map[string]bool
+		status        int
+		need          string // in the answer
+		deleted       bool
+		sent          string // the content an update sent; empty when none was sent
+		audits        []string
+	}{
+		{"a store holding only imports is deleted", "import", grantsOf("manage:vm_import"),
+			200, `"deleted"`, true, "", []string{"delete_import_source"}},
+		{"a store holding other content loses only import", "images,import,iso",
+			grantsOf("manage:vm_import", "manage:storage"), 200, `"updated"`, false, "images,iso",
+			[]string{"remove_import_content"}},
+		{"without manage:storage that is refused, and nothing is sent", "images,import",
+			grantsOf("manage:vm_import"), 403, "requires manage:storage", false, "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var mu sync.Mutex
+			deleted, sent := false, ""
+			pve := &backupRunPVE{handle: func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path != "/api2/json/storage/store01" {
+					return false
+				}
+				answer := `{"data":null}`
+				mu.Lock()
+				switch r.Method {
+				case http.MethodGet:
+					answer = `{"data":{"storage":"store01","type":"dir","content":"` + tt.content + `"}}`
+				case http.MethodDelete:
+					deleted = true
+				case http.MethodPut:
+					_ = r.ParseForm()
+					sent = r.PostForm.Get("content")
+				}
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(answer))
+				return true
+			}}
+			path := importSourceScope + "/:storage"
+			app, dbtx := newPVEAppAs(t, pve, tt.grants, fiber.MethodDelete, path,
+				func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+					return handlers.NewVMImportHandler(q, backupRunEncKey, nil).DeleteImportSource
+				})
+			dbtx.lookups = map[string]any{"GetCluster": db.Cluster{ID: uuid.MustParse(testClusterID)}}
+			req := httptest.NewRequest(http.MethodDelete, vmImportRoute(path), nil)
+			req.Header.Set("X-Test-User", "yes")
+			status, body := sendBody(t, app, req)
+			var audits []string
+			for _, a := range dbtx.decodedAudits(t) {
+				audits = append(audits, a.action)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if status != tt.status || !strings.Contains(string(body), tt.need) || deleted != tt.deleted ||
+				sent != tt.sent || !slices.Equal(audits, tt.audits) {
+				t.Errorf("answered %d %s, deleted %t, sent content %q, audited %v; want %d naming %s, deleted %t, "+
+					"sent %q, audited %v", status, body, deleted, sent, audits, tt.status, tt.need, tt.deleted,
+					tt.sent, tt.audits)
+			}
+		})
 	}
 }
 
