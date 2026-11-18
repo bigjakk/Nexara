@@ -203,10 +203,15 @@ func (l *License) ProxmoxClusters() []ProxmoxCluster {
 // that contained it is not.
 type Timestamp struct {
 	time.Time
+	// zoned is true when the value carried its own offset ("Z" or ±hh:mm).
+	// One that did not is the Veeam server's local wall clock, decoded as UTC
+	// (see UnmarshalJSON); WallIn reads it in the zone it was written in.
+	zoned bool
 }
 
 // timestampLayouts are tried in order. The offset-bearing forms come first
-// because they are what the endpoints Nexara actually polls emit.
+// because they are what the endpoints Nexara actually polls emit; the first
+// zonedLayouts of them are the ones that carry an offset.
 var timestampLayouts = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
@@ -215,25 +220,47 @@ var timestampLayouts = []string{
 	"2006-01-02",
 }
 
+const zonedLayouts = 2
+
 // UnmarshalJSON decodes any of the layouts above, plus JSON null.
 func (t *Timestamp) UnmarshalJSON(data []byte) error {
 	s := strings.Trim(string(data), `"`)
 	if s == "" || s == "null" {
 		t.Time = time.Time{}
+		t.zoned = false
 		return nil
 	}
-	for _, layout := range timestampLayouts {
+	for i, layout := range timestampLayouts {
 		// An offset-less value is read as UTC. It is the only defensible
-		// choice: the alternative is the collector's local zone, which would
-		// make the same payload decode differently depending on where Nexara
-		// runs.
+		// choice here: the alternative is the collector's local zone, which
+		// would make the same payload decode differently depending on where
+		// Nexara runs. A caller that knows the server's zone fixes it up with
+		// WallIn.
 		if parsed, err := time.Parse(layout, s); err == nil {
 			t.Time = parsed
+			t.zoned = i < zonedLayouts
 			return nil
 		}
 	}
 	t.Time = time.Time{}
+	t.zoned = false
 	return nil
+}
+
+// HasOffset reports whether the value carried its own offset. Only then does
+// Location name the zone the Veeam server wrote it in.
+func (t Timestamp) HasOffset() bool { return t.zoned }
+
+// WallIn is the instant this timestamp names when its wall clock is read in
+// loc. An offset-less value (a run's task times are one) is the Veeam
+// server's local time decoded as UTC, off by the server's offset; read in the
+// server's zone it is right. A value that carried an offset, the zero time and
+// a nil loc come back unchanged.
+func (t Timestamp) WallIn(loc *time.Location) time.Time {
+	if t.zoned || t.IsZero() || loc == nil {
+		return t.Time
+	}
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 }
 
 // MarshalJSON emits RFC3339, or null for the zero time.

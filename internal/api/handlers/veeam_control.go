@@ -387,6 +387,13 @@ func (h *VeeamHandler) GetSessionTasks(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return renderVeeamControlError(c, err)
 	}
+	var zone *time.Location
+	if s, err := client.Session(ctx, target.session.VeeamID.String()); err == nil {
+		zone = veeamServerZone(s)
+	} else {
+		slog.Warn("veeam: reading the run's session failed; its guests' times go out as decoded, off by the server's offset",
+			"veeam_server_id", target.server.ID, "session", target.session.VeeamID, "error", err)
+	}
 
 	guests := h.resolveTaskGuests(c, target)
 
@@ -425,13 +432,7 @@ func (h *VeeamHandler) GetSessionTasks(c fiber.Ctx, p *apischema.Params) error {
 			ProcessedSize:   t.Progress.ProcessedSize,
 			TransferredSize: t.Progress.TransferredSize,
 		}
-		if !t.CreationTime.IsZero() {
-			ts := t.CreationTime.Time
-			row.CreationTime = &ts
-		}
-		if end := t.EndTime.Or(); !end.IsZero() {
-			row.EndTime = &end
-		}
+		row.CreationTime, row.EndTime = veeamTaskTimes(t, zone)
 		if g, ok := guests[strings.ToLower(t.Name)]; ok {
 			cluster := g.cluster
 			vmid := g.vmid
@@ -888,4 +889,30 @@ func clampPercent(v int) int32 {
 		return 100
 	}
 	return int32(v)
+}
+
+// veeamServerZone is the zone the Veeam server writes its local times in, read
+// off the run's own session: session times carry an offset, a run's task times
+// do not. nil when there is no session or it carried none; the task times then
+// go out as decoded.
+func veeamServerZone(s *veeam.Session) *time.Location {
+	if s == nil || !s.CreationTime.HasOffset() {
+		return nil
+	}
+	return s.CreationTime.Location()
+}
+
+// veeamTaskTimes is a task's start and end, read in the server's zone. Decoded
+// as UTC, a run's guests read hours away from the run itself (the job's
+// schedule and the run's own times carry the offset and were right).
+func veeamTaskTimes(t veeam.TaskSession, zone *time.Location) (created, ended *time.Time) {
+	if !t.CreationTime.IsZero() {
+		ts := t.CreationTime.WallIn(zone)
+		created = &ts
+	}
+	if t.EndTime != nil && !t.EndTime.IsZero() {
+		ts := t.EndTime.WallIn(zone)
+		ended = &ts
+	}
+	return created, ended
 }

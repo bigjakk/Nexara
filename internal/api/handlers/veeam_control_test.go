@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -354,5 +355,29 @@ func TestVeeamSessionAuditNamesTheJobItRanFor(t *testing.T) {
 				t.Errorf("details.veeam_job_id = %v (present: %v), want %q", got, has, tt.want)
 			}
 		})
+	}
+}
+
+// A run's task times carry no offset; a guest's times were off by the Veeam
+// server's offset until read in the zone the run's own session carries.
+func TestVeeamTaskTimesAreReadInTheZoneOfTheRunsSession(t *testing.T) {
+	t.Parallel()
+	var session veeam.Session
+	if err := json.Unmarshal([]byte(`{"creationTime":"2026-11-16T22:00:13+05:30"}`), &session); err != nil {
+		t.Fatalf("Unmarshal session: %v", err)
+	}
+	var task veeam.TaskSession
+	if err := json.Unmarshal([]byte(`{"creationTime":"2026-11-16T22:17:38","endTime":"2026-11-16T22:18:36"}`), &task); err != nil {
+		t.Fatalf("Unmarshal task: %v", err)
+	}
+	created, ended := veeamTaskTimes(task, veeamServerZone(&session))
+	if created == nil || ended == nil {
+		t.Fatalf("times = %v, %v; want both", created, ended)
+	}
+	if got := created.UTC().Format(time.RFC3339); got != "2026-11-16T16:47:38Z" {
+		t.Errorf("created = %s, want 2026-11-16T16:47:38Z", got)
+	}
+	if got := ended.UTC().Format(time.RFC3339); got != "2026-11-16T16:48:36Z" {
+		t.Errorf("ended = %s, want 2026-11-16T16:48:36Z", got)
 	}
 }

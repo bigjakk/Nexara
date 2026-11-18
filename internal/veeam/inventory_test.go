@@ -480,6 +480,34 @@ func TestTimestamp_DecodesEveryLayoutTheAPIEmits(t *testing.T) {
 	}
 }
 
+// A run's task times carry no offset: they are the Veeam server's wall clock.
+// Decoded as UTC, a guest's times were off by the server's offset in every
+// browser; read in the zone of a timestamp that did carry one, they name the
+// right instant. A half-hour offset, as in the decode test above.
+func TestTimestamp_WallInReadsAnOffsetLessValueInTheServersZone(t *testing.T) {
+	t.Parallel()
+	var session, task, stamped Timestamp
+	for raw, ts := range map[string]*Timestamp{
+		`"2026-11-16T22:00:13+05:30"`: &session,
+		`"2026-11-16T22:17:38"`:       &task,
+		`"2026-11-16T22:17:38+02:00"`: &stamped,
+	} {
+		if err := json.Unmarshal([]byte(raw), ts); err != nil {
+			t.Fatalf("Unmarshal(%s): %v", raw, err)
+		}
+	}
+	if !session.HasOffset() || task.HasOffset() {
+		t.Fatalf("HasOffset: session %v, task %v; want true, false", session.HasOffset(), task.HasOffset())
+	}
+	zone := session.Location()
+	if got := task.WallIn(zone).UTC().Format(time.RFC3339); got != "2026-11-16T16:47:38Z" {
+		t.Errorf("task read in the session's zone = %s, want 2026-11-16T16:47:38Z", got)
+	}
+	if got := stamped.WallIn(zone); !got.Equal(stamped.Time) {
+		t.Errorf("a value with its own offset moved: %v -> %v", stamped.Time, got)
+	}
+}
+
 func TestTimestamp_RoundTripsThroughJSON(t *testing.T) {
 	var ts Timestamp
 	if err := json.Unmarshal([]byte(`"2026-08-25T12:57:50+05:30"`), &ts); err != nil {
