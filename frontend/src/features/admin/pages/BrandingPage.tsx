@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, Loader2, Server, X } from "lucide-react";
 
+import { BrandingLogo } from "@/components/BrandingLogo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -12,19 +13,27 @@ import {
 } from "@/components/page/Settings";
 import {
   useBranding,
+  useBrandingImage,
+  useDeleteSetting,
   useUpsertSetting,
   useUploadLogo,
   useUploadFavicon,
 } from "@/features/settings/api/settings-queries";
-import { useBrandingStore } from "@/stores/branding-store";
+import {
+  brandingText,
+  DEFAULT_FAVICON,
+  useBrandingStore,
+} from "@/stores/branding-store";
 import { AdminNav } from "../components/AdminNav";
 
 export function BrandingPage() {
   const brandingQuery = useBranding();
   const upsertSetting = useUpsertSetting();
+  const deleteSetting = useDeleteSetting();
   const uploadLogo = useUploadLogo();
   const uploadFavicon = useUploadFavicon();
   const branding = useBrandingStore();
+  const faviconSrc = useBrandingImage("favicon", branding.faviconUrl);
 
   const [appTitle, setAppTitle] = useState(branding.appTitle);
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -33,11 +42,8 @@ export function BrandingPage() {
   // Sync from backend when data arrives
   useEffect(() => {
     if (brandingQuery.data) {
-      const data = brandingQuery.data;
-      if (typeof data["branding.app_title"] === "string") {
-        const title = JSON.parse(data["branding.app_title"]) as string;
-        setAppTitle(title);
-      }
+      const title = brandingText(brandingQuery.data["branding.app_title"]);
+      if (title) setAppTitle(title);
     }
   }, [brandingQuery.data]);
 
@@ -78,17 +84,37 @@ export function BrandingPage() {
     });
   };
 
+  // Reset removes the setting rather than saving "Nexara": the install is then
+  // back on the default, as it was before anyone named it.
   const handleResetTitle = () => {
-    setAppTitle("Nexara");
-    upsertSetting.mutate(
-      {
-        key: "branding.app_title",
-        value: "Nexara",
-        scope: "global",
-      },
+    deleteSetting.mutate(
+      { key: "branding.app_title", scope: "global" },
       {
         onSuccess: () => {
+          setAppTitle("Nexara");
           branding.setAppTitle("Nexara");
+        },
+      },
+    );
+  };
+
+  const resetLogo = () => {
+    deleteSetting.mutate(
+      { key: "branding.logo_url", scope: "global" },
+      {
+        onSuccess: () => {
+          branding.setLogoUrl(null);
+        },
+      },
+    );
+  };
+
+  const resetFavicon = () => {
+    deleteSetting.mutate(
+      { key: "branding.favicon_url", scope: "global" },
+      {
+        onSuccess: () => {
+          branding.setFaviconUrl(null);
         },
       },
     );
@@ -134,7 +160,13 @@ export function BrandingPage() {
                 />
               </SettingRow>
               <SettingsFooter>
-                <Button variant="outline" onClick={handleResetTitle}>
+                {/* One delete mutation serves Reset and both Use default:
+                    a second mutate() would drop the first one's onSuccess. */}
+                <Button
+                  variant="outline"
+                  onClick={handleResetTitle}
+                  disabled={deleteSetting.isPending}
+                >
                   Reset
                 </Button>
                 <Button
@@ -159,10 +191,9 @@ export function BrandingPage() {
               >
                 {branding.logoUrl && (
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-foreground/[0.06]">
-                    <img
-                      src={branding.logoUrl}
-                      alt="Logo"
+                    <BrandingLogo
                       className="h-8 w-8 object-contain"
+                      alt="Logo"
                     />
                   </div>
                 )}
@@ -187,6 +218,15 @@ export function BrandingPage() {
                   )}
                   Upload logo
                 </Button>
+                {branding.logoUrl && (
+                  <Button
+                    variant="outline"
+                    onClick={resetLogo}
+                    disabled={deleteSetting.isPending}
+                  >
+                    Use default
+                  </Button>
+                )}
               </SettingRow>
               <SettingRow
                 label="Favicon"
@@ -194,11 +234,13 @@ export function BrandingPage() {
               >
                 {branding.faviconUrl && (
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-foreground/[0.06]">
-                    <img
-                      src={branding.faviconUrl}
-                      alt="Favicon"
-                      className="h-6 w-6 object-contain"
-                    />
+                    {faviconSrc && (
+                      <img
+                        src={faviconSrc}
+                        alt="Favicon"
+                        className="h-6 w-6 object-contain"
+                      />
+                    )}
                   </div>
                 )}
                 <input
@@ -222,6 +264,15 @@ export function BrandingPage() {
                   )}
                   Upload favicon
                 </Button>
+                {branding.faviconUrl && (
+                  <Button
+                    variant="outline"
+                    onClick={resetFavicon}
+                    disabled={deleteSetting.isPending}
+                  >
+                    Use default
+                  </Button>
+                )}
               </SettingRow>
             </SettingsSection>
           </div>
@@ -235,15 +286,10 @@ export function BrandingPage() {
                   </div>
                   <div className="flex items-center gap-2.5 rounded-lg bg-background px-2.5 py-2">
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-foreground/[0.08]">
-                      {branding.logoUrl ? (
-                        <img
-                          src={branding.logoUrl}
-                          alt=""
-                          className="h-5 w-5 object-contain"
-                        />
-                      ) : (
-                        <Server className="h-5 w-5" />
-                      )}
+                      <BrandingLogo
+                        className="h-5 w-5 object-contain"
+                        fallback={<Server className="h-5 w-5" />}
+                      />
                     </span>
                     <span className="truncate text-base font-semibold tracking-tight [font-stretch:112%]">
                       {previewTitle}
@@ -257,7 +303,7 @@ export function BrandingPage() {
                   <div className="flex max-w-[15rem] items-center gap-2 rounded-t-lg bg-background px-3 py-2 text-[13px]">
                     {/* index.html's own icon until one is uploaded. */}
                     <img
-                      src={branding.faviconUrl ?? "/favicon.png"}
+                      src={faviconSrc ?? DEFAULT_FAVICON}
                       alt=""
                       className="h-4 w-4 shrink-0 object-contain"
                     />

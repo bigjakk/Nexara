@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { stubObjectUrls } from "@/test/object-url";
 import { PBSKeySaveDialog } from "./PBSKeySaveDialog";
 
 // A key file in the shape proxmox-backup-client writes. Synthetic: the data
@@ -162,19 +163,7 @@ describe("PBSKeySaveDialog", () => {
   });
 
   it("downloads exactly the key as a .json file", async () => {
-    // jsdom has no createObjectURL; a subclass supplies it while `new URL`
-    // keeps working for anything else that runs.
-    const blobs: Blob[] = [];
-    class RecordingURL extends URL {
-      static override createObjectURL(blob: Blob): string {
-        blobs.push(blob);
-        return "blob:pbs-key";
-      }
-      static override revokeObjectURL(): void {
-        // nothing to release
-      }
-    }
-    vi.stubGlobal("URL", RecordingURL);
+    const { blobs } = stubObjectUrls();
     const downloads: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,

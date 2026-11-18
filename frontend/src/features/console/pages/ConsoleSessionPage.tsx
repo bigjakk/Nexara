@@ -383,8 +383,8 @@ function ConsoleSessionScreen({ tab }: { tab: ConsoleTab }) {
   const brandingQuery = useBranding();
   const appTitle = useBrandingStore((s) => s.appTitle);
   // Both this and BrandingLoader watch the branding query, so they render in
-  // one commit, and BrandingLoader's effect — it writes the branded title,
-  // where the installation has one, on every load — runs first: its subtree
+  // one commit, and BrandingLoader's effect — it writes the title, branded or
+  // the default, on a load that changes it — runs first: its subtree
   // comes earlier. This one lists the query's data, so it runs after it.
   useEffect(() => {
     document.title = `${label} · ${appTitle}`;

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, apiFetch } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
@@ -25,6 +26,8 @@ export const settingsKeys = {
   detail: (key: string, scope: string) =>
     [...settingsKeys.all, "detail", key, scope] as const,
   branding: () => [...settingsKeys.all, "branding"] as const,
+  // Not under `all`: a write of any setting would read both files again.
+  brandingFiles: ["branding-file"] as const,
 };
 
 export function useSettings(scope: string) {
@@ -124,6 +127,7 @@ export function useUploadLogo() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: settingsKeys.branding() });
+      void qc.invalidateQueries({ queryKey: settingsKeys.brandingFiles });
     },
   });
 }
@@ -144,6 +148,66 @@ export function useUploadFavicon() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: settingsKeys.branding() });
+      void qc.invalidateQueries({ queryKey: settingsKeys.brandingFiles });
     },
   });
+}
+
+const brandingFiles = {
+  logo: apiPath`/api/v1/settings/branding/logo-file`,
+  favicon: apiPath`/api/v1/settings/branding/favicon-file`,
+};
+
+/**
+ * An uploaded logo or favicon as a URL an <img> or the tab's icon link can
+ * show, or null while there is none (`stored`, the setting, is null) or it is
+ * loading. The API serves the file only with the session's bearer token,
+ * which an <img> cannot send, so every custom logo was a broken image: it is
+ * read through apiFetch and shown from a blob: URL, which the CSP allows.
+ */
+export function useBrandingImage(
+  kind: keyof typeof brandingFiles,
+  stored: string | null,
+): string | null {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    // An upload invalidates it (see useUploadLogo); a removal drops it below.
+    queryKey: [...settingsKeys.brandingFiles, kind],
+    queryFn: async () => {
+      const res = await apiFetch(brandingFiles[kind], {
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error(`Failed to load the ${kind}`);
+      return res.blob();
+    },
+    enabled: stored !== null,
+    // Read again after five minutes, as the settings are: one replaced in
+    // another tab then shows here.
+    staleTime: 5 * 60 * 1000,
+  });
+  // A removed image leaves the cache, so one uploaded after it is never shown
+  // the old picture while the new one loads.
+  useEffect(() => {
+    if (stored === null) {
+      qc.removeQueries({ queryKey: [...settingsKeys.brandingFiles, kind] });
+    }
+  }, [stored, kind, qc]);
+  return useObjectUrl(stored === null ? undefined : data);
+}
+
+/** A blob: URL for `blob`, released when the blob changes or the caller unmounts. */
+function useObjectUrl(blob: Blob | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!blob) {
+      setUrl(null);
+      return;
+    }
+    const next = URL.createObjectURL(blob);
+    setUrl(next);
+    return () => {
+      URL.revokeObjectURL(next);
+    };
+  }, [blob]);
+  return url;
 }

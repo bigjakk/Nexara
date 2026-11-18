@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Server } from "lucide-react";
+import { BrandingLogo } from "@/components/BrandingLogo";
 import { cn } from "@/lib/utils";
 import { useBrandingStore } from "@/stores/branding-store";
 import {
@@ -41,7 +42,7 @@ function RailLink({ item, pathname }: { item: NavItem; pathname: string }) {
  */
 export function NavRail() {
   const { pathname } = useLocation();
-  const { appTitle, logoUrl } = useBrandingStore();
+  const appTitle = useBrandingStore((s) => s.appTitle);
   const sections = useVisibleNavSections();
   // Settings and Admin stay pinned; the rest scrolls on a short screen.
   const pinned = sections.filter((s) => s.labelKey === "sectionSystem");
@@ -54,11 +55,10 @@ export function NavRail() {
         aria-label={appTitle}
         className="my-2.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rail-accent text-rail-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {logoUrl ? (
-          <img src={logoUrl} alt="" className="h-5 w-5 object-contain" />
-        ) : (
-          <Server className="h-5 w-5" />
-        )}
+        <BrandingLogo
+          className="h-5 w-5 object-contain"
+          fallback={<Server className="h-5 w-5" />}
+        />
       </Link>
       <nav
         aria-label="Main"

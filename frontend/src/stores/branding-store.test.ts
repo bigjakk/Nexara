@@ -126,31 +126,6 @@ describe("branding-store — setFaviconUrl", () => {
     );
   });
 
-  it("injects a <link rel='icon'> element when none exists", () => {
-    useBrandingStore.getState().setFaviconUrl("https://example.com/fav.ico");
-    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    expect(link).not.toBeNull();
-    expect(link?.href).toContain("fav.ico");
-  });
-
-  it("updates existing <link rel='icon'> href when element already present", () => {
-    // Pre-create a link element.
-    const link = document.createElement("link");
-    link.rel = "icon";
-    link.href = "https://example.com/old.ico";
-    document.head.appendChild(link);
-
-    useBrandingStore.getState().setFaviconUrl("https://example.com/new.ico");
-    const found = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    expect(found?.href).toContain("new.ico");
-  });
-
-  it("does not inject a DOM element when url is null", () => {
-    useBrandingStore.getState().setFaviconUrl(null);
-    const link = document.querySelector('link[rel="icon"]');
-    expect(link).toBeNull();
-  });
-
   it("stores null faviconUrl in the store", () => {
     useBrandingStore.getState().setFaviconUrl(null);
     expect(useBrandingStore.getState().faviconUrl).toBeNull();
@@ -179,58 +154,43 @@ describe("branding-store — loadFromBranding", () => {
     expect(useBrandingStore.getState().loaded).toBe(true);
   });
 
-  it("parses a JSON-encoded app title from branding.app_title key", () => {
+  // The server sends each value decoded (`map[string]json.RawMessage`), so a
+  // title arrives as the title; parsing it again threw on every saved title.
+  it.each([
+    ["the plain value the server sends", "Acme Platform"],
+    ["a value once stored JSON-encoded", JSON.stringify("Acme Platform")],
+  ])("reads the title from %s", (_label, value) => {
     useBrandingStore.getState().loadFromBranding({
-      "branding.app_title": JSON.stringify("Acme Platform"),
+      "branding.app_title": value,
     });
     expect(useBrandingStore.getState().appTitle).toBe("Acme Platform");
-  });
-
-  it("updates document.title when branding.app_title is provided", () => {
-    useBrandingStore.getState().loadFromBranding({
-      "branding.app_title": JSON.stringify("Acme Platform"),
-    });
     expect(document.title).toBe("Acme Platform");
   });
 
-  it("parses a JSON-encoded logo URL from branding.logo_url key", () => {
+  it("loads the logo and favicon URLs as the server sends them", () => {
     useBrandingStore.getState().loadFromBranding({
-      "branding.logo_url": JSON.stringify("https://example.com/logo.svg"),
-    });
-    expect(useBrandingStore.getState().logoUrl).toBe(
-      "https://example.com/logo.svg",
-    );
-  });
-
-  it("parses a JSON-encoded favicon URL from branding.favicon_url key", () => {
-    useBrandingStore.getState().loadFromBranding({
-      "branding.favicon_url": JSON.stringify("https://example.com/favicon.ico"),
-    });
-    expect(useBrandingStore.getState().faviconUrl).toBe(
-      "https://example.com/favicon.ico",
-    );
-  });
-
-  it("injects favicon DOM element when branding.favicon_url is provided", () => {
-    useBrandingStore.getState().loadFromBranding({
-      "branding.favicon_url": JSON.stringify("https://example.com/favicon.ico"),
-    });
-    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    expect(link).not.toBeNull();
-    expect(link?.href).toContain("favicon.ico");
-  });
-
-  it("loads all three branding fields together", () => {
-    useBrandingStore.getState().loadFromBranding({
-      "branding.app_title": JSON.stringify("Full Platform"),
-      "branding.logo_url": JSON.stringify("https://example.com/logo.png"),
-      "branding.favicon_url": JSON.stringify("https://example.com/fav.png"),
+      "branding.logo_url": "/api/v1/settings/branding/logo-file",
+      "branding.favicon_url": "/api/v1/settings/branding/favicon-file",
     });
     const state = useBrandingStore.getState();
-    expect(state.appTitle).toBe("Full Platform");
-    expect(state.logoUrl).toBe("https://example.com/logo.png");
-    expect(state.faviconUrl).toBe("https://example.com/fav.png");
-    expect(state.loaded).toBe(true);
+    expect(state.logoUrl).toBe("/api/v1/settings/branding/logo-file");
+    expect(state.faviconUrl).toBe("/api/v1/settings/branding/favicon-file");
+  });
+
+  // Reset elsewhere (another tab, another admin), each stayed here for good.
+  it("puts back the title, logo and favicon the server no longer reports", () => {
+    useBrandingStore.setState({
+      appTitle: "Acme Platform",
+      logoUrl: "/api/v1/settings/branding/logo-file",
+      faviconUrl: "/api/v1/settings/branding/favicon-file",
+    });
+    document.title = "Acme Platform";
+    useBrandingStore.getState().loadFromBranding({});
+    const state = useBrandingStore.getState();
+    expect(state.appTitle).toBe("Nexara");
+    expect(document.title).toBe("Nexara");
+    expect(state.logoUrl).toBeNull();
+    expect(state.faviconUrl).toBeNull();
   });
 
   it("ignores non-string branding.app_title values", () => {
@@ -254,44 +214,8 @@ describe("branding-store — loadFromBranding", () => {
     expect(useBrandingStore.getState().faviconUrl).toBeNull();
   });
 
-  it("silently ignores malformed JSON in branding.app_title", () => {
-    // Should not throw; store title should remain unchanged.
-    expect(() => {
-      useBrandingStore.getState().loadFromBranding({
-        "branding.app_title": "{not-valid-json",
-      });
-    }).not.toThrow();
-    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
-  });
-
-  it("silently ignores malformed JSON in branding.logo_url", () => {
-    expect(() => {
-      useBrandingStore.getState().loadFromBranding({
-        "branding.logo_url": "not-json-at-all",
-      });
-    }).not.toThrow();
-    // JSON.parse("not-json-at-all") throws, so logoUrl stays null.
-    expect(useBrandingStore.getState().logoUrl).toBeNull();
-  });
-
-  it("silently ignores malformed JSON in branding.favicon_url", () => {
-    expect(() => {
-      useBrandingStore.getState().loadFromBranding({
-        "branding.favicon_url": "bad-json",
-      });
-    }).not.toThrow();
-    expect(useBrandingStore.getState().faviconUrl).toBeNull();
-  });
-
   it("sets loaded to true even when no branding keys are present", () => {
     useBrandingStore.getState().loadFromBranding({});
     expect(useBrandingStore.getState().loaded).toBe(true);
-  });
-
-  it("does not mutate appTitle when branding.app_title is absent", () => {
-    useBrandingStore.getState().loadFromBranding({
-      "branding.logo_url": JSON.stringify("https://example.com/logo.png"),
-    });
-    expect(useBrandingStore.getState().appTitle).toBe("Nexara");
   });
 });

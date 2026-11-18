@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight, Server } from "lucide-react";
+import { BrandingLogo } from "@/components/BrandingLogo";
 import { cn } from "@/lib/utils";
 import { useBrandingStore } from "@/stores/branding-store";
 import { useSidebarStore } from "@/stores/sidebar-store";
@@ -14,7 +15,7 @@ import { isNavItemActive, useVisibleNavSections } from "./nav-items";
 export function MobileNav() {
   const { t } = useTranslation("navigation");
   const { pathname } = useLocation();
-  const { appTitle, logoUrl } = useBrandingStore();
+  const appTitle = useBrandingStore((s) => s.appTitle);
   const sections = useVisibleNavSections();
   const treeVisible = useSidebarStore((s) => s.treeVisible);
   const setTreeVisible = useSidebarStore((s) => s.setTreeVisible);
@@ -23,15 +24,12 @@ export function MobileNav() {
     <div className="flex h-full flex-col bg-card">
       {/* Room on the right for the sheet's own close button. */}
       <div className="flex h-14 shrink-0 items-center gap-2 border-b pl-4 pr-12">
-        {logoUrl ? (
-          <img
-            src={logoUrl}
-            alt=""
-            className="h-6 w-6 shrink-0 object-contain"
-          />
-        ) : (
-          <Server className="h-5 w-5 shrink-0 text-muted-foreground" />
-        )}
+        <BrandingLogo
+          className="h-6 w-6 shrink-0 object-contain"
+          fallback={
+            <Server className="h-5 w-5 shrink-0 text-muted-foreground" />
+          }
+        />
         <span className="truncate text-lg font-semibold tracking-tight">
           {appTitle}
         </span>

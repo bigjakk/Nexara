@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BrandingLogo } from "@/components/BrandingLogo";
 import { useBrandingStore } from "@/stores/branding-store";
 
 interface AboutDialogProps {
@@ -21,7 +22,7 @@ const REPO_URL = "https://github.com/bigjakk/Nexara";
 
 const STACK = [
   { label: "Go", note: "API + collector + scheduler" },
-  { label: "React 19 + TypeScript 5", note: "Frontend SPA" },
+  { label: "React 19 + TypeScript 6", note: "Frontend SPA" },
   {
     label: "PostgreSQL + TimescaleDB",
     note: "Persistence + time-series metrics",
@@ -40,7 +41,6 @@ const STACK = [
 
 export function AboutDialog({ open, onOpenChange, version }: AboutDialogProps) {
   const appTitle = useBrandingStore((s) => s.appTitle);
-  const logoUrl = useBrandingStore((s) => s.logoUrl);
 
   const displayVersion = version ?? "unknown";
 
@@ -49,13 +49,7 @@ export function AboutDialog({ open, onOpenChange, version }: AboutDialogProps) {
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <div className="flex items-center gap-3">
-            {logoUrl ? (
-              <img
-                src={logoUrl}
-                alt=""
-                className="h-10 w-10 rounded-md object-contain"
-              />
-            ) : null}
+            <BrandingLogo className="h-10 w-10 rounded-md object-contain" />
             <div>
               <DialogTitle>About {appTitle}</DialogTitle>
               <DialogDescription>
