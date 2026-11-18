@@ -1,7 +1,13 @@
 package migration
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
+
+	"github.com/bigjakk/nexara/internal/proxmox"
 )
 
 func TestParseFlags(t *testing.T) {
@@ -135,5 +141,35 @@ func TestPreFlightReportAddCheck(t *testing.T) {
 	}
 	if len(report.Checks) != 3 {
 		t.Errorf("expected 3 checks, got %d", len(report.Checks))
+	}
+}
+
+// A move within one cluster keeps its VMID, so the report names no VMID check:
+// it read "No target VMID specified; Proxmox will auto-assign" on every one.
+func TestPreFlightChecksWithinAClusterCheckNoTargetVMID(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api2/json/nodes", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"node":"pve-02","status":"online"}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client, err := proxmox.NewClient(proxmox.ClientConfig{BaseURL: srv.URL, TokenID: "user@pam!test", TokenSecret: "x"})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	report, err := RunPreFlightChecks(context.Background(), client, client, "pve-01", "pve-02", 100,
+		VMTypeQEMU, TypeIntraCluster, nil, nil, 0)
+	if err != nil {
+		t.Fatalf("RunPreFlightChecks: %v", err)
+	}
+	names := make([]string, 0, len(report.Checks))
+	for _, c := range report.Checks {
+		names = append(names, c.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"target_node_online"}) || !report.Passed {
+		t.Errorf("checks %v (passed %v), want only target_node_online, passing", names, report.Passed)
 	}
 }

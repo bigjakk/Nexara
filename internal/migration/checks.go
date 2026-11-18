@@ -28,10 +28,11 @@ func RunPreFlightChecks(
 	}
 
 	// For intra-cluster migration, source and target clients are the same
-	// and we only need basic checks.
+	// and we only need basic checks. The guest keeps its VMID on such a move,
+	// so there is no VMID to check: the check said "Proxmox will auto-assign",
+	// which cannot happen, or with a VMID given flagged the guest's own.
 	if migrationType == TypeIntraCluster {
 		report.addCheck(checkTargetNodeOnline(ctx, sourceClient, targetNode))
-		report.addCheck(checkTargetVMIDAvailable(ctx, targetClient, targetNode, targetVMID, vmType))
 		return report, nil
 	}
 

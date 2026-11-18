@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -531,6 +532,7 @@ export function BulkMigrateDialog({
             targetBridges={targetBridges}
             isFormValid={isFormValid}
             isCreating={isCreating}
+            onCancel={handleClose}
             onSubmit={() => {
               void handleCreateAndCheck();
             }}
@@ -716,6 +718,7 @@ interface ConfigStepProps {
   isFormValid: boolean;
   isCreating: boolean;
   onSubmit: () => void;
+  onCancel: () => void;
 }
 
 function ConfigStep({
@@ -758,6 +761,7 @@ function ConfigStep({
   isFormValid,
   isCreating,
   onSubmit,
+  onCancel,
 }: ConfigStepProps) {
   return (
     <div className="space-y-4">
@@ -1037,20 +1041,26 @@ function ConfigStep({
         </div>
       </div>
 
-      <Button
-        onClick={onSubmit}
-        disabled={!isFormValid || isCreating}
-        className="w-full"
-      >
-        {isCreating ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Creating jobs and running checks...
-          </>
-        ) : (
-          "Run pre-flight checks"
-        )}
-      </Button>
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={isCreating}
+        >
+          Cancel
+        </Button>
+        <Button onClick={onSubmit} disabled={!isFormValid || isCreating}>
+          {isCreating ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Creating jobs and running checks...
+            </>
+          ) : (
+            "Run pre-flight checks"
+          )}
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

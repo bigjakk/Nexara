@@ -12,7 +12,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { UsageBar } from "@/components/UsageBar";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
-import { useMigrationJobs } from "../api/migration-queries";
+import {
+  useMigrationGuestNames,
+  useMigrationJobs,
+} from "../api/migration-queries";
 import { MigrateWizard } from "../components/MigrateWizard";
 import { MigrationStatusText } from "../components/MigrationStatusText";
 import { ACTIVE_MIGRATION_STATUSES, jobSummary } from "../lib/job-summary";
@@ -47,6 +50,7 @@ function MigrationProgress({ job }: { job: MigrationJob }) {
 
 export function MigrationsPage() {
   const { data: jobs, isLoading } = useMigrationJobs();
+  const guestNames = useMigrationGuestNames(jobs);
   const summary =
     jobSummary(
       "migration",
@@ -95,7 +99,16 @@ export function MigrationsPage() {
               {jobs.map((job) => (
                 <TableRow key={job.id}>
                   <TableCell className="whitespace-nowrap py-2">
-                    <span className="font-medium tabular-nums">{job.vmid}</span>{" "}
+                    {guestNames.get(
+                      `${job.source_cluster_id}:${String(job.vmid)}`,
+                    ) !== undefined && (
+                      <span className="mr-1.5 font-medium">
+                        {guestNames.get(
+                          `${job.source_cluster_id}:${String(job.vmid)}`,
+                        )}
+                      </span>
+                    )}
+                    <span className="tabular-nums">{job.vmid}</span>{" "}
                     <span className="text-[12.5px] text-muted-foreground">
                       {job.vm_type === "lxc" ? "CT" : "VM"}
                     </span>

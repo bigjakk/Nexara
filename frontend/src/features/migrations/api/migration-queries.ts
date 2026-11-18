@@ -1,7 +1,14 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import {
+  useQueries,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { errorsHandledLocally } from "@/hooks/useSaveOutcome";
+import type { VMResponse } from "@/types/api";
 import type {
   MigrationJob,
   CreateMigrationRequest,
@@ -114,4 +121,40 @@ export function useCancelMigration() {
       void queryClient.invalidateQueries({ queryKey: ["migrations"] });
     },
   });
+}
+
+/**
+ * Each job's guest name, keyed `${source_cluster_id}:${vmid}`. A job keeps only
+ * the VMID; the name comes from its cluster's guest list, read on the key the
+ * tree and the inventory already fill (so mostly from cache). A guest that is
+ * gone has no name, and the page shows the VMID alone.
+ */
+export function useMigrationGuestNames(
+  jobs: MigrationJob[] | undefined,
+): Map<string, string> {
+  const clusterIds = useMemo(
+    () => [...new Set((jobs ?? []).map((j) => j.source_cluster_id))],
+    [jobs],
+  );
+  return useQueries({
+    queries: clusterIds.map((id) => ({
+      queryKey: ["clusters", id, "vms"],
+      queryFn: () =>
+        apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${id}/vms`),
+    })),
+    combine: guestNames,
+  });
+}
+
+// Module-level, so useQueries runs it only when a list changes.
+function guestNames(
+  lists: { data?: VMResponse[] | undefined }[],
+): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const list of lists) {
+    for (const vm of list.data ?? []) {
+      if (vm.name) names.set(`${vm.cluster_id}:${String(vm.vmid)}`, vm.name);
+    }
+  }
+  return names;
 }

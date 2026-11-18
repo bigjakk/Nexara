@@ -1,3 +1,4 @@
+import { checkLabel } from "@/features/migrations/lib/job-summary";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -977,7 +978,9 @@ export function MigrateJobDialog({
                           {severityIcon[check.severity]}
                         </span>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium">{check.name}</p>
+                          <p className="text-sm font-medium">
+                            {checkLabel(check.name)}
+                          </p>
                           <p className="text-[12.5px] leading-snug text-muted-foreground">
                             {check.message}
                           </p>

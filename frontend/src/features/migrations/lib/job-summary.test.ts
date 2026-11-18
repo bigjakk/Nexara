@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVE_MIGRATION_STATUSES, jobSummary } from "./job-summary";
+import {
+  ACTIVE_MIGRATION_STATUSES,
+  checkLabel,
+  jobSummary,
+} from "./job-summary";
 
 describe("jobSummary", () => {
   it.each([
@@ -19,5 +23,15 @@ describe("jobSummary", () => {
     expect(jobSummary("migration", statuses, ACTIVE_MIGRATION_STATUSES)).toBe(
       want,
     );
+  });
+});
+
+describe("checkLabel", () => {
+  it.each([
+    ["target_node_online", "Target node"],
+    ["cpu_compatibility", "CPU compatibility"],
+    ["disk_space_free", "Disk space free"],
+  ])("labels %j as %j", (name, want) => {
+    expect(checkLabel(name)).toBe(want);
   });
 });

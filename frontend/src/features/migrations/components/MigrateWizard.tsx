@@ -1,3 +1,4 @@
+import { checkLabel } from "@/features/migrations/lib/job-summary";
 import { useState, useEffect } from "react";
 import {
   Dialog,
@@ -586,7 +587,9 @@ export function MigrateWizard() {
                     >
                       {severityIcon[check.severity]}
                       <div>
-                        <p className="text-sm font-medium">{check.name}</p>
+                        <p className="text-sm font-medium">
+                          {checkLabel(check.name)}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {check.message}
                         </p>

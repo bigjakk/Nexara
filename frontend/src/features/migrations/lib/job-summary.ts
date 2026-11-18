@@ -1,3 +1,5 @@
+import { spellOutKey } from "@/lib/spell-out-key";
+
 /** A count and its noun: "1 source", "3 sources". */
 export function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
@@ -30,3 +32,20 @@ export const ACTIVE_MIGRATION_STATUSES = [
   "checking",
   "migrating",
 ] as const;
+
+const CHECK_LABELS = new Map([
+  ["target_node_online", "Target node"],
+  ["target_vmid", "Target VMID"],
+  ["pve_version", "Proxmox VE version"],
+  ["cpu_compatibility", "CPU compatibility"],
+  ["storage_mappings", "Storage mappings"],
+  ["network_mappings", "Network mappings"],
+]);
+
+/**
+ * A pre-flight check's name as a label, the message under it saying how it
+ * went. The dialogs printed the server's id ("target_node_online").
+ */
+export function checkLabel(name: string): string {
+  return CHECK_LABELS.get(name) ?? spellOutKey(name);
+}
