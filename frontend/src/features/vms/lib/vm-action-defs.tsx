@@ -19,11 +19,18 @@ import { canResume, isHaltedState } from "@/lib/guest-state";
 export interface ActionConfig {
   action: VMAction;
   label: string;
+  /** The label as a verb, where a question needs one ("Shut down linux01?"). */
+  verb?: string;
   icon: React.ReactNode;
   variant: "outline" | "destructive";
   needsConfirm: boolean;
   /** `state` is guestState(): the halted QEMU state of a running VM, else its status. */
   showWhen: (state: string, kind: ResourceKind) => boolean;
+}
+
+/** What a confirmation asks with: the action's verb, or its label. */
+export function actionVerb(config: Pick<ActionConfig, "label" | "verb">) {
+  return config.verb ?? config.label;
 }
 
 /**
@@ -70,6 +77,7 @@ export const lifecycleActions: ActionConfig[] = [
   {
     action: "shutdown",
     label: "Shutdown",
+    verb: "Shut down",
     icon: <Power className="h-4 w-4" />,
     variant: "outline",
     needsConfirm: true,

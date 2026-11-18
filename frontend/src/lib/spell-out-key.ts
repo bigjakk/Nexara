@@ -17,6 +17,7 @@ const ACRONYMS = new Set([
   "mac",
   "nfs",
   "nut",
+  "oci",
   "oidc",
   "osd",
   "pbs",

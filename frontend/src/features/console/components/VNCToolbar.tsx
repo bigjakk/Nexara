@@ -33,7 +33,10 @@ import { cn } from "@/lib/utils";
 import type { ConsoleTab } from "../types/console";
 import { useConsoleSession } from "@/stores/console-store";
 import { useVM, useVMAction, useVMConfig } from "@/features/vms/api/vm-queries";
-import { lifecycleActions } from "@/features/vms/lib/vm-action-defs";
+import {
+  actionVerb,
+  lifecycleActions,
+} from "@/features/vms/lib/vm-action-defs";
 import type { VMAction } from "@/features/vms/types/vm";
 import { useTaskLogStore } from "@/stores/task-log-store";
 import { useMountISO } from "../api/console-queries";
@@ -276,7 +279,7 @@ export function VNCToolbar({
                 onClick={() => {
                   handlePowerAction(
                     config.action,
-                    config.label,
+                    actionVerb(config),
                     config.needsConfirm,
                   );
                 }}

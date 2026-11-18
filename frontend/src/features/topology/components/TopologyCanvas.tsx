@@ -56,6 +56,17 @@ const edgeTypes = {
   stack: StackEdge,
 };
 
+// The library labels its controls in Title Case ("Zoom In"); the app's are
+// sentence case.
+const ARIA_LABELS = {
+  "controls.ariaLabel": "Control panel",
+  "controls.zoomIn.ariaLabel": "Zoom in",
+  "controls.zoomOut.ariaLabel": "Zoom out",
+  "controls.fitView.ariaLabel": "Fit view",
+  "controls.interactive.ariaLabel": "Toggle interactivity",
+  "minimap.ariaLabel": "Mini map",
+};
+
 /**
  * Room for what floats over the canvas: the options along the top, the legend
  * along the bottom, the zoom buttons down the right. The graph is fitted
@@ -412,6 +423,7 @@ export function TopologyCanvas({
         minZoom={0.1}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
+        ariaLabelConfig={ARIA_LABELS}
       >
         <FitOnChange
           shape={shape}

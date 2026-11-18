@@ -58,16 +58,27 @@ describe("VMActions", () => {
     },
   );
 
-  it("asks before a destructive power action chosen from the menu", async () => {
-    renderWithProviders(<VMActions {...defaultProps} />);
-    await userEvent.click(
-      screen.getByRole("button", { name: "More power actions" }),
-    );
-    await userEvent.click(screen.getByRole("menuitem", { name: "Stop" }));
-    expect(
-      await screen.findByRole("dialog", { name: "Confirm Stop" }),
-    ).toBeInTheDocument();
-  });
+  // Shutdown is Proxmox's noun on the button; the question needs the verb.
+  it.each([
+    { action: "Stop", inMenu: true, title: "Stop test-vm?" },
+    { action: "Shutdown", inMenu: false, title: "Shut down test-vm?" },
+  ])(
+    "asks before $action, naming the guest",
+    async ({ action, inMenu, title }) => {
+      renderWithProviders(<VMActions {...defaultProps} />);
+      if (inMenu) {
+        await userEvent.click(
+          screen.getByRole("button", { name: "More power actions" }),
+        );
+        await userEvent.click(screen.getByRole("menuitem", { name: action }));
+      } else {
+        await userEvent.click(screen.getByRole("button", { name: action }));
+      }
+      expect(
+        await screen.findByRole("dialog", { name: title }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("offers a stopped guest Start alone", () => {
     renderWithProviders(<VMActions {...defaultProps} status="stopped" />);

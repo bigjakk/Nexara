@@ -11,6 +11,7 @@ import { Monitor, FolderInput } from "lucide-react";
 import { useVMAction } from "../api/vm-queries";
 import { guestState } from "@/lib/guest-state";
 import {
+  actionVerb,
   lifecycleActions,
   managementActions,
   type ManagementAction,
@@ -178,7 +179,7 @@ export function VMContextMenu({
           handleLifecycleAction(
             config.action,
             config.needsConfirm,
-            config.label,
+            actionVerb(config),
           );
         }}
       >

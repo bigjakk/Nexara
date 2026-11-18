@@ -110,7 +110,7 @@ SELECT
   COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
-  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), NULLIF(gv.name, ''), '')::text AS resource_name,
   COALESCE(th.status, ar.status, '') AS task_status,
   COALESCE(th.exit_status, ar.exit_status, '') AS task_exit_status,
   th.progress AS task_progress
@@ -120,6 +120,10 @@ LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
+-- A row that names its guest by VMID only (a backup, a restore, a console
+-- token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+-- unique, so this join adds no rows.
+LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
 -- A task row the retention sweep archived still says how the task ended
 -- (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
@@ -183,12 +187,16 @@ SELECT
   COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
-  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), NULLIF(gv.name, ''), '')::text AS resource_name
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
+-- A row that names its guest by VMID only (a backup, a restore, a console
+-- token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+-- unique, so this join adds no rows.
+LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))
   AND (sqlc.narg('user_id')::uuid IS NULL OR a.user_id = sqlc.narg('user_id'))

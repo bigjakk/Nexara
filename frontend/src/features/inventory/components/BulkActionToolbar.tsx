@@ -42,9 +42,12 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
   const actionMutation = useVMAction();
   const destroyMutation = useDestroyVM();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // `verb` asks the question and labels its button ("Shut down 3 resources");
+  // `label` is the noun the title uses.
   const [confirmBulk, setConfirmBulk] = useState<{
     action: "stop" | "shutdown";
     label: string;
+    verb: string;
   } | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [progress, setProgress] = useState<{
@@ -158,7 +161,11 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
               className="gap-1.5"
               disabled={noGuests}
               onClick={() => {
-                setConfirmBulk({ action: "shutdown", label: "Shutdown" });
+                setConfirmBulk({
+                  action: "shutdown",
+                  label: "Shutdown",
+                  verb: "Shut down",
+                });
               }}
             >
               <PowerOff />
@@ -204,7 +211,11 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
                 <DropdownMenuItem
                   className="gap-2"
                   onClick={() => {
-                    setConfirmBulk({ action: "stop", label: "Stop" });
+                    setConfirmBulk({
+                      action: "stop",
+                      label: "Stop",
+                      verb: "Stop",
+                    });
                   }}
                 >
                   <Square className="h-4 w-4" />
@@ -253,7 +264,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
               Confirm bulk {confirmBulk?.label.toLowerCase()}
             </DialogTitle>
             <DialogDescription>
-              This will {confirmBulk?.label.toLowerCase()}{" "}
+              This will {confirmBulk?.verb.toLowerCase()}{" "}
               {String(vmCtRows.length)} resource
               {vmCtRows.length !== 1 ? "s" : ""}. Running guests may lose
               unsaved data.
@@ -276,7 +287,7 @@ export function BulkActionToolbar({ table }: BulkActionToolbarProps) {
                 if (pending) void executeBulkAction(pending.action);
               }}
             >
-              {confirmBulk?.label} {String(vmCtRows.length)} resource
+              {confirmBulk?.verb} {String(vmCtRows.length)} resource
               {vmCtRows.length !== 1 ? "s" : ""}
             </Button>
           </DialogFooter>

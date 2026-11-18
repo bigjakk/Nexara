@@ -98,5 +98,30 @@
   "log": "Log",
   "loadingLog": "Loading log…",
   "noLogOutput": "No log output",
-  "logUnavailable": "Proxmox did not return this task's log. It may have been rotated away."
+  "logUnavailable": "Proxmox did not return this task's log. It may have been rotated away.",
+  "auditActions": {
+    "console_token_mint": "Console opened",
+    "login": "Signed in",
+    "logout": "Signed out",
+    "logout_all": "Signed out everywhere",
+    "login_failed": "Sign-in failed",
+    "login_failed_unknown_account": "Sign-in failed, unknown account",
+    "login_locked": "Sign-in locked",
+    "login_lock_released": "Sign-in lock released",
+    "ldap_login": "Signed in with LDAP",
+    "oidc_login": "Signed in with SSO",
+    "snapshot_create": "Take snapshot",
+    "snapshot_delete": "Delete snapshot",
+    "migrate_created": "Migration created",
+    "migrate_started": "Migration started",
+    "migrate_running": "Migration",
+    "migrate_failed": "Migration failed",
+    "migrate_cancelled": "Migration cancelled",
+    "drs_migrate_running": "DRS migration",
+    "drs_migrate": "DRS migration done",
+    "drs_migrate_failed": "DRS migration failed",
+    "drs_migrate_interrupted": "DRS migration interrupted",
+    "drs_advisory": "DRS recommendation",
+    "ociregistrypull": "OCI registry pull"
+  }
 }

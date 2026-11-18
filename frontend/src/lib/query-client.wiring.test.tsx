@@ -185,7 +185,7 @@ const SHOWN_IN_PLACE: [
     "clusters: a node's Shutdown",
     () => <ShutdownHost />,
     async (u) => {
-      await u.click(screen.getByRole("button", { name: "Shutdown" }));
+      await u.click(screen.getByRole("button", { name: "Shut down" }));
     },
   ],
   [
@@ -317,7 +317,7 @@ describe("a failed save", () => {
 
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Shutdown" }));
+      .click(screen.getByRole("button", { name: "Shut down" }));
 
     await vi.waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(REFUSED);

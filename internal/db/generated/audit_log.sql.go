@@ -196,12 +196,13 @@ SELECT
   COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
-  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), NULLIF(gv.name, ''), '')::text AS resource_name
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
+LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
 WHERE ($3::uuid IS NULL OR a.cluster_id = $3)
   AND ($4::text IS NULL OR a.resource_type = $4)
   AND ($5::uuid IS NULL OR a.user_id = $5)
@@ -301,6 +302,9 @@ type ListAuditLogAdvancedRow struct {
 // activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
 // are the reserved setting keys whose details the caller may not read; their
 // details do not count, as the SPA only ever sees them redacted.
+// A row that names its guest by VMID only (a backup, a restore, a console
+// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+// unique, so this join adds no rows.
 func (q *Queries) ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogAdvanced,
 		arg.Limit,
@@ -491,7 +495,7 @@ SELECT
   COALESCE(c.name, rc.name, '') AS cluster_name,
   (a.cluster_id IS NOT NULL AND c.id IS NULL)::boolean AS cluster_removed,
   COALESCE(a.vmid, v.vmid, 0) AS resource_vmid,
-  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), '')::text AS resource_name,
+  COALESCE(NULLIF(a.details->>'resource_name', ''), NULLIF(v.name, ''), NULLIF(gv.name, ''), '')::text AS resource_name,
   COALESCE(th.status, ar.status, '') AS task_status,
   COALESCE(th.exit_status, ar.exit_status, '') AS task_exit_status,
   th.progress AS task_progress
@@ -501,6 +505,7 @@ LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
+LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
 LEFT JOIN task_history_archive ar ON ar.upid = (a.details->>'upid') AND ar.cluster_id = a.cluster_id
 ORDER BY a.created_at DESC
@@ -546,6 +551,9 @@ type ListRecentAuditLogEnrichedRow struct {
 // DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
 // for good. A task_history row goes with its cluster, so this arm needs the scope
 // but not the check that the cluster exists.
+// A row that names its guest by VMID only (a backup, a restore, a console
+// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+// unique, so this join adds no rows.
 // A task row the retention sweep archived still says how the task ended
 // (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
 // no outcome at all.

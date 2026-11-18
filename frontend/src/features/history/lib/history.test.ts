@@ -280,8 +280,8 @@ describe("a run", () => {
       details: '{"error":"connection refused"}',
     });
   it.each([
-    [1, "Sync Failed, once"],
-    [412, "Sync Failed, 412 times"],
+    [1, "Sync failed, once"],
+    [412, "Sync failed, 412 times"],
   ])("of %d reads %s", (count, want) => {
     expect(historyEventLabel(kind, run(count), t)).toBe(want);
   });

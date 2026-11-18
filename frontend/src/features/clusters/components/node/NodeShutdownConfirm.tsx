@@ -54,7 +54,7 @@ export function NodeShutdownConfirm({
       )}
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Shutdown {nodeName}?</AlertDialogTitle>
+          <AlertDialogTitle>Shut down {nodeName}?</AlertDialogTitle>
           <AlertDialogDescription>
             This will shut down the node. It will go offline and all running
             guests will be stopped. You will need physical or out-of-band
@@ -78,7 +78,7 @@ export function NodeShutdownConfirm({
             disabled={shutdown.isPending}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Shutdown
+            Shut down
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

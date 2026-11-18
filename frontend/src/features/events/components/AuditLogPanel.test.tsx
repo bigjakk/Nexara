@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import {
@@ -47,7 +47,11 @@ vi.mock("./SyslogConfigCard", () => ({
  * answers are worked out from `held`, so a panel that asked about the wrong
  * permission would get the wrong answer rather than a blanket yes.
  */
-function renderFor(held: string[], items: AuditLogEntry[] = []) {
+function renderFor(
+  held: string[],
+  items: AuditLogEntry[] = [],
+  actions: string[] = [],
+) {
   const has = (action: string, resource: string) =>
     held.includes(`${action}:${resource}`);
   vi.mocked(usePermissions).mockReturnValue({
@@ -59,7 +63,7 @@ function renderFor(held: string[], items: AuditLogEntry[] = []) {
     data: [],
   } as unknown as ReturnType<typeof useClusters>);
   vi.mocked(useAuditActions).mockReturnValue({
-    data: [],
+    data: actions,
   } as unknown as ReturnType<typeof useAuditActions>);
   vi.mocked(useAuditUsers).mockReturnValue({
     data: [],
@@ -85,6 +89,22 @@ describe("AuditLogPanel", () => {
       expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     },
   );
+
+  // The server sends them in key order, which the labels no longer follow.
+  it("lists the Action filter's options in the order of their labels", () => {
+    renderFor(
+      ["view:audit"],
+      [],
+      ["console_token_mint", "login", "migrate_running"],
+    );
+
+    const select = screen.getByRole("combobox", { name: "Action" });
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["All actions", "Console opened", "Migration", "Signed in"]);
+  });
 
   it("shows the syslog card to a user who can manage the audit log", () => {
     renderFor(["view:audit", "manage:audit"]);

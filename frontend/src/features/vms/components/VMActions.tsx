@@ -29,7 +29,11 @@ import {
 } from "@/components/ui/dialog";
 import { useVMAction } from "../api/vm-queries";
 import { TaskProgressBanner } from "./TaskProgressBanner";
-import { lifecycleActions, type ActionConfig } from "../lib/vm-action-defs";
+import {
+  actionVerb,
+  lifecycleActions,
+  type ActionConfig,
+} from "../lib/vm-action-defs";
 import type { VMAction, ResourceKind } from "../types/vm";
 import { cn } from "@/lib/utils";
 import { guestState } from "@/lib/guest-state";
@@ -322,9 +326,12 @@ export function VMActions({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Confirm {confirmAction?.label}</DialogTitle>
+            <DialogTitle>
+              {confirmAction && actionVerb(confirmAction)} {name}?
+            </DialogTitle>
             <DialogDescription>
-              Are you sure you want to {confirmAction?.label.toLowerCase()}{" "}
+              Are you sure you want to{" "}
+              {confirmAction && actionVerb(confirmAction).toLowerCase()}{" "}
               <strong>{name}</strong>? This action may cause data loss.
             </DialogDescription>
           </DialogHeader>
@@ -344,7 +351,7 @@ export function VMActions({
                 if (confirmAction) dispatchAction(confirmAction.action);
               }}
             >
-              {confirmAction?.label}
+              {confirmAction && actionVerb(confirmAction)}
             </Button>
           </DialogFooter>
         </DialogContent>

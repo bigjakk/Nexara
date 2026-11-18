@@ -84,7 +84,7 @@
     "ctrlVToPasteHere": "Ctrl+V to paste here...",
     "cancel": "Cancel",
     "send": "Send",
-    "confirmLabel": "Confirm {{label}}",
+    "confirmLabel": "{{label}} this guest?",
     "connectionInfo2": "Connection info",
     "node": "Node",
     "vmid": "VMID",

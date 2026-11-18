@@ -9,6 +9,8 @@ import {
   summarizeActivity,
   userLabel,
   type LiveTaskStatus,
+  formatAction,
+  decorateActivities,
 } from "./activity-columns";
 import { SYSTEM_USER_ID } from "@/lib/constants";
 import { ACTIVITY_COLUMN_DEFS } from "./activity-column-defs";
@@ -151,7 +153,7 @@ describe("activityLabel", () => {
       noLive,
     );
     expect(row.resourceLabel).toBe("");
-    expect(activityLabel(row)).toBe("Login");
+    expect(activityLabel(row)).toBe("Signed in");
   });
 });
 
@@ -324,7 +326,7 @@ describe("activity sort accessors", () => {
       entry({ action: "vm_start", resource_name: "web01", resource_vmid: 101 }),
       noLive,
     );
-    expect(ACCESSORS.action(row)).toBe("Vm Start — web01 (101)");
+    expect(ACCESSORS.action(row)).toBe("VM start — web01 (101)");
   });
 
   it("sorts User on the resolved actor, not the raw join column", () => {
@@ -414,6 +416,21 @@ describe("summarizeActivity", () => {
       live: confirmed("live"),
       want: { runningCount: 2, featured: "live", latest: "stranded" },
     },
+    {
+      // It read "Last: Start" right after a migration: the target's start is
+      // the migration's worker, and the row that asked for it is the news.
+      name: "a migration's start on its target is not the latest",
+      entries: [
+        task("migrate", "2026-09-01T10:00:00Z", "completed"),
+        entry({
+          id: "target-start",
+          created_at: "2026-09-01T10:00:05Z",
+          details: JSON.stringify({ migration_upid: "UPID:migrate" }),
+        }),
+      ],
+      live: noLive,
+      want: { runningCount: 0, featured: undefined, latest: "migrate" },
+    },
   ])("$name", ({ entries, live, want }) => {
     const summary = summarizeActivity(
       entries.map((e) => decorateActivity(e, live)),
@@ -423,5 +440,82 @@ describe("summarizeActivity", () => {
       featured: summary.featured?.entry.id,
       latest: summary.latest?.entry.id,
     }).toEqual(want);
+  });
+});
+
+// The Activity panel, the audit log and PBS task rows all label actions here.
+describe("formatAction", () => {
+  it.each([
+    ["snapshot_create", "Take snapshot"],
+    ["console_token_mint", "Console opened"],
+    ["backup_triggered", "Backup triggered"],
+    ["api_key_created", "API key created"],
+    ["convert-to-template", "Convert to template"],
+  ])("labels %j as %j", (action, want) => {
+    expect(formatAction(action)).toBe(want);
+  });
+});
+
+describe("resourceLabel", () => {
+  const uuid = "00000000-0000-4000-8000-0000000000a1";
+  it.each([
+    [
+      "a user's id on a sign-in",
+      { action: "login", resource_type: "auth", resource_id: uuid },
+      "",
+    ],
+    [
+      "a report run's id",
+      { action: "deleted", resource_type: "report", resource_id: uuid },
+      "Report",
+    ],
+    [
+      "a node shell's token",
+      {
+        action: "console_token_mint",
+        resource_type: "auth",
+        resource_id: uuid,
+        details: JSON.stringify({
+          type: "node_shell",
+          node: "pve-01",
+          vmid: 0,
+        }),
+      },
+      "pve-01",
+    ],
+    [
+      "a restore of a guest that no longer exists",
+      {
+        action: "backup_restored",
+        resource_type: "backup",
+        resource_id: "9902/vm",
+        resource_vmid: 9902,
+      },
+      "VMID 9902",
+    ],
+  ])("names %s as %j", (_label, fields, want) => {
+    const row = decorateActivity(
+      entry({ resource_name: "", resource_vmid: 0, ...fields }),
+      noLive,
+    );
+    expect(row.resourceLabel).toBe(want);
+  });
+});
+
+describe("decorateActivities", () => {
+  // A guest page's console preview mints a token on every visit; the panel
+  // read "Last: Console opened" instead of the last task.
+  it("leaves out the console preview's tokens, not a console the user opened", () => {
+    const mint = (id: string, silent: boolean) =>
+      entry({
+        id,
+        action: "console_token_mint",
+        details: JSON.stringify({ type: "vm_vnc", vmid: 100, silent }),
+      });
+    const rows = decorateActivities(
+      [mint("preview", true), mint("opened", false)],
+      noLive,
+    );
+    expect(rows.map((r) => r.entry.id)).toEqual(["opened"]);
   });
 });

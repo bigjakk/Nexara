@@ -6,6 +6,9 @@
  * which does this job for the Tasks tables. How each column renders, and what
  * it sorts on, is next door in activity-column-defs.tsx.
  */
+import i18n from "@/lib/i18n";
+import { spellOutKey } from "@/lib/spell-out-key";
+import { resourceTypeLabel } from "@/features/events/lib/resource-types";
 import type { AuditLogEntry } from "@/features/audit/api/audit-queries";
 import type { SortState } from "@/hooks/useTableSort";
 import { SYSTEM_USER_ID } from "@/lib/constants";
@@ -29,8 +32,18 @@ export interface LiveTaskStatus {
   progress?: number;
 }
 
+/**
+ * An audit action as a label: the name set for it in common:auditActions
+ * (the History tabs' wording where they have one), every other one spelled
+ * out in sentence case with its acronyms kept ("api_key_created" → "API key
+ * created"). Title-casing each word read "Snapshot Create".
+ */
 export function formatAction(action: string): string {
-  return action.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const spelled = spellOutKey(action.replace(/-/g, "_"));
+  return i18n.t(`auditActions.${action}`, {
+    ns: "common",
+    defaultValue: spelled,
+  });
 }
 
 export type Severity = "info" | "warning" | "error";
@@ -177,24 +190,7 @@ export function decorateActivity(
       ? null
       : displayProgress(status, entry.task_progress ?? null, live?.progress);
 
-  // For Proxmox-sourced entries, resolve resource_name from the details JSON.
-  let resourceLabel =
-    entry.resource_name && entry.resource_vmid
-      ? `${entry.resource_name} (${String(entry.resource_vmid)})`
-      : entry.resource_name || entry.resource_id;
-  if (!entry.resource_name && details["resource_name"]) {
-    const rn =
-      typeof details["resource_name"] === "string"
-        ? details["resource_name"]
-        : null;
-    const ri =
-      typeof details["resource_id"] === "string"
-        ? details["resource_id"]
-        : null;
-    if (rn) {
-      resourceLabel = ri ? `${rn} (${ri})` : rn;
-    }
-  }
+  const resourceLabel = deriveResourceLabel(entry, details);
 
   const exitStatusText =
     live?.exitStatus ||
@@ -218,6 +214,54 @@ export function decorateActivity(
   };
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * What a row is about: the guest's name and VMID where the server resolved
+ * one, else the name the details carry, a node shell's node, or the VMID. A
+ * bare id says nothing ("Signed in — 00000000-…"), so a user's id is left off
+ * and another kind's is named by its kind ("Deleted — Report").
+ */
+function deriveResourceLabel(
+  entry: AuditLogEntry,
+  details: ParsedDetails,
+): string {
+  if (entry.resource_name) {
+    return entry.resource_vmid
+      ? `${entry.resource_name} (${String(entry.resource_vmid)})`
+      : entry.resource_name;
+  }
+  const rn =
+    typeof details["resource_name"] === "string"
+      ? details["resource_name"]
+      : "";
+  const ri =
+    typeof details["resource_id"] === "string" ? details["resource_id"] : "";
+  if (rn) return ri ? `${rn} (${ri})` : rn;
+  if (details["type"] === "node_shell" && typeof details["node"] === "string") {
+    return details["node"];
+  }
+  if (entry.resource_vmid > 0) return `VMID ${String(entry.resource_vmid)}`;
+  if (UUID_RE.test(entry.resource_id)) {
+    return entry.resource_type === "auth"
+      ? ""
+      : resourceTypeLabel(entry.resource_type);
+  }
+  return entry.resource_id;
+}
+
+/**
+ * A console token minted for a page's console preview, not for a console the
+ * user opened: one per guest page visit, so it is left out of the panel (the
+ * audit log keeps it).
+ */
+function isPreviewConsoleMint(row: ActivityRowData): boolean {
+  return (
+    row.entry.action === "console_token_mint" && row.details["silent"] === true
+  );
+}
+
 const NO_ROWS: ReadonlyMap<string, string> = new Map();
 
 /**
@@ -229,7 +273,9 @@ export function decorateActivities(
   entries: AuditLogEntry[],
   taskStatuses: Record<string, LiveTaskStatus>,
 ): ActivityRowData[] {
-  const rows = entries.map((e) => decorateActivity(e, taskStatuses));
+  const rows = entries
+    .map((e) => decorateActivity(e, taskStatuses))
+    .filter((r) => !isPreviewConsoleMint(r));
   const actorByUpid = new Map(
     rows.flatMap((r) =>
       r.details.upid && r.actorLabel
@@ -289,7 +335,16 @@ export function summarizeActivity(rows: ActivityRowData[]): ActivitySummary {
     runningCount: running.length,
     featured:
       newest(running.filter((r) => r.confirmedRunning)) ?? newest(running),
-    latest: newest(rows),
+    // A worker task (an HA manager's, a migration's start on its target)
+    // follows the row that asked for it; naming it read "Last: Start" right
+    // after a migration.
+    latest:
+      newest(
+        rows.filter(
+          (r) =>
+            r.linkedRole !== "ha-worker" && r.linkedRole !== "migration-start",
+        ),
+      ) ?? newest(rows),
   };
 }
 

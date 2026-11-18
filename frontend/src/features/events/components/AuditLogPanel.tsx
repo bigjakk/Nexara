@@ -184,10 +184,14 @@ function ResourceFallback({ entry }: { entry: AuditLogEntry }) {
         </span>
       );
     }
+    // A node's shell names no guest (its details carry vmid 0): its node does.
+    if (d["type"] === "node_shell" && typeof d["node"] === "string") {
+      return <span>{d["node"]}</span>;
+    }
     // Nexara-initiated entries with VMID in details
     const vmid = typeof d["vmid"] === "number" ? d["vmid"] : null;
     const vmType = typeof d["vm_type"] === "string" ? d["vm_type"] : null;
-    if (vmid != null) {
+    if (vmid != null && vmid > 0) {
       return (
         <span>
           {vmType ?? "VM"} {String(vmid)}
@@ -410,6 +414,16 @@ export function AuditLogPanel() {
     [users],
   );
 
+  // The same rule for actions: the server orders them by key, and a relabelled
+  // one ("login" reads "Signed in") would otherwise sit where its key sorts.
+  const actionOptions = useMemo(
+    () =>
+      (actions ?? [])
+        .map((a) => ({ value: a, label: formatAction(a) }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [actions],
+  );
+
   const startTime = startDate ? new Date(startDate).toISOString() : undefined;
   const endTime = endDate
     ? new Date(endDate + "T23:59:59").toISOString()
@@ -615,9 +629,9 @@ export function AuditLogPanel() {
             }}
           >
             <option value="">All actions</option>
-            {actions?.map((a) => (
-              <option key={a} value={a}>
-                {formatAction(a)}
+            {actionOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>
