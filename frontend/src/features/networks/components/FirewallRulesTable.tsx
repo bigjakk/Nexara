@@ -19,6 +19,7 @@ import { CreateFirewallRuleDialog } from "./CreateFirewallRuleDialog";
 import { ConfirmFirewallRuleDeleteDialog } from "./ConfirmFirewallRuleDeleteDialog";
 import type { FirewallRule } from "../types/network";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "react-i18next";
 
 interface FirewallRulesTableProps {
@@ -31,6 +32,11 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
   const rules = rulesQuery.data;
   const deleteRule = useDeleteClusterFirewallRule(clusterId);
   const [pendingDelete, setPendingDelete] = useState<FirewallRule | null>(null);
+  // A rule's create route takes manage:network on the cluster, its delete
+  // delete:network.
+  const { canManage, canDelete } = usePermissions();
+  const canAdd = canManage("network");
+  const canRemove = canDelete("network");
 
   const disabled = (rules ?? []).filter((r) => !r.enable).length;
 
@@ -49,7 +55,11 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                 })
               : t("firewallRulesTable.rulesCount", { count: rules.length })
         }
-        actions={<CreateFirewallRuleDialog clusterId={clusterId} />}
+        actions={
+          canAdd ? (
+            <CreateFirewallRuleDialog clusterId={clusterId} />
+          ) : undefined
+        }
       >
         {!rules || rules.length === 0 ? (
           <div className="px-[18px] pb-1">
@@ -117,20 +127,22 @@ export function FirewallRulesTable({ clusterId }: FirewallRulesTableProps) {
                     {rule.comment || "-"}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    <Button
-                      aria-label={t("firewallRulesTable.deleteRulePos", {
-                        pos: String(rule.pos),
-                      })}
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        setPendingDelete(rule);
-                      }}
-                      disabled={deleteRule.isPending}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canRemove && (
+                      <Button
+                        aria-label={t("firewallRulesTable.deleteRulePos", {
+                          pos: String(rule.pos),
+                        })}
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setPendingDelete(rule);
+                        }}
+                        disabled={deleteRule.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

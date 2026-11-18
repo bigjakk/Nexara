@@ -19,6 +19,7 @@ import { USAGE_TEXT_CLASS, usageLevel } from "@/lib/usage-level";
 import { cn } from "@/lib/utils";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface PoolTableProps {
   pools: CephPool[];
@@ -29,6 +30,9 @@ interface PoolTableProps {
 
 export function PoolTable({ pools, clusterId, actions }: PoolTableProps) {
   const [deletePool, setDeletePool] = useState<string | null>(null);
+  // Deleting a pool takes manage:ceph on the cluster, as the OSD actions do;
+  // without it the table has no actions column.
+  const canManageCeph = usePermissions().canManage("ceph");
 
   return (
     <>
@@ -56,9 +60,11 @@ export function PoolTable({ pools, clusterId, actions }: PoolTableProps) {
               <TableHead className="text-right">
                 Throughput, read / write
               </TableHead>
-              <TableHead className="w-0">
-                <span className="sr-only">Actions</span>
-              </TableHead>
+              {canManageCeph && (
+                <TableHead className="w-0">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -112,36 +118,38 @@ export function PoolTable({ pools, clusterId, actions }: PoolTableProps) {
                     {formatBytesPerSecond(pool.read_bytes_sec)} /{" "}
                     {formatBytesPerSecond(pool.write_bytes_sec)}
                   </TableCell>
-                  <TableCell className="py-1 text-right">
-                    {/* Ceph and Proxmox both admit a pool named "." or "..";
-                        Nexara cannot address one (lib/api-path.ts), so the
-                        row shows why in place of the delete — as text, since a
-                        disabled button's title never shows. */}
-                    {unaddressableHint(pool.pool_name) !== null ? (
-                      <span className="text-xs text-muted-foreground">
-                        {unaddressableHint(pool.pool_name)}
-                      </span>
-                    ) : (
-                      <Button
-                        aria-label={`Delete pool ${pool.pool_name}`}
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => {
-                          setDeletePool(pool.pool_name);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </TableCell>
+                  {canManageCeph && (
+                    <TableCell className="py-1 text-right">
+                      {/* Ceph and Proxmox both admit a pool named "." or "..";
+                          Nexara cannot address one (lib/api-path.ts), so the
+                          row shows why in place of the delete — as text, since a
+                          disabled button's title never shows. */}
+                      {unaddressableHint(pool.pool_name) !== null ? (
+                        <span className="text-xs text-muted-foreground">
+                          {unaddressableHint(pool.pool_name)}
+                        </span>
+                      ) : (
+                        <Button
+                          aria-label={`Delete pool ${pool.pool_name}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setDeletePool(pool.pool_name);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}
             {pools.length === 0 && (
               <TableRow className="hover:bg-transparent">
                 <TableCell
-                  colSpan={8}
+                  colSpan={canManageCeph ? 8 : 7}
                   className="py-8 text-center text-muted-foreground"
                 >
                   No pools found.

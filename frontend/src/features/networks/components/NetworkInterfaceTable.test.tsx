@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
 import { fill, setupUser } from "@/test/user";
 import { NetworkInterfaceTable } from "./NetworkInterfaceTable";
 import type { NodeInterfaces } from "../types/network";
@@ -30,8 +31,66 @@ const NODES: NodeInterfaces[] = [
 
 let api: ReturnType<typeof stubApi>;
 
+beforeEach(() => {
+  grantPermissions("manage:network", "delete:network");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// Create, edit, apply and revert take manage:network; delete takes
+// delete:network. A Viewer was offered all five, and the server refused them.
+// Without manage:network a row's View opens the form read-only instead.
+describe("NetworkInterfaceTable — what a role is offered", () => {
+  it.each([
+    { permissions: [], manage: false, remove: false },
+    { permissions: ["manage:network"], manage: true, remove: false },
+    { permissions: ["delete:network"], manage: false, remove: true },
+  ])(
+    "with $permissions offers manage: $manage, delete: $remove",
+    async ({ permissions, manage, remove }) => {
+      grantPermissions(...permissions);
+      stubApi({ [NETWORKS_PATH]: listOf(NODES) });
+      const user = setupUser();
+      renderWithProviders(<NetworkInterfaceTable clusterId={CLUSTER} />);
+      const filter = await screen.findByRole("combobox", {
+        name: "Filter by node",
+      });
+      expect(
+        screen.queryByText(/Pick a node to add an interface/) !== null,
+      ).toBe(manage);
+      fill(filter, "pve-02");
+
+      const offered = (name: string) =>
+        screen.queryByRole("button", { name }) !== null;
+      expect({
+        create: offered("Create interface"),
+        apply: offered("Apply config"),
+        revert: offered("Revert"),
+        edit: offered("Edit vmbr1 on pve-02"),
+        view: offered("View vmbr1 on pve-02"),
+        delete: offered("Delete vmbr1 on pve-02"),
+      }).toEqual({
+        create: manage,
+        apply: manage,
+        revert: manage,
+        edit: manage,
+        view: !manage,
+        delete: remove,
+      });
+
+      await user.click(
+        screen.getByRole("button", {
+          name: `${manage ? "Edit" : "View"} vmbr1 on pve-02`,
+        }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(
+        within(dialog).queryByRole("button", { name: "Save" }) !== null,
+      ).toBe(manage);
+    },
+  );
 });
 
 async function openDeleteFor(label: string) {

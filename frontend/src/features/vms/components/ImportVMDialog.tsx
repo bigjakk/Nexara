@@ -667,16 +667,20 @@ export function ImportVMDialog({
                   >
                     From import storage
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={sourceMode === "url" ? "default" : "outline"}
-                    onClick={() => {
-                      setSourceMode("url");
-                    }}
-                  >
-                    Download OVA from URL
-                  </Button>
+                  {/* A URL download takes manage:storage, even for an OVA; an
+                      upload also accepts manage:vm_import. */}
+                  {canManage("storage") && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={sourceMode === "url" ? "default" : "outline"}
+                      onClick={() => {
+                        setSourceMode("url");
+                      }}
+                    >
+                      Download OVA from URL
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     size="sm"
@@ -762,9 +766,18 @@ export function ImportVMDialog({
                   {sourceOptions.length === 0 && (
                     <div className="space-y-2 text-xs text-muted-foreground">
                       <p>
-                        No import-capable storage found. Add the
-                        &quot;import&quot; content type to a directory/NFS
-                        storage, register an ESXi source, or upload an OVA.
+                        No import-capable storage found.{" "}
+                        {/* Adding the content type takes manage:storage; an
+                            ESXi source, like this dialog, manage:vm_import. */}
+                        {canManage("storage") ? (
+                          <>
+                            Add the &quot;import&quot; content type to a
+                            directory/NFS storage, register an ESXi source, or
+                            upload an OVA.
+                          </>
+                        ) : (
+                          <>Register an ESXi source, or upload an OVA.</>
+                        )}
                       </p>
                       {canManage("storage") &&
                         enableableStorages.length > 0 && (

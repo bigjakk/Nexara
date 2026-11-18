@@ -54,10 +54,11 @@ import { useRefreshInterval } from "@/lib/refresh-interval";
 
 // --- PBS Server Queries ---
 
-export function usePBSServers() {
+export function usePBSServers(enabled = true) {
   return useQuery({
     queryKey: ["pbs-servers"],
     queryFn: () => apiClient.list<PBSServer>(apiPath`/api/v1/pbs-servers`),
+    enabled,
   });
 }
 

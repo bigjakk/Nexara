@@ -4,12 +4,11 @@ import { HardDrive } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { Stat, StatStrip } from "@/components/page/StatStrip";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
 import { formatBytes, formatPercent } from "@/lib/format";
 import { AddStorageDialog } from "../components/AddStorageDialog";
 import {
@@ -99,11 +98,9 @@ export function StoragePage() {
       )}
 
       {clustersQuery.isSuccess && clusters.length === 0 && (
-        <EmptyState
+        <NoClustersEmptyState
           icon={HardDrive}
-          title={td("noClustersRegistered")}
           description={td("addClusterToGetStarted")}
-          action={<AddClusterDialog />}
         />
       )}
 

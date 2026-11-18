@@ -52,8 +52,31 @@ vi.mock("@/features/settings/api/totp-queries", () => ({
 
 describe("UsersPage", () => {
   afterEach(() => {
-    useAuthStore.setState({ user: null });
+    useAuthStore.setState({
+      user: null,
+      permissions: [],
+      globalPermissions: [],
+    });
   });
+
+  // Assigning and revoking a role take manage:role install-wide, which the
+  // page's own manage:user guard does not give.
+  it.each<[string, string[], number]>([
+    ["on a cluster only", ["manage:user"], 0],
+    ["install-wide", ["manage:user", "manage:role"], 4],
+  ])(
+    "with manage:role %s (install-wide: %j) offers Manage roles on %i rows",
+    (_scope, globalPermissions, rows) => {
+      useAuthStore.setState({
+        permissions: ["manage:user", "manage:role"],
+        globalPermissions,
+      });
+      renderWithProviders(<UsersPage />);
+      expect(
+        screen.queryAllByRole("button", { name: "Manage roles" }),
+      ).toHaveLength(rows);
+    },
+  );
 
   // Each reset is offered for a linked account of its source only, and confirms first.
   it.each([

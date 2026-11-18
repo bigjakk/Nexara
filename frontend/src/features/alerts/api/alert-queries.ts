@@ -287,7 +287,7 @@ export function useNotificationDLQ(state?: string) {
   });
 }
 
-export function useNotificationDLQSummary() {
+export function useNotificationDLQSummary(enabled = true) {
   const refetchInterval = useRefreshInterval(30000);
   return useQuery({
     queryKey: ["notification-dlq-summary"],
@@ -296,6 +296,7 @@ export function useNotificationDLQSummary() {
         apiPath`/api/v1/notification-dlq/summary`,
       ),
     refetchInterval,
+    enabled,
   });
 }
 

@@ -25,6 +25,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { Plus, Trash2 } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { FirewallStatusStrip } from "@/features/networks/components/FirewallStatusStrip";
 import { FirewallRulesTable } from "@/features/networks/components/FirewallRulesTable";
 import { FirewallOptionsCard } from "@/features/networks/components/FirewallOptionsCard";
@@ -92,6 +93,9 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
     history.target.clusterId === null,
   );
   const shown = view === "history" && !canHistory ? "rules" : view;
+  // Every alias, IP set and security group write, the deletes included,
+  // takes manage:network on the cluster.
+  const canManage = usePermissions().canManage("network");
 
   return (
     <div className="space-y-4">
@@ -128,21 +132,24 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
           aria-label="Aliases"
           aria-labelledby={undefined}
         >
-          <FirewallAliasesSection clusterId={clusterId} />
+          <FirewallAliasesSection clusterId={clusterId} canManage={canManage} />
         </TabsContent>
         <TabsContent
           value="ipsets"
           aria-label="IP sets"
           aria-labelledby={undefined}
         >
-          <FirewallIPSetsSection clusterId={clusterId} />
+          <FirewallIPSetsSection clusterId={clusterId} canManage={canManage} />
         </TabsContent>
         <TabsContent
           value="groups"
           aria-label="Security groups"
           aria-labelledby={undefined}
         >
-          <FirewallSecurityGroupsSection clusterId={clusterId} />
+          <FirewallSecurityGroupsSection
+            clusterId={clusterId}
+            canManage={canManage}
+          />
         </TabsContent>
         <TabsContent value="log" aria-label="Log" aria-labelledby={undefined}>
           <FirewallLogSection clusterId={clusterId} />
@@ -160,7 +167,13 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
   );
 }
 
-function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
+function FirewallAliasesSection({
+  clusterId,
+  canManage,
+}: {
+  clusterId: string;
+  canManage: boolean;
+}) {
   const aliasesQuery = useFirewallAliases(clusterId);
   const createAlias = useCreateFirewallAlias(clusterId);
   const deleteAlias = useDeleteFirewallAlias(clusterId);
@@ -194,60 +207,62 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
       title="Aliases"
       aside={countLabel(aliasesQuery.data?.length, "alias", "aliases")}
       actions={
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4" />
-              Add alias
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add alias</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="fw-alias-name">Name</Label>
-                <Input
-                  id="fw-alias-name"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="fw-alias-cidr">CIDR</Label>
-                <Input
-                  id="fw-alias-cidr"
-                  value={cidr}
-                  onChange={(e) => {
-                    setCidr(e.target.value);
-                  }}
-                  placeholder="192.168.1.0/24"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="fw-alias-comment">Comment</Label>
-                <Input
-                  id="fw-alias-comment"
-                  value={comment}
-                  onChange={(e) => {
-                    setComment(e.target.value);
-                  }}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={handleCreate}
-                disabled={!name || !cidr || createAlias.isPending}
-              >
-                {createAlias.isPending ? "Creating..." : "Create"}
+        canManage ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <Plus className="h-4 w-4" />
+                Add alias
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add alias</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fw-alias-name">Name</Label>
+                  <Input
+                    id="fw-alias-name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fw-alias-cidr">CIDR</Label>
+                  <Input
+                    id="fw-alias-cidr"
+                    value={cidr}
+                    onChange={(e) => {
+                      setCidr(e.target.value);
+                    }}
+                    placeholder="192.168.1.0/24"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fw-alias-comment">Comment</Label>
+                  <Input
+                    id="fw-alias-comment"
+                    value={comment}
+                    onChange={(e) => {
+                      setComment(e.target.value);
+                    }}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={handleCreate}
+                  disabled={!name || !cidr || createAlias.isPending}
+                >
+                  {createAlias.isPending ? "Creating..." : "Create"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : undefined
       }
     >
       <>
@@ -287,17 +302,19 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
                     {a.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    <Button
-                      aria-label={`Delete alias ${a.name}`}
-                      variant="ghost"
-                      size="icon"
-                      className={ROW_DELETE_CLASS}
-                      onClick={() => {
-                        setPendingDelete(a);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManage && (
+                      <Button
+                        aria-label={`Delete alias ${a.name}`}
+                        variant="ghost"
+                        size="icon"
+                        className={ROW_DELETE_CLASS}
+                        onClick={() => {
+                          setPendingDelete(a);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -331,7 +348,13 @@ function FirewallAliasesSection({ clusterId }: { clusterId: string }) {
   );
 }
 
-function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
+function FirewallIPSetsSection({
+  clusterId,
+  canManage,
+}: {
+  clusterId: string;
+  canManage: boolean;
+}) {
   const setsQuery = useFirewallIPSets(clusterId);
   const createSet = useCreateFirewallIPSet(clusterId);
   const deleteSet = useDeleteFirewallIPSet(clusterId);
@@ -366,49 +389,51 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
             : undefined
         }
         actions={
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="h-4 w-4" />
-                Add IP set
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add IP set</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="fw-ipset-name">Name</Label>
-                  <Input
-                    id="fw-ipset-name"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                    }}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="fw-ipset-comment">Comment</Label>
-                  <Input
-                    id="fw-ipset-comment"
-                    value={comment}
-                    onChange={(e) => {
-                      setComment(e.target.value);
-                    }}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  onClick={handleCreate}
-                  disabled={!name || createSet.isPending}
-                >
-                  {createSet.isPending ? "Creating..." : "Create"}
+          canManage ? (
+            <Dialog open={open} onOpenChange={setOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="h-4 w-4" />
+                  Add IP set
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Add IP set</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="fw-ipset-name">Name</Label>
+                    <Input
+                      id="fw-ipset-name"
+                      value={name}
+                      onChange={(e) => {
+                        setName(e.target.value);
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fw-ipset-comment">Comment</Label>
+                    <Input
+                      id="fw-ipset-comment"
+                      value={comment}
+                      onChange={(e) => {
+                        setComment(e.target.value);
+                      }}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    onClick={handleCreate}
+                    disabled={!name || createSet.isPending}
+                  >
+                    {createSet.isPending ? "Creating..." : "Create"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          ) : undefined
         }
       >
         <>
@@ -451,18 +476,20 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
                       {s.comment}
                     </TableCell>
                     <TableCell className="py-1 text-right">
-                      <Button
-                        aria-label={`Delete IPSet ${s.name}`}
-                        variant="ghost"
-                        size="icon"
-                        className={ROW_DELETE_CLASS}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDelete(s);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canManage && (
+                        <Button
+                          aria-label={`Delete IPSet ${s.name}`}
+                          variant="ghost"
+                          size="icon"
+                          className={ROW_DELETE_CLASS}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDelete(s);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -496,7 +523,11 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
         confirmLabel="Delete IP set"
       />
       {selectedSet && (
-        <IPSetEntriesCard clusterId={clusterId} setName={selectedSet} />
+        <IPSetEntriesCard
+          clusterId={clusterId}
+          setName={selectedSet}
+          canManage={canManage}
+        />
       )}
     </div>
   );
@@ -505,9 +536,11 @@ function FirewallIPSetsSection({ clusterId }: { clusterId: string }) {
 function IPSetEntriesCard({
   clusterId,
   setName,
+  canManage,
 }: {
   clusterId: string;
   setName: string;
+  canManage: boolean;
 }) {
   const entriesQuery = useFirewallIPSetEntries(clusterId, setName);
   const addEntry = useAddFirewallIPSetEntry(clusterId, setName);
@@ -534,25 +567,27 @@ function IPSetEntriesCard({
       title={<>Entries in &ldquo;{setName}&rdquo;</>}
       aside={countLabel(entriesQuery.data?.length, "entry", "entries")}
       actions={
-        <>
-          <Input
-            aria-label="CIDR to add"
-            value={cidr}
-            onChange={(e) => {
-              setCidr(e.target.value);
-            }}
-            placeholder="CIDR (e.g. 10.0.0.0/8)"
-            className="h-8 w-56 max-w-full"
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAdd}
-            disabled={!cidr || addEntry.isPending}
-          >
-            Add
-          </Button>
-        </>
+        canManage ? (
+          <>
+            <Input
+              aria-label="CIDR to add"
+              value={cidr}
+              onChange={(e) => {
+                setCidr(e.target.value);
+              }}
+              placeholder="CIDR (e.g. 10.0.0.0/8)"
+              className="h-8 w-56 max-w-full"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleAdd}
+              disabled={!cidr || addEntry.isPending}
+            >
+              Add
+            </Button>
+          </>
+        ) : undefined
       }
     >
       <>
@@ -587,17 +622,19 @@ function IPSetEntriesCard({
                     {e.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    <Button
-                      aria-label={`Delete entry ${e.cidr}`}
-                      variant="ghost"
-                      size="icon"
-                      className={ROW_DELETE_CLASS}
-                      onClick={() => {
-                        setPendingDelete(e);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManage && (
+                      <Button
+                        aria-label={`Delete entry ${e.cidr}`}
+                        variant="ghost"
+                        size="icon"
+                        className={ROW_DELETE_CLASS}
+                        onClick={() => {
+                          setPendingDelete(e);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -639,7 +676,13 @@ function IPSetEntriesCard({
   );
 }
 
-function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
+function FirewallSecurityGroupsSection({
+  clusterId,
+  canManage,
+}: {
+  clusterId: string;
+  canManage: boolean;
+}) {
   const groupsQuery = useFirewallSecurityGroups(clusterId);
   const createGroup = useCreateFirewallSecurityGroup(clusterId);
   const deleteGroup = useDeleteFirewallSecurityGroup(clusterId);
@@ -667,49 +710,51 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
       title="Security groups"
       aside={countLabel(groupsQuery.data?.length, "group", "groups")}
       actions={
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4" />
-              Add group
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add security group</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="fw-group-name">Name</Label>
-                <Input
-                  id="fw-group-name"
-                  value={group}
-                  onChange={(e) => {
-                    setGroup(e.target.value);
-                  }}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="fw-group-comment">Comment</Label>
-                <Input
-                  id="fw-group-comment"
-                  value={comment}
-                  onChange={(e) => {
-                    setComment(e.target.value);
-                  }}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                onClick={handleCreate}
-                disabled={!group || createGroup.isPending}
-              >
-                {createGroup.isPending ? "Creating..." : "Create"}
+        canManage ? (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm">
+                <Plus className="h-4 w-4" />
+                Add group
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Add security group</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fw-group-name">Name</Label>
+                  <Input
+                    id="fw-group-name"
+                    value={group}
+                    onChange={(e) => {
+                      setGroup(e.target.value);
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fw-group-comment">Comment</Label>
+                  <Input
+                    id="fw-group-comment"
+                    value={comment}
+                    onChange={(e) => {
+                      setComment(e.target.value);
+                    }}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  onClick={handleCreate}
+                  disabled={!group || createGroup.isPending}
+                >
+                  {createGroup.isPending ? "Creating..." : "Create"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : undefined
       }
     >
       <>
@@ -745,17 +790,19 @@ function FirewallSecurityGroupsSection({ clusterId }: { clusterId: string }) {
                     {g.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    <Button
-                      aria-label={`Delete security group ${g.group}`}
-                      variant="ghost"
-                      size="icon"
-                      className={ROW_DELETE_CLASS}
-                      onClick={() => {
-                        setPendingDelete(g);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManage && (
+                      <Button
+                        aria-label={`Delete security group ${g.group}`}
+                        variant="ghost"
+                        size="icon"
+                        className={ROW_DELETE_CLASS}
+                        onClick={() => {
+                          setPendingDelete(g);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

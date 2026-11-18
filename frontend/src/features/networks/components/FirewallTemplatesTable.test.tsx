@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
+import { useAuthStore } from "@/stores/auth-store";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
 import { setupUser } from "@/test/user";
 import { FirewallTemplatesTable } from "./FirewallTemplatesTable";
 import type { FirewallTemplate } from "../types/network";
@@ -38,8 +40,79 @@ const TEMPLATES: FirewallTemplate[] = [
 
 let api: ReturnType<typeof stubApi>;
 
+beforeEach(() => {
+  grantPermissions("manage:network", "delete:network");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// A template belongs to no cluster: creating and deleting one take
+// manage:network and delete:network install-wide. Applying one takes
+// manage:network on the cluster, where a grant on that cluster is enough.
+// Without it the same dialog opens as View rules: the rules show nowhere else.
+describe("FirewallTemplatesTable — what a role is offered", () => {
+  const BOTH = ["manage:network", "delete:network"];
+
+  it.each([
+    [[], [], { apply: false, create: false, remove: false }],
+    [BOTH, [], { apply: true, create: false, remove: false }],
+    [BOTH, ["manage:network"], { apply: true, create: true, remove: false }],
+    [BOTH, ["delete:network"], { apply: true, create: false, remove: true }],
+  ])(
+    "with %j, install-wide %j, offers %j",
+    async (permissions, globalPermissions, expected) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      stubApi({ [TEMPLATES_PATH]: listOf(TEMPLATES) });
+      const user = setupUser();
+      renderWithProviders(<FirewallTemplatesTable clusterId="c1" />);
+      await screen.findByText("db");
+
+      const offered = (name: string) =>
+        screen.queryByRole("button", { name }) !== null;
+      const opener = expected.apply
+        ? "Apply template db"
+        : "View rules of template db";
+      expect({
+        apply: offered("Apply template db"),
+        create: offered("Create template"),
+        remove: offered("Delete template db"),
+        view: offered("View rules of template db"),
+      }).toEqual({ ...expected, view: !expected.apply });
+
+      await user.click(screen.getByRole("button", { name: opener }));
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent(":5432");
+      // What applying does, and its lock-out warning, only beside Apply.
+      expect({
+        applies:
+          within(dialog).queryByRole("button", { name: "Apply to cluster" }) !==
+          null,
+        explains: within(dialog).queryByText(/^Adds 2 rules/) !== null,
+        warns: within(dialog).queryByText(/lock you out/) !== null,
+      }).toEqual({
+        applies: expected.apply,
+        explains: expected.apply,
+        warns: expected.apply,
+      });
+    },
+  );
+
+  it.each([
+    [[], "No firewall templates."],
+    [
+      ["manage:network"],
+      "No firewall templates. Create one to define reusable rule sets.",
+    ],
+  ])("with %j install-wide, an empty list says %j", async (granted, says) => {
+    grantPermissions(...granted);
+    stubApi({ [TEMPLATES_PATH]: listOf([]) });
+    renderWithProviders(<FirewallTemplatesTable clusterId="c1" />);
+
+    const empty = await screen.findByText(/^No firewall templates\./);
+    expect(empty.textContent).toBe(says);
+  });
 });
 
 async function openDeleteFor(name: string) {

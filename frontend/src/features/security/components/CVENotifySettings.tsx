@@ -11,6 +11,7 @@ import {
   useUpdateCVENotifyConfig,
 } from "../api/cve-queries";
 import { useNotificationChannels } from "@/features/alerts/api/alert-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const COOLDOWN_OPTIONS = [
   { label: "Immediately", value: 0 },
@@ -32,11 +33,26 @@ const settingSelectClass =
  *
  * Dedup is by CVE-ID set: re-fires when the set changes since last
  * notification, OR when cooldown has elapsed and the set is still nonempty.
+ *
+ * The save takes manage:cve_scan on the cluster; without it the rows only
+ * show the settings, with no Save.
  */
-export function CVENotifySettings({ clusterId }: { clusterId: string }) {
+export function CVENotifySettings({
+  clusterId,
+  canManage,
+}: {
+  clusterId: string;
+  canManage: boolean;
+}) {
   const { data: config, isLoading } = useCVENotifyConfig(clusterId);
   const { data: channels } = useNotificationChannels();
   const update = useUpdateCVENotifyConfig();
+  // Adding a channel takes manage:notification_channel install-wide.
+  const canAddChannel = usePermissions().hasGlobalPermission(
+    "manage",
+    "notification_channel",
+  );
+  const readOnly = !canManage;
 
   const [enabled, setEnabled] = useState(false);
   const [onAct, setOnAct] = useState(true);
@@ -98,6 +114,7 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
         <Switch
           id="cve-notify-enabled"
           checked={enabled}
+          disabled={readOnly}
           onCheckedChange={(checked) => {
             setEnabled(checked);
             setDirty(true);
@@ -113,6 +130,7 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
                 <Checkbox
                   className="mt-0.5"
                   checked={onAct}
+                  disabled={readOnly}
                   onCheckedChange={(checked) => {
                     setOnAct(checked === true);
                     setDirty(true);
@@ -130,6 +148,7 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
                 <Checkbox
                   className="mt-0.5"
                   checked={onAttend}
+                  disabled={readOnly}
                   onCheckedChange={(checked) => {
                     setOnAttend(checked === true);
                     setDirty(true);
@@ -148,11 +167,17 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
           <SettingRow label="Channels" className="items-start">
             {enabledChannels.length === 0 ? (
               <p className="w-full text-[13px] text-muted-foreground">
-                No notification channels configured. Add one in{" "}
-                <Link className="underline" to="/alerts">
-                  Alerts, Channels
-                </Link>{" "}
-                first.
+                No notification channels configured.
+                {canAddChannel && (
+                  <>
+                    {" "}
+                    Add one in{" "}
+                    <Link className="underline" to="/alerts">
+                      Alerts, Channels
+                    </Link>{" "}
+                    first.
+                  </>
+                )}
               </p>
             ) : (
               <div className="w-full space-y-2 text-sm">
@@ -160,6 +185,7 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
                   <label key={ch.id} className="flex items-center gap-2.5">
                     <Checkbox
                       checked={channelIDs.includes(ch.id)}
+                      disabled={readOnly}
                       onCheckedChange={() => {
                         toggleChannel(ch.id);
                       }}
@@ -184,6 +210,7 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
             <select
               id="cve-notify-cooldown"
               value={cooldownMinutes}
+              disabled={readOnly}
               onChange={(e) => {
                 setCooldownMinutes(Number(e.target.value));
                 setDirty(true);
@@ -200,25 +227,27 @@ export function CVENotifySettings({ clusterId }: { clusterId: string }) {
         </>
       )}
 
-      <SettingsFooter>
-        {update.isPending && (
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        )}
-        {dirty && !update.isPending && (
-          <span className="text-[12.5px] text-muted-foreground">
-            Notification changes are not saved yet
-          </span>
-        )}
-        {/* Outline: the screen's one primary button is Scan now. */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onSave}
-          disabled={!canSave}
-        >
-          Save
-        </Button>
-      </SettingsFooter>
+      {!readOnly && (
+        <SettingsFooter>
+          {update.isPending && (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+          {dirty && !update.isPending && (
+            <span className="text-[12.5px] text-muted-foreground">
+              Notification changes are not saved yet
+            </span>
+          )}
+          {/* Outline: the screen's one primary button is Scan now. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onSave}
+            disabled={!canSave}
+          >
+            Save
+          </Button>
+        </SettingsFooter>
+      )}
     </>
   );
 }

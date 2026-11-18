@@ -329,10 +329,13 @@ const router = createBrowserRouter([
               </LazyPage>
             ),
           },
+          // Every route of the four admin pages below, reads included, takes
+          // its grant install-wide (registry_users.go, registry_rbac.go,
+          // registry_ldap.go, registry_oidc.go): one on a cluster opens nothing.
           {
             path: "admin/users",
             element: (
-              <RequirePermission action="manage" resource="user">
+              <RequirePermission action="manage" resource="user" global>
                 <LazyPage>
                   <UsersPage />
                 </LazyPage>
@@ -342,7 +345,7 @@ const router = createBrowserRouter([
           {
             path: "admin/roles",
             element: (
-              <RequirePermission action="manage" resource="role">
+              <RequirePermission action="manage" resource="role" global>
                 <LazyPage>
                   <RolesPage />
                 </LazyPage>
@@ -352,7 +355,7 @@ const router = createBrowserRouter([
           {
             path: "admin/ldap",
             element: (
-              <RequirePermission action="manage" resource="user">
+              <RequirePermission action="manage" resource="user" global>
                 <LazyPage>
                   <LDAPPage />
                 </LazyPage>
@@ -362,7 +365,7 @@ const router = createBrowserRouter([
           {
             path: "admin/oidc",
             element: (
-              <RequirePermission action="manage" resource="user">
+              <RequirePermission action="manage" resource="user" global>
                 <LazyPage>
                   <OIDCPage />
                 </LazyPage>
@@ -464,11 +467,15 @@ const router = createBrowserRouter([
             ),
           },
           {
+            // Listing, creating and revoking your own keys all take
+            // manage:api_key install-wide (registry_api_keys.go).
             path: "settings/api-keys",
             element: (
-              <LazyPage>
-                <APIKeysPage />
-              </LazyPage>
+              <RequirePermission action="manage" resource="api_key" global>
+                <LazyPage>
+                  <APIKeysPage />
+                </LazyPage>
+              </RequirePermission>
             ),
           },
           {

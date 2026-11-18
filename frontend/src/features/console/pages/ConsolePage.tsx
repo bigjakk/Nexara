@@ -7,9 +7,10 @@ import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { Button } from "@/components/ui/button";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
 import { useConsoleStore } from "@/stores/console-store";
 import { usePreferencesStore } from "@/stores/preferences-store";
+import { usePermissions } from "@/hooks/usePermissions";
 import { ConsoleStateDot } from "../components/ConsoleState";
 import { QuickConnect } from "../components/QuickConnect";
 import { CONSOLE_STATUS_TEXT, CONSOLE_TYPE_TEXT } from "../lib/console-status";
@@ -31,7 +32,6 @@ function sessionSummary(tabs: readonly ConsoleTab[]): string {
 
 export function ConsolePage() {
   const { t } = useTranslation("console");
-  const { t: td } = useTranslation("dashboard");
   const setWindowMode = useConsoleStore((s) => s.setWindowMode);
   const showConsole = useConsoleStore((s) => s.showConsole);
   const setActiveTab = useConsoleStore((s) => s.setActiveTab);
@@ -43,6 +43,10 @@ export function ConsolePage() {
   );
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
+  // What the empty state may offer: a guest's console here, a node's shell on
+  // its own page, or neither.
+  const { canConsole } = usePermissions();
+  const canGuestConsole = canConsole("vm") || canConsole("container");
 
   useEffect(() => {
     if (tabs.length > 0) {
@@ -53,11 +57,9 @@ export function ConsolePage() {
   if (!hasClusters) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <EmptyState
+        <NoClustersEmptyState
           icon={TerminalSquare}
-          title={td("noClustersRegistered")}
           description={t("consolePage.addAProxmoxClusterTo")}
-          action={<AddClusterDialog />}
         />
       </div>
     );
@@ -74,7 +76,13 @@ export function ConsolePage() {
         <EmptyState
           icon={TerminalSquare}
           title={t("consolePage.noConsoleIsOpen")}
-          description={t("consolePage.openOneHereOrFrom")}
+          description={
+            canGuestConsole
+              ? t("consolePage.openOneHereOrFrom")
+              : canConsole("node")
+                ? t("consolePage.openOneFromANode")
+                : t("consolePage.noConsolePermission")
+          }
           action={<QuickConnect />}
         />
       </div>

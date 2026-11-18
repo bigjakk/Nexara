@@ -580,7 +580,7 @@ export function CreateRollingUpdateWizard({
                     ? "Run apt dist-upgrade automatically via SSH"
                     : sshUnknown
                       ? "Run apt dist-upgrade via SSH, which needs the cluster's SSH credentials"
-                      : "Configure SSH credentials to enable"}
+                      : "Needs SSH credentials, and this cluster has none yet"}
                 </p>
               </div>
               <Switch

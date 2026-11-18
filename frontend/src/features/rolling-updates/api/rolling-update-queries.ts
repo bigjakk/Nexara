@@ -338,6 +338,9 @@ export function useSSHConfigured(clusterId: string, enabled = true) {
   return {
     configured: query.data?.configured === true,
     unknown: query.isError,
+    // Known to be missing: the read answered no. While it is in flight, or
+    // when it (or a refetch, which keeps the last answer) failed, this is false.
+    missing: !query.isError && query.data?.configured === false,
   };
 }
 

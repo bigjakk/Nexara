@@ -1057,9 +1057,15 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
                   Proxmox VE 9 migrated HA groups to <strong>HA rules</strong>{" "}
-                  (node affinity). Creating or editing groups is disabled; use
-                  the <strong>Rules</strong> section above. Any existing groups
-                  are shown read-only.
+                  (node affinity).
+                  {canManage("ha") && (
+                    <>
+                      {" "}
+                      Creating or editing groups is disabled; use the{" "}
+                      <strong>Rules</strong> section above.
+                    </>
+                  )}{" "}
+                  Any existing groups are shown read-only.
                 </span>
               </p>
             )}

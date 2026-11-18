@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
+import { setupUser } from "@/test/user";
 import { SDNTable } from "./SDNTable";
 import type { SDNSubnet, SDNVNet, SDNZone } from "../types/network";
 
@@ -28,8 +30,95 @@ const TARGET = "zone01-192.0.2.128-26";
 
 let api: ReturnType<typeof stubApi>;
 
+beforeEach(() => {
+  grantPermissions("manage:network", "delete:network");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// Creating, editing and applying SDN objects take manage:network; deleting
+// one takes delete:network. A Viewer was offered every one of them. Without
+// manage:network each row's View opens its dialog read-only instead.
+describe("SDNTable — what a role is offered", () => {
+  // Each kind's view, the create button it adds, and its one fixture row.
+  const KINDS = [
+    { view: "Zones", create: "Create zone", kind: "Zone", name: "zone01" },
+    { view: "VNets", create: "Create VNet", kind: "VNet", name: "vnet01" },
+    {
+      view: "Controllers",
+      create: "Create controller",
+      kind: "Controller",
+      name: "ctl01",
+    },
+    { view: "IPAM", create: "Create IPAM", kind: "IPAM", name: "ipam01" },
+    { view: "DNS", create: "Create DNS", kind: "DNS", name: "dns01" },
+  ];
+  const SUBNET = "zone01-192.0.2.0-26";
+
+  it.each([
+    { permissions: [], manage: false, remove: false },
+    { permissions: ["manage:network"], manage: true, remove: false },
+    { permissions: ["delete:network"], manage: false, remove: true },
+  ])(
+    "with $permissions offers create, edit and apply: $manage, delete: $remove",
+    async ({ permissions, manage, remove }) => {
+      grantPermissions(...permissions);
+      stubApi({
+        [`${SDN}/zones`]: listOf(ZONES),
+        [`${SDN}/vnets`]: listOf(VNETS),
+        [`${SDN}/vnets/vnet01/subnets`]: listOf(VNET01_SUBNETS),
+        [`${SDN}/controllers`]: listOf([{ controller: "ctl01", type: "evpn" }]),
+        [`${SDN}/ipams`]: listOf([{ ipam: "ipam01", type: "pve" }]),
+        [`${SDN}/dns`]: listOf([{ dns: "dns01", type: "powerdns" }]),
+      });
+      const user = setupUser();
+      renderWithProviders(<SDNTable clusterId={CLUSTER} />);
+      const seen: Record<string, boolean> = {};
+      const look = (...names: string[]) => {
+        for (const name of names) {
+          seen[name] = screen.queryByRole("button", { name }) !== null;
+        }
+      };
+
+      const row = (kind: string, name: string) =>
+        ["Edit", "View", "Delete"].map((verb) => `${verb} ${kind} ${name}`);
+      for (const { view, create, kind, name } of KINDS) {
+        await user.click(await screen.findByRole("button", { name: view }));
+        await screen.findByText(name);
+        look(create, ...row(kind, name));
+      }
+      look("Apply changes");
+      // A VNet's subnets show once it is expanded.
+      await user.click(screen.getByRole("button", { name: "VNets" }));
+      await user.click(await screen.findByText("vnet01"));
+      await screen.findByText(SUBNET);
+      look("Add subnet", ...row("Subnet", SUBNET));
+
+      expect(seen).toEqual(
+        Object.fromEntries(
+          Object.keys(seen).map((name) => [
+            name,
+            name.startsWith("Delete ")
+              ? remove
+              : name.startsWith("View ")
+                ? !manage
+                : manage,
+          ]),
+        ),
+      );
+      await user.click(
+        screen.getByRole("button", {
+          name: `${manage ? "Edit" : "View"} Subnet ${SUBNET}`,
+        }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(
+        within(dialog).queryByRole("button", { name: "Save" }) !== null,
+      ).toBe(manage);
+    },
+  );
 });
 
 async function openDeleteFor(subnet: string) {

@@ -6,13 +6,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/EmptyState";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { SettingsSection } from "@/components/page/Settings";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
 import { useAuth } from "@/hooks/useAuth";
 import {
   useCVEScans,
@@ -42,10 +41,12 @@ import type { RollingUpdateJob } from "@/types/api";
 
 export function SecurityDashboardPage() {
   const { t } = useTranslation("security");
-  const { t: td } = useTranslation("dashboard");
   const { hasPermission } = useAuth();
   const canManageRolling = hasPermission("manage", "rolling_update");
   const canManageSSH = hasPermission("manage", "ssh_credentials");
+  // Starting a scan, its schedule, its notifications and deleting one take
+  // manage:cve_scan on the cluster; reading this page takes only view.
+  const canManageScans = hasPermission("manage", "cve_scan");
 
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: clusters, isLoading: clustersLoading } = useClusters();
@@ -156,11 +157,9 @@ export function SecurityDashboardPage() {
   if (!clusters || clusters.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
-        <EmptyState
+        <NoClustersEmptyState
           icon={ShieldAlert}
-          title={td("noClustersRegistered")}
           description={t("noClustersConfigured")}
-          action={<AddClusterDialog />}
         />
       </div>
     );
@@ -202,33 +201,33 @@ export function SecurityDashboardPage() {
               />
             )}
             {/* The one primary button is the open tab's own action. */}
-            {activeTab === "rolling-updates" ? (
-              canManageRolling &&
-              activeClusterId && (
-                <CreateRollingUpdateWizard
-                  clusterId={activeClusterId}
-                  clusterName={
-                    clusters.find((c) => c.id === activeClusterId)?.name
-                  }
-                  onStarted={setSelectedJob}
-                />
-              )
-            ) : (
-              <Button
-                onClick={() => {
-                  triggerScan.mutate(activeClusterId);
-                }}
-                disabled={triggerScan.isPending}
-                className="gap-2"
-              >
-                {triggerScan.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
+            {activeTab === "rolling-updates"
+              ? canManageRolling &&
+                activeClusterId && (
+                  <CreateRollingUpdateWizard
+                    clusterId={activeClusterId}
+                    clusterName={
+                      clusters.find((c) => c.id === activeClusterId)?.name
+                    }
+                    onStarted={setSelectedJob}
+                  />
+                )
+              : canManageScans && (
+                  <Button
+                    onClick={() => {
+                      triggerScan.mutate(activeClusterId);
+                    }}
+                    disabled={triggerScan.isPending}
+                    className="gap-2"
+                  >
+                    {triggerScan.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    {t("scanNow")}
+                  </Button>
                 )}
-                {t("scanNow")}
-              </Button>
-            )}
           </>
         }
       />
@@ -252,6 +251,7 @@ export function SecurityDashboardPage() {
             <>
               <PosturePanel
                 posture={posture}
+                canScan={canManageScans}
                 onShowKEV={(scanId) => {
                   setKEVDialogScanId(scanId);
                 }}
@@ -300,6 +300,7 @@ export function SecurityDashboardPage() {
                 <ScanHistoryTable
                   scans={scans ?? []}
                   clusterId={activeClusterId}
+                  canManage={canManageScans}
                   onSelectScan={setSelectedScanId}
                 />
               )}
@@ -310,8 +311,14 @@ export function SecurityDashboardPage() {
             title="Scanning"
             description="When this cluster is scanned, and who is told what a scan finds."
           >
-            <ScanScheduleSettings clusterId={activeClusterId} />
-            <CVENotifySettings clusterId={activeClusterId} />
+            <ScanScheduleSettings
+              clusterId={activeClusterId}
+              canManage={canManageScans}
+            />
+            <CVENotifySettings
+              clusterId={activeClusterId}
+              canManage={canManageScans}
+            />
           </SettingsSection>
         </TabsContent>
 

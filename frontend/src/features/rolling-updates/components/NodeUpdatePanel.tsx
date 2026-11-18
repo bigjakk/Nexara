@@ -88,7 +88,10 @@ export function NodeUpdatePanel({
   // error toast shows.
   const sshUnknown = ssh.unknown;
   const hasSSH = ssh.configured;
+  const sshMissing = ssh.missing;
   const allowed = canManage("rolling_update");
+  // Storing the credentials takes manage:ssh_credentials, apart from the update.
+  const canAddCredentials = canManage("ssh_credentials");
   const busy = update.isPending;
 
   function applyUpdates() {
@@ -121,9 +124,7 @@ export function NodeUpdatePanel({
             size="sm"
             disabled={(!hasSSH && !sshUnknown) || busy}
             title={
-              hasSSH || sshUnknown
-                ? undefined
-                : "Configure SSH credentials for this cluster first"
+              sshMissing ? "This cluster has no SSH credentials yet" : undefined
             }
             onClick={() => {
               setConfirmOpen(true);
@@ -159,14 +160,21 @@ export function NodeUpdatePanel({
       )}
 
       <div className="space-y-2 px-[18px] empty:hidden [&>*:first-child]:pt-3">
-        {count > 0 && !hasSSH && !sshUnknown && (
+        {/* Only a role that may update the node has the credentials read, so
+            only it can know they are missing. */}
+        {count > 0 && allowed && sshMissing && (
           <p className="text-sm text-muted-foreground">
-            Applying updates needs SSH credentials for this cluster. Add them
-            under{" "}
-            <Link to="/security" className="underline">
-              Security
-            </Link>
-            .
+            Applying updates needs SSH credentials for this cluster.
+            {canAddCredentials && (
+              <>
+                {" "}
+                Add them under{" "}
+                <Link to="/security" className="underline">
+                  Security
+                </Link>
+                .
+              </>
+            )}
           </p>
         )}
 

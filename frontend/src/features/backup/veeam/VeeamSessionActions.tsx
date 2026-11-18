@@ -40,11 +40,17 @@ export function VeeamSessionActions({
   serverId,
   session,
 }: VeeamSessionActionsProps) {
-  const { canExecute } = usePermissions();
+  const { canExecute, hasGlobalPermission } = usePermissions();
   const [confirming, setConfirming] = useState(false);
   const stopSession = useStopVeeamSession(serverId);
 
-  if (!canExecute("veeam")) return null;
+  // execute:veeam on the cluster the run's platform maps to; a run with no
+  // cluster takes it install-wide.
+  const allowed =
+    session.cluster_id === null
+      ? hasGlobalPermission("execute", "veeam")
+      : canExecute("veeam");
+  if (!allowed) return null;
   // A finished run has nothing to stop, and rendering a disabled button on
   // every historical row would be noise on a table that is mostly history. An
   // empty state is treated as finished: it is what a row with no state at all

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/context-menu";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
+import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import { formatBytes, formatUptime } from "@/lib/format";
@@ -79,6 +80,13 @@ export function StorageGuestTable({
     staleTime: 30_000,
   });
   const nodesQuery = useClusterNodes(clusterId);
+  // A VM's disk move takes manage:vm, a container's volume move
+  // execute:container: a row is offered a migration only for its kind.
+  const { hasPermission } = usePermissions();
+  const canMove = (kind: GuestRow["guestKind"]) =>
+    kind === "ct"
+      ? hasPermission("execute", "container")
+      : hasPermission("manage", "vm");
 
   const rows = useMemo<GuestRow[]>(() => {
     const byVmidVm = new Map<number, VMResponse>();
@@ -123,13 +131,16 @@ export function StorageGuestTable({
     return Array.from(groups.values()).sort((a, b) => a.vmid - b.vmid);
   }, [items, vmsQuery.data, ctsQuery.data, nodesQuery.data]);
 
-  const allSelected = rows.length > 0 && selectedVmids.size === rows.length;
+  // Only the rows this role may migrate can be selected.
+  const movableRows = rows.filter((r) => canMove(r.guestKind));
+  const allSelected =
+    movableRows.length > 0 && selectedVmids.size === movableRows.length;
   const someSelected =
-    selectedVmids.size > 0 && selectedVmids.size < rows.length;
+    selectedVmids.size > 0 && selectedVmids.size < movableRows.length;
 
   function toggleAll() {
     if (allSelected) setSelectedVmids(new Set());
-    else setSelectedVmids(new Set(rows.map((r) => r.vmid)));
+    else setSelectedVmids(new Set(movableRows.map((r) => r.vmid)));
   }
 
   function toggleRow(vmid: number) {
@@ -216,13 +227,15 @@ export function StorageGuestTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-10">
-              <Checkbox
-                checked={
-                  allSelected ? true : someSelected ? "indeterminate" : false
-                }
-                onCheckedChange={toggleAll}
-                aria-label="Select all guests"
-              />
+              {movableRows.length > 0 && (
+                <Checkbox
+                  checked={
+                    allSelected ? true : someSelected ? "indeterminate" : false
+                  }
+                  onCheckedChange={toggleAll}
+                  aria-label="Select all guests"
+                />
+              )}
             </TableHead>
             <TableHead>Name</TableHead>
             <TableHead>Status</TableHead>
@@ -248,7 +261,8 @@ export function StorageGuestTable({
         <TableBody>
           {rows.map((row) => (
             <ContextMenu key={`${row.guestKind}:${String(row.vmid)}`}>
-              <ContextMenuTrigger asChild>
+              {/* Migrate is the menu's one item. */}
+              <ContextMenuTrigger asChild disabled={!canMove(row.guestKind)}>
                 <TableRow
                   data-state={
                     selectedVmids.has(row.vmid) ? "selected" : undefined
@@ -256,13 +270,15 @@ export function StorageGuestTable({
                   className="cursor-default"
                 >
                   <TableCell>
-                    <Checkbox
-                      checked={selectedVmids.has(row.vmid)}
-                      onCheckedChange={() => {
-                        toggleRow(row.vmid);
-                      }}
-                      aria-label={`Select ${row.name}`}
-                    />
+                    {canMove(row.guestKind) && (
+                      <Checkbox
+                        checked={selectedVmids.has(row.vmid)}
+                        onCheckedChange={() => {
+                          toggleRow(row.vmid);
+                        }}
+                        aria-label={`Select ${row.name}`}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2 font-medium">
@@ -316,24 +332,26 @@ export function StorageGuestTable({
                     {formatBytes(row.totalBytes)}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-end">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        title={
-                          canMigrate
-                            ? `Migrate ${String(row.volumes.length)} ${row.volumes.length === 1 ? "disk" : "disks"} to another storage`
-                            : "No compatible target storage available"
-                        }
-                        disabled={!canMigrate || !row.guestId}
-                        onClick={() => {
-                          migrateRow(row);
-                        }}
-                      >
-                        <ArrowRightLeft className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {canMove(row.guestKind) && (
+                      <div className="flex items-center justify-end">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title={
+                            canMigrate
+                              ? `Migrate ${String(row.volumes.length)} ${row.volumes.length === 1 ? "disk" : "disks"} to another storage`
+                              : "No compatible target storage available"
+                          }
+                          disabled={!canMigrate || !row.guestId}
+                          onClick={() => {
+                            migrateRow(row);
+                          }}
+                        >
+                          <ArrowRightLeft className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               </ContextMenuTrigger>

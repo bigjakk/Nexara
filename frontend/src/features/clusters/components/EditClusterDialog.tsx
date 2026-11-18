@@ -28,6 +28,7 @@ import {
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { ConfirmRequiredWarning } from "@/components/ConfirmRequiredWarning";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import {
   confirmRequiredFromError,
@@ -75,6 +76,15 @@ export function EditClusterDialog({
     "fetch" | "update" | null
   >(null);
   const [allowPrivate, setAllowPrivate] = useState(false);
+
+  // Fetching the certificate takes manage:cluster, manage:pbs or manage:veeam
+  // INSTALL-WIDE (it is step 1 of the add flows); the save takes manage:cluster
+  // on this cluster, so a cluster-scoped editor saves without re-fetching.
+  const { hasGlobalPermission } = usePermissions();
+  const canFetchFingerprint =
+    hasGlobalPermission("manage", "cluster") ||
+    hasGlobalPermission("manage", "pbs") ||
+    hasGlobalPermission("manage", "veeam");
 
   const updateMutation = useUpdateCluster();
   const { t } = useTranslation("clusters");
@@ -385,21 +395,31 @@ export function EditClusterDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>{t("editClusterDialog.tlsCertificate")}</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleFetchFingerprint}
-                disabled={fetchingFingerprint || !apiUrl}
-              >
-                <RefreshCw
-                  className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`}
-                />
-                {fetchingFingerprint
-                  ? t("editClusterDialog.fetching")
-                  : t("editClusterDialog.refetchCertificate")}
-              </Button>
+              {canFetchFingerprint && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleFetchFingerprint}
+                  disabled={fetchingFingerprint || !apiUrl}
+                >
+                  <RefreshCw
+                    className={`mr-1.5 h-3.5 w-3.5 ${fetchingFingerprint ? "animate-spin" : ""}`}
+                  />
+                  {fetchingFingerprint
+                    ? t("editClusterDialog.fetching")
+                    : t("editClusterDialog.refetchCertificate")}
+                </Button>
+              )}
             </div>
+
+            {/* The server points here to re-fetch a changed certificate; say
+                what it takes rather than leave the section empty. */}
+            {!canFetchFingerprint && (
+              <p className="text-[12.5px] text-muted-foreground">
+                {t("editClusterDialog.refetchNeedsGlobal")}
+              </p>
+            )}
 
             {cluster.tls_fingerprint && !fingerprint && (
               <div className="rounded-md bg-muted p-3">

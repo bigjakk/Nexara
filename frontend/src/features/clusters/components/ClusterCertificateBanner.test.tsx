@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { ClusterCertificateBanner } from "./ClusterCertificateBanner";
 import type { ClusterResponse, HealthIssue } from "@/types/api";
 
@@ -55,6 +56,18 @@ function makeCluster(issues: HealthIssue[]): ClusterResponse {
 describe("ClusterCertificateBanner", () => {
   beforeEach(() => {
     mockMutate.mockReset();
+    grantPermissions("manage:cluster");
+  });
+
+  // Verifying and editing take manage:cluster; a Viewer is still told what is
+  // wrong, without the two buttons the server would refuse.
+  it("offers a role without manage:cluster the issue alone", () => {
+    grantPermissions("view:cluster");
+    renderWithProviders(
+      <ClusterCertificateBanner cluster={makeCluster([FINGERPRINT_ISSUE])} />,
+    );
+    expect(screen.getByText("TLS certificate changed")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("renders nothing when the cluster has no issues at all", () => {

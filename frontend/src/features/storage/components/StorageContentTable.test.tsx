@@ -17,6 +17,8 @@ import {
   type FakeServer,
 } from "@/test/fake-server";
 import { emptyPerSessionStores } from "@/test/per-session-stores";
+import { grantPermissions } from "@/test/permissions";
+import { renderWithProviders } from "@/test/test-utils";
 import type { User } from "@/types/api";
 import { useAuthStore } from "@/stores/auth-store";
 import type { StorageContentItem } from "../types/storage";
@@ -158,5 +160,35 @@ describe("StorageContentTable, deleting the selected volumes", () => {
     expect(server.times(del(VOLIDS[1] ?? ""))).toBe(1);
     expect(laterCallers.length).toBeGreaterThan(0);
     expect(laterCallers.every((c) => c === ADMIN.id)).toBe(true);
+  });
+});
+
+// Deleting a volume takes delete:storage, and the selection exists only for
+// that: without the grant the table offers neither.
+describe("StorageContentTable, by grant", () => {
+  it.each([
+    ["view:storage", false],
+    ["delete:storage", true],
+  ])("offers selection and Delete to %s: %s", (permission, offered) => {
+    grantPermissions(permission);
+    renderWithProviders(
+      <StorageContentTable
+        items={ITEMS}
+        clusterId={CLUSTER}
+        storageId={STORAGE}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("checkbox", { name: "Select all items" }) !== null,
+    ).toBe(offered);
+    expect(
+      screen.queryByRole("checkbox", { name: `Select ${VOLIDS[0] ?? ""}` }) !==
+        null,
+    ).toBe(offered);
+    expect(
+      screen.queryByRole("button", { name: `Delete ${VOLIDS[0] ?? ""}` }) !==
+        null,
+    ).toBe(offered);
   });
 });

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { ApiClientError, apiClient } from "@/lib/api-client";
 import { deferred } from "@/test/fake-server";
+import { grantPermissions } from "@/test/permissions";
 import {
   DENIED,
   PATIENCE_MS,
@@ -67,6 +68,8 @@ type UserEvent = ReturnType<typeof userEvent.setup>;
 beforeEach(() => {
   vi.resetAllMocks();
   signIn();
+  // Edit takes manage:cluster.
+  grantPermissions("manage:cluster");
   mockedList.mockImplementation((path: string) =>
     Promise.resolve(path === "/api/v1/clusters" ? CLUSTERS : []),
   );

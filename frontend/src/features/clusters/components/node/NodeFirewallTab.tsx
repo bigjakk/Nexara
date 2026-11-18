@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmFirewallRuleDeleteDialog } from "@/features/networks/components/ConfirmFirewallRuleDeleteDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useCreateNodeFirewallRule,
   useDeleteNodeFirewallRule,
@@ -31,6 +32,9 @@ export function FirewallTab({
   nodeName: string;
 }) {
   const [showLog, setShowLog] = useState(false);
+  // Adding and deleting a node's rule both take manage:network (not
+  // manage:node); without it the rules and the log are read-only.
+  const canEdit = usePermissions().hasPermission("manage", "network");
   const rulesQuery = useNodeFirewallRules(clusterId, nodeName);
   const rules = rulesQuery.data;
   const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
@@ -68,30 +72,34 @@ export function FirewallTab({
         }
         actions={
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => {
-                setPendingQuickAdd("ACCEPT");
-              }}
-              disabled={createRule.isPending}
-            >
-              <Plus className="h-4 w-4" />
-              Add accept rule
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => {
-                setPendingQuickAdd("DROP");
-              }}
-              disabled={createRule.isPending}
-            >
-              <Plus className="h-4 w-4" />
-              Add drop rule
-            </Button>
+            {canEdit && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    setPendingQuickAdd("ACCEPT");
+                  }}
+                  disabled={createRule.isPending}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add accept rule
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    setPendingQuickAdd("DROP");
+                  }}
+                  disabled={createRule.isPending}
+                >
+                  <Plus className="h-4 w-4" />
+                  Add drop rule
+                </Button>
+              </>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -128,7 +136,7 @@ export function FirewallTab({
                 <TableHead>Port</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead className="w-12" />
+                {canEdit && <TableHead className="w-12" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -157,20 +165,22 @@ export function FirewallTab({
                   <TableCell className="min-w-[10rem] whitespace-normal text-muted-foreground">
                     {rule.comment || <NoValue />}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      aria-label={`Delete firewall rule ${String(rule.pos)}`}
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        setPendingDelete(rule);
-                      }}
-                      disabled={deleteRule.isPending}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
+                  {canEdit && (
+                    <TableCell className="text-right">
+                      <Button
+                        aria-label={`Delete firewall rule ${String(rule.pos)}`}
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setPendingDelete(rule);
+                        }}
+                        disabled={deleteRule.isPending}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

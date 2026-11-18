@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { grantPermissions } from "@/test/permissions";
+import { useAuthStore } from "@/stores/auth-store";
 import { BackupPanel } from "./BackupPanel";
 
 vi.mock("@/lib/api-client", async () =>
@@ -61,6 +62,56 @@ describe("BackupPanel", () => {
       ).toBe(del);
     },
   );
+
+  // A delete takes delete:backup on the PBS server's cluster, or across the
+  // install for a server attached to none; a grant on one cluster showed it on
+  // a standalone server's backups, and the delete answered 403.
+  it("with delete:backup on one cluster offers Delete backup only where the server is attached", async () => {
+    useAuthStore.setState({
+      user: null,
+      permissions: ["delete:backup"],
+      globalPermissions: [],
+    });
+    vi.mocked(apiClient.get).mockResolvedValue({
+      items: [
+        SNAPSHOT,
+        {
+          ...SNAPSHOT,
+          id: "s2",
+          pbs_server_id: "p2",
+          datastore: "datastore02",
+        },
+      ],
+      total: 2,
+      storage_unread: false,
+    });
+    vi.mocked(apiClient.list).mockImplementation((path: unknown) =>
+      Promise.resolve(
+        String(path) === "/api/v1/pbs-servers"
+          ? [
+              { id: "p1", cluster_id: "c1" },
+              { id: "p2", cluster_id: null },
+            ]
+          : [],
+      ),
+    );
+    renderWithProviders(
+      <BackupPanel vmid={101} clusterId="c1" nodeName="pve-01" kind="vm" />,
+    );
+    // The attached server's Delete shows once the server list has arrived.
+    const attached = (await screen.findByText("datastore01")).closest("tr");
+    expect(
+      await within(attached as HTMLElement).findByRole("button", {
+        name: "Delete backup",
+      }),
+    ).toBeInTheDocument();
+    const standalone = screen.getByText("datastore02").closest("tr");
+    expect(
+      within(standalone as HTMLElement).queryByRole("button", {
+        name: "Delete backup",
+      }),
+    ).toBeNull();
+  });
 
   // With the cluster's storages unread, the server filters by its last reading
   // and says so; the panel says that instead, and offers no delete or restore.

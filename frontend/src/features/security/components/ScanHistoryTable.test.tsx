@@ -53,6 +53,7 @@ function renderTable() {
     <ScanHistoryTable
       scans={scans}
       clusterId={CLUSTER}
+      canManage
       onSelectScan={() => undefined}
     />,
   );

@@ -162,8 +162,31 @@ describe("AlertRuleForm", () => {
     expect(screen.queryByRole("option", { name: "UPS on battery (count)" })).not.toBeInTheDocument();
   });
 
+  // A rule that names no cluster, global or one UPS, takes manage:alert
+  // install-wide; a metric that has no other scope goes with it.
+  it.each<[string[], boolean]>([
+    [["view:ups"], false],
+    [["view:ups", "manage:alert"], true],
+  ])(
+    "with %j install-wide offers the metrics that name no cluster: %s",
+    async (globalPermissions, offered) => {
+      useAuthStore.setState({ globalPermissions });
+      const user = await openForm();
+      await user.click(screen.getByRole("combobox", { name: "Metric" }));
+      expect(
+        await screen.findByRole("option", { name: "CPU usage (%)" }),
+      ).toBeInTheDocument();
+      for (const name of [
+        "Veeam repository usage (%)",
+        "UPS on battery (count)",
+      ]) {
+        expect(screen.queryByRole("option", { name }) !== null).toBe(offered);
+      }
+    },
+  );
+
   it("creates a UPS charge rule as global, below 50%", async () => {
-    useAuthStore.setState({ globalPermissions: ["view:ups"] });
+    useAuthStore.setState({ globalPermissions: ["view:ups", "manage:alert"] });
     const user = await openForm();
     // "> 50" would fire on every healthy UPS, a NUT server belongs to no
     // cluster, and an hour's cooldown would swallow a storm's second outage:
@@ -192,7 +215,7 @@ describe("AlertRuleForm", () => {
   // One UPS is offered with global view:ups, which the server holds a rule
   // bound to a UPS to; the rule names the UPS and no cluster.
   it("creates a rule for one UPS", async () => {
-    useAuthStore.setState({ globalPermissions: ["view:ups"] });
+    useAuthStore.setState({ globalPermissions: ["view:ups", "manage:alert"] });
     mockedList.mockImplementation((path: string) =>
       Promise.resolve(
         (path.includes("ups-devices") ? [{ id: "u1", name: "ups01", server_name: "nut01" }] : []) as never,

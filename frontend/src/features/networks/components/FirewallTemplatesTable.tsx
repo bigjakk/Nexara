@@ -22,6 +22,7 @@ import type { FirewallTemplate } from "../types/network";
 import { ClusterHistoryButton } from "@/features/history/components/ClusterHistoryButton";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { DateTime } from "@/components/DateTime";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "react-i18next";
 
 interface FirewallTemplatesTableProps {
@@ -37,6 +38,13 @@ export function FirewallTemplatesTable({
   const [pendingDelete, setPendingDelete] = useState<FirewallTemplate | null>(
     null,
   );
+  // Creating and deleting a template take manage:network and delete:network
+  // install-wide (a template belongs to no cluster); applying one takes
+  // manage:network on this cluster.
+  const { hasPermission, hasGlobalPermission } = usePermissions();
+  const canCreate = hasGlobalPermission("manage", "network");
+  const canRemove = hasGlobalPermission("delete", "network");
+  const canApply = hasPermission("manage", "network");
 
   const count = templates?.length ?? 0;
 
@@ -52,7 +60,7 @@ export function FirewallTemplatesTable({
               ? t("firewallTemplatesTable.reusableRuleSetsSharedBy")
               : t("firewallTemplatesTable.templatesShared", { count })
         }
-        actions={<CreateTemplateDialog />}
+        actions={canCreate ? <CreateTemplateDialog /> : undefined}
       >
         {isLoading ? (
           <div className="px-[18px] pb-1">
@@ -60,7 +68,9 @@ export function FirewallTemplatesTable({
           </div>
         ) : !templates || templates.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            {t("firewallTemplatesTable.noFirewallTemplatesCreateOne")}
+            {canCreate
+              ? t("firewallTemplatesTable.noFirewallTemplatesCreateOne")
+              : t("firewallTemplatesTable.noFirewallTemplates")}
           </p>
         ) : (
           <Table>
@@ -103,22 +113,25 @@ export function FirewallTemplatesTable({
                       <ApplyTemplateDialog
                         clusterId={clusterId}
                         template={tmpl}
+                        canApply={canApply}
                       />
-                      <Button
-                        aria-label={t(
-                          "firewallTemplatesTable.deleteTemplateName",
-                          { name: tmpl.name },
-                        )}
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => {
-                          setPendingDelete(tmpl);
-                        }}
-                        disabled={deleteTemplate.isPending}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canRemove && (
+                        <Button
+                          aria-label={t(
+                            "firewallTemplatesTable.deleteTemplateName",
+                            { name: tmpl.name },
+                          )}
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setPendingDelete(tmpl);
+                          }}
+                          disabled={deleteTemplate.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

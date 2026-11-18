@@ -90,9 +90,12 @@ export function NodePowerActions({
   // Generated on demand, and Proxmox shells out to a long list of commands to
   // build it, so the pending state is held for however long that takes.
   const report = useDownloadNodeReport(clusterId, nodeName);
-  // Maintenance needs manage:node; without it the check is not sent at all.
+  // Maintenance, evacuate, reboot and shutdown all take manage:node; without it
+  // none is offered and the SSH check is not sent at all.
   const { canManage } = useAuth();
   const canNode = canManage("node");
+  // Setting the SSH credential takes manage:ssh_credentials.
+  const canSetSSH = canManage("ssh_credentials");
   const ssh = useSSHConfigured(clusterId, canNode);
   // Could not check: offered all the same, and the action says if it fails.
   const hasSSH = canNode && (ssh.configured || ssh.unknown);
@@ -231,86 +234,89 @@ export function NodePowerActions({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      ) : (
+      ) : canNode ? (
         <Button
           variant="outline"
           size="sm"
           className="gap-1.5"
           disabled
           title={
-            canNode
+            canSetSSH
               ? "Configure SSH credentials (Security → Rolling updates → SSH access) to use node maintenance, or use Evacuate."
-              : "Node maintenance needs the manage:node permission."
+              : t("nodePowerActions.maintenanceNeedsSSH")
           }
         >
           <Wrench className="h-4 w-4" />
           Maintenance
         </Button>
-      )}
+      ) : null}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="px-2"
-            aria-label="More actions"
-            aria-busy={report.isPending || undefined}
-          >
-            {report.isPending ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <MoreHorizontal />
+      {/* Every item takes manage:node: the support bundle (canReport) too. */}
+      {canNode && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="px-2"
+              aria-label="More actions"
+              aria-busy={report.isPending || undefined}
+            >
+              {report.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <MoreHorizontal />
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {canReport && (
+              <DropdownMenuItem
+                className="gap-2"
+                disabled={report.isPending}
+                title="Download this node's pvereport support bundle"
+                onClick={() => {
+                  report.mutate();
+                }}
+              >
+                <FileText className="h-4 w-4" />
+                {report.isPending
+                  ? "Generating support bundle…"
+                  : "Support bundle"}
+              </DropdownMenuItem>
             )}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {canReport && (
             <DropdownMenuItem
               className="gap-2"
-              disabled={report.isPending}
-              title="Download this node's pvereport support bundle"
+              disabled={otherNodes.length === 0}
               onClick={() => {
-                report.mutate();
+                setDialog("evacuate");
               }}
             >
-              <FileText className="h-4 w-4" />
-              {report.isPending
-                ? "Generating support bundle…"
-                : "Support bundle"}
+              <ArrowRightLeft className="h-4 w-4" />
+              Evacuate
             </DropdownMenuItem>
-          )}
-          <DropdownMenuItem
-            className="gap-2"
-            disabled={otherNodes.length === 0}
-            onClick={() => {
-              setDialog("evacuate");
-            }}
-          >
-            <ArrowRightLeft className="h-4 w-4" />
-            Evacuate
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="gap-2"
-            onClick={() => {
-              setDialog("reboot");
-            }}
-          >
-            <RefreshCw className="h-4 w-4" />
-            Reboot
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="gap-2 text-red-700 focus:text-red-700 dark:text-red-400 dark:focus:text-red-400"
-            onClick={() => {
-              setDialog("shutdown");
-            }}
-          >
-            <Power className="h-4 w-4" />
-            Shutdown
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-2"
+              onClick={() => {
+                setDialog("reboot");
+              }}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Reboot
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="gap-2 text-red-700 focus:text-red-700 dark:text-red-400 dark:focus:text-red-400"
+              onClick={() => {
+                setDialog("shutdown");
+              }}
+            >
+              <Power className="h-4 w-4" />
+              Shutdown
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
 
       {bannerContainer != null ? createPortal(banner, bannerContainer) : banner}
 

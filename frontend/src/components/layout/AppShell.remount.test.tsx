@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, useParams } from "react-router-dom";
 
 import { AppRoot } from "@/components/AppRoot";
+import { useAuthStore } from "@/stores/auth-store";
 import { useWebSocketStore } from "@/stores/websocket-store";
 import { installFakeServer } from "@/test/fake-server";
 import { renderOnAppClient } from "@/test/save-outcome-kit";
@@ -115,4 +116,31 @@ describe("AppShell — Sign out all devices", () => {
       screen.queryByRole("dialog", { name: "Sign out all devices?" }),
     ).toBeNull();
   });
+});
+
+describe("AppShell — API keys in the user menu", () => {
+  afterEach(() => {
+    useAuthStore.setState({ permissions: [], globalPermissions: [] });
+  });
+
+  // The page and every route it calls take manage:api_key install-wide.
+  it.each<[string, string[], boolean]>([
+    ["on a cluster only", [], false],
+    ["install-wide", ["manage:api_key"], true],
+  ])(
+    "with manage:api_key %s (install-wide: %j) offers API keys: %s",
+    async (_held, globalPermissions, offered) => {
+      useAuthStore.setState({
+        permissions: ["manage:api_key"],
+        globalPermissions,
+      });
+      const user = userEvent.setup();
+      renderShell("/clusters/c1");
+      await user.click(await screen.findByRole("button", { name: /User$/ }));
+      await screen.findByRole("menuitem", { name: "Sign out all devices" });
+      expect(
+        screen.queryByRole("menuitem", { name: "API keys" }) !== null,
+      ).toBe(offered);
+    },
+  );
 });

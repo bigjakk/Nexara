@@ -26,6 +26,7 @@ import {
 import { useImportJobs, useCancelImport } from "../api/import-queries";
 import type { VMImportJob } from "@/types/api";
 import { DateTime } from "@/components/DateTime";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface ImportHistoryTableProps {
   clusterId: string;
@@ -79,6 +80,8 @@ function importName(job: VMImportJob): string {
 export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
   const { data: jobs, isLoading } = useImportJobs(clusterId);
   const cancelMutation = useCancelImport();
+  // Cancelling an import takes manage:vm_import; the page itself only view.
+  const canCancel = usePermissions().canManage("vm_import");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<VMImportJob | null>(null);
   const [deleteVm, setDeleteVm] = useState(false);
@@ -157,7 +160,8 @@ export function ImportHistoryTable({ clusterId }: ImportHistoryTableProps) {
               {jobs.map((job: VMImportJob) => {
                 const isOpen = expanded === job.id;
                 const cancellable =
-                  job.status === "pending" || job.status === "running";
+                  canCancel &&
+                  (job.status === "pending" || job.status === "running");
                 return (
                   <RowGroup
                     key={job.id}

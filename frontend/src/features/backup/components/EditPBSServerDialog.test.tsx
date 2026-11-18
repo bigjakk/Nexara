@@ -33,9 +33,14 @@ function sentBody(): Record<string, unknown> {
   return call[1] as Record<string, unknown>;
 }
 
-function render() {
+function render(readOnly = false) {
   renderWithProviders(
-    <EditPBSServerDialog server={SERVER} open onOpenChange={() => undefined} />,
+    <EditPBSServerDialog
+      server={SERVER}
+      open
+      onOpenChange={() => undefined}
+      readOnly={readOnly}
+    />,
   );
   return userEvent.setup();
 }
@@ -111,5 +116,25 @@ describe("EditPBSServerDialog", () => {
     await user.type(apiUrl, url);
 
     expect(screen.getByLabelText(/api token secret/i)).toBeRequired();
+  });
+
+  // A role that may not change the server (manage:pbs on its scope) still
+  // reads its settings here: the fields are shown disabled, with no Save, and
+  // the token secret is as blank as it is to an editor.
+  it("shows the settings read-only to a role that may not change them", () => {
+    render(true);
+
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull();
+    for (const [label, value] of [
+      [/server name/i, "PBS Primary"],
+      [/api token id/i, "nexara@pbs!token"],
+      [/tls fingerprint/i, "AA:BB:CC:DD"],
+      [/api token secret/i, ""],
+    ] as const) {
+      const field = screen.getByLabelText(label);
+      expect(field).toHaveValue(value);
+      expect(field).toBeDisabled();
+    }
+    expect(screen.getByLabelText(/associated cluster/i)).toBeDisabled();
   });
 });

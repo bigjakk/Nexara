@@ -74,8 +74,8 @@ type UserEvent = ReturnType<typeof userEvent.setup>;
 beforeEach(() => {
   vi.resetAllMocks();
   signIn();
-  // The revoke option takes manage:cluster install-wide, as the server checks.
-  grantPermissions("manage:cluster");
+  // Delete takes delete:cluster; the revoke option manage:cluster install-wide.
+  grantPermissions("manage:cluster", "delete:cluster");
   mockedList.mockImplementation((path: string) =>
     Promise.resolve(path === "/api/v1/clusters" ? CLUSTERS : []),
   );

@@ -35,6 +35,12 @@ export function AlertRulesTable() {
   // A UPS's rule is named by its UPS, read only where the caller may list them.
   const { hasGlobalPermission } = usePermissions();
   const canViewUps = hasGlobalPermission("view", "ups");
+  // A rule on a cluster takes manage:alert there; one that names no cluster
+  // (global, or a UPS's) takes it install-wide (UpdateRule and DeleteRule in
+  // handlers/alerts.go).
+  const canManageGlobally = hasGlobalPermission("manage", "alert");
+  const canManageRule = (rule: AlertRule) =>
+    canManage && (Boolean(rule.cluster_id) || canManageGlobally);
   const upsDevices = useUpsDevices(
     canViewUps && (rules ?? []).some((r) => r.scope_type === "ups"),
   );
@@ -148,14 +154,14 @@ export function AlertRulesTable() {
                   : `${String(rule.duration_seconds)}s`}
               </TableCell>
               <TableCell>
-                {canManage && enableRefused(rule) ? (
+                {canManageRule(rule) && enableRefused(rule) ? (
                   <div>
                     <span>{t("alertRulesTable.no")}</span>
                     <div className="text-[12.5px] text-muted-foreground">
                       {t("alertRulesTable.enablingItTakesViewUps")}
                     </div>
                   </div>
-                ) : canManage ? (
+                ) : canManageRule(rule) ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -186,18 +192,20 @@ export function AlertRulesTable() {
               </TableCell>
               {canManage && (
                 <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
-                    aria-label={t("alertRulesTable.deleteRule")}
-                    onClick={() => {
-                      setPendingDelete(rule);
-                    }}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {canManageRule(rule) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-muted-foreground hover:text-red-700 dark:hover:text-red-400"
+                      aria-label={t("alertRulesTable.deleteRule")}
+                      onClick={() => {
+                        setPendingDelete(rule);
+                      }}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </TableCell>
               )}
             </TableRow>

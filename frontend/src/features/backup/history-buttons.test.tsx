@@ -12,7 +12,7 @@ import { DatastoreOverview } from "./components/DatastoreOverview";
 import { VeeamJobTable } from "./veeam/VeeamJobTable";
 import { VeeamServerTable } from "./veeam/VeeamServerTable";
 import { VeeamSessionTable } from "./veeam/VeeamSessionTable";
-import { job, session } from "./veeam/veeam.fixtures";
+import { job, server, session } from "./veeam/veeam.fixtures";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -47,28 +47,12 @@ function signIn(permissions: string[], globalPermissions = permissions) {
   });
 }
 
-const server = {
-  id: "srv-1",
-  name: "vbr01",
-  base_url: "https://192.0.2.10:9419",
-  username: "",
-  api_revision: "1.3-rev2",
-  product_version: "13.1.0.411",
-  license_edition: "EnterprisePlus",
-  tls_fingerprint: "",
-  verify_tls: true,
-  enabled: true,
-  last_sync_at: null,
-  last_sync_error: "",
-  created_at: "2026-08-26T19:56:00Z",
-  updated_at: "2026-08-26T19:56:00Z",
-};
-
 const datastoreOverview = (
   <DatastoreOverview
     key="d"
     pbsId="p1"
     datastores={[{ store: "datastore01", total: 100, used: 10, avail: 90 }]}
+    canManage={false}
   />
 );
 
@@ -88,7 +72,7 @@ describe("a list row's History button", () => {
       "a Veeam server",
       <VeeamServerTable
         key="s"
-        servers={[server]}
+        servers={[server({ id: "srv-1", name: "vbr01" })]}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
       />,

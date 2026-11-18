@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PoolTable } from "./PoolTable";
 import type { CephPool } from "../types/ceph";
 import { unaddressableHint } from "@/lib/api-path";
-import { expectOnScreen } from "@/test/test-utils";
+import { expectOnScreen, renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
@@ -32,6 +33,7 @@ function pool(name: string, id: number): CephPool {
 describe("a Ceph pool Nexara cannot address", () => {
   // Ceph, and pveceph's own pool-name rule, admit "." and "..".
   it("keeps its row, and shows why as text in place of the delete", () => {
+    grantPermissions("manage:ceph");
     const qc = new QueryClient();
     render(
       <QueryClientProvider client={qc}>
@@ -53,6 +55,26 @@ describe("a Ceph pool Nexara cannot address", () => {
       screen.getByRole("button", { name: "Delete pool rbd" }),
     ).toBeEnabled();
   });
+});
+
+describe("PoolTable — delete", () => {
+  // Deleting a pool takes manage:ceph on the cluster; view:ceph shows the table.
+  it.each([
+    { perms: ["view:ceph"], can: false },
+    { perms: ["view:ceph", "manage:ceph"], can: true },
+  ])(
+    "offers Delete only to a role that may delete: $perms",
+    ({ perms, can }) => {
+      grantPermissions(...perms);
+      renderWithProviders(
+        <PoolTable clusterId="c1" pools={[pool("rbd", 1)]} />,
+      );
+      expect(screen.getByText("rbd")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Delete pool rbd" }) !== null,
+      ).toBe(can);
+    },
+  );
 });
 
 function reasonFor(name: string): string {

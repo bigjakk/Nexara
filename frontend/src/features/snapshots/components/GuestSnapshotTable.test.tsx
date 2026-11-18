@@ -132,10 +132,12 @@ describe("GuestSnapshotTable", () => {
     }
   });
 
-  it("blocks deletion without the delete permission", () => {
+  it("offers no delete without the delete permission", () => {
     permissionState.canDelete = false;
     renderWithProviders(<GuestSnapshotTable rows={[makeRow({})]} />);
-    expect(screen.getByTitle("Requires delete permission")).toBeDisabled();
+    // Under either title: the row's guest is in inventory.
+    expect(screen.queryByTitle("Delete snapshot")).toBeNull();
+    expect(screen.queryByTitle("Guest not in inventory")).toBeNull();
   });
 
   it("requires an explicit confirm, then dispatches and resyncs on completion", async () => {

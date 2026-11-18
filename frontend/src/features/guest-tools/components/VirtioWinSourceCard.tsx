@@ -118,8 +118,9 @@ export function VirtioWinSourceCard() {
   const { data: mirror, isLoading } = useVirtioWinMirror();
   const updateMirror = useUpdateVirtioWinMirror();
   const settle = useSaveOutcome();
-  const { canManage } = usePermissions();
-  const readOnly = !canManage("settings");
+  // PUT /virtio-win/mirror is a global check: a manage:settings grant on one
+  // cluster does not cover it.
+  const readOnly = !usePermissions().hasGlobalPermission("manage", "settings");
 
   const [baseUrl, setBaseUrl] = useState("");
   // One at a time by construction: the API answers with at most one gate per
@@ -241,37 +242,38 @@ export function VirtioWinSourceCard() {
           />
         )}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            onClick={() => {
-              save();
-            }}
-            disabled={readOnly || updateMirror.isPending || !dirty}
-          >
-            {updateMirror.isPending ? "Saving..." : "Save source"}
-          </Button>
-          {baseUrl.trim() !== "" && !readOnly && (
-            <Button
-              variant="ghost"
-              disabled={updateMirror.isPending}
-              onClick={() => {
-                handleChange("");
-              }}
-            >
-              Reset to upstream
-            </Button>
-          )}
-          {saved && (
-            <span className="text-sm text-muted-foreground">
-              Saved. Run a check to rebuild the release list from this source.
-            </span>
-          )}
-        </div>
-
-        {readOnly && (
+        {readOnly ? (
           <p className="text-xs text-muted-foreground">
-            Changing the source needs the Manage settings permission.
+            Changing the source needs the Manage settings permission on the
+            whole install.
           </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              onClick={() => {
+                save();
+              }}
+              disabled={updateMirror.isPending || !dirty}
+            >
+              {updateMirror.isPending ? "Saving..." : "Save source"}
+            </Button>
+            {baseUrl.trim() !== "" && (
+              <Button
+                variant="ghost"
+                disabled={updateMirror.isPending}
+                onClick={() => {
+                  handleChange("");
+                }}
+              >
+                Reset to upstream
+              </Button>
+            )}
+            {saved && (
+              <span className="text-sm text-muted-foreground">
+                Saved. Run a check to rebuild the release list from this source.
+              </span>
+            )}
+          </div>
         )}
       </div>
     </Panel>

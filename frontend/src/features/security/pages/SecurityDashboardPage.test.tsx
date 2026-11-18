@@ -6,12 +6,14 @@ import { listOf, stubApi } from "@/test/fetch-stub";
 import { makeCluster } from "@/test/cluster.fixtures";
 import { makeRollingUpdateJob } from "@/test/rolling-update.fixtures";
 import { setupUser } from "@/test/user";
+import { grantPermissions } from "@/test/permissions";
 import { useAuthStore } from "@/stores/auth-store";
+import { cveScan, posture } from "../security.fixtures";
 import { SecurityDashboardPage } from "./SecurityDashboardPage";
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  useAuthStore.setState({ permissions: [] });
+  useAuthStore.setState({ permissions: [], globalPermissions: [] });
 });
 
 /** The page with the router's current search string beside it. */
@@ -43,6 +45,73 @@ describe("SecurityDashboardPage — posture", () => {
       within(notice as HTMLElement).getByRole("button", { name: "Retry" }),
     ).toBeInTheDocument();
   });
+});
+
+describe("SecurityDashboardPage — scan controls", () => {
+  // Scan now, the schedule, the notifications and Delete scan take
+  // manage:cve_scan, and adding a channel manage:notification_channel; the
+  // page itself takes only view:cve_scan, which a Viewer holds.
+  it.each([
+    { perms: ["view:cve_scan"], can: false },
+    {
+      perms: [
+        "view:cve_scan",
+        "manage:cve_scan",
+        "manage:notification_channel",
+      ],
+      can: true,
+    },
+  ])(
+    "offers them only to a role that may use them: $perms",
+    async ({ perms, can }) => {
+      grantPermissions(...perms);
+      stubApi({
+        "/api/v1/clusters": listOf([makeCluster({ id: "c1" })]),
+        "/api/v1/clusters/c1/security-posture": posture({
+          status: "no_scans",
+          total_nodes: 0,
+          scanned_nodes: 0,
+        }),
+        "/api/v1/clusters/c1/cve-scans?limit=20": listOf([cveScan()]),
+        "/api/v1/clusters/c1/cve-scan-schedule": {
+          cluster_id: "c1",
+          enabled: true,
+          interval_hours: 24,
+        },
+        "/api/v1/clusters/c1/cve-notifications": {
+          cluster_id: "c1",
+          enabled: true,
+          notify_on_act: true,
+          notify_on_attend: false,
+          channel_ids: [],
+          cooldown_minutes: 60,
+        },
+        "/api/v1/notification-channels": listOf([]),
+      });
+      renderWithProviders(<SecurityDashboardPage />);
+
+      await screen.findByRole("button", { name: "View vulnerabilities" });
+      await screen.findByText(/^No notification channels configured\./);
+      const offered = (name: string) =>
+        screen.queryByRole("button", { name }) !== null;
+      expect(offered("Scan now")).toBe(can);
+      expect(offered("Delete scan")).toBe(can);
+      expect(offered("Save")).toBe(can);
+      for (const control of [
+        screen.getByRole("switch", { name: "Automatic scans" }),
+        screen.getByRole("combobox", { name: "Scan interval" }),
+        screen.getByRole("switch", { name: "Enable notifications" }),
+        screen.getByRole("combobox", { name: "Re-notify after" }),
+      ]) {
+        expect(control).toHaveProperty("disabled", !can);
+      }
+      expect(
+        screen.getByText(/^No scans have been run yet\./),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Use Scan now/) !== null).toBe(can);
+      expect(screen.queryByText(/Add one in/) !== null).toBe(can);
+    },
+  );
 });
 
 describe("SecurityDashboardPage — job links", () => {

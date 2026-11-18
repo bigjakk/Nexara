@@ -19,6 +19,7 @@ it("does not report nothing for what could not be read", async () => {
     <DatastoreOverview
       pbsId="p1"
       datastores={[{ store: "datastore01", total: 100, used: 10, avail: 90 }]}
+      canManage={false}
     />,
   );
 

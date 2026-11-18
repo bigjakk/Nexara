@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
+import { useAuthStore } from "@/stores/auth-store";
 import type { APIEndpoint } from "@/types/api";
 import { APIDocsPage } from "./APIDocsPage";
 
@@ -56,6 +57,10 @@ function renderPage() {
 }
 
 describe("APIDocsPage", () => {
+  afterEach(() => {
+    useAuthStore.setState({ permissions: [], globalPermissions: [] });
+  });
+
   it("lists every endpoint, grouped", () => {
     renderPage();
     expect(screen.getByText("Virtual Machines")).toBeInTheDocument();
@@ -102,4 +107,22 @@ describe("APIDocsPage", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByText("Requirement")).toBeInTheDocument();
   });
+
+  // Creating a key takes manage:api_key install-wide (registry_api_keys.go).
+  it.each<[string, string[], boolean]>([
+    ["on a cluster only", [], false],
+    ["install-wide", ["manage:api_key"], true],
+  ])(
+    "with manage:api_key %s (install-wide: %j) offers Create an API key: %s",
+    (_held, globalPermissions, offered) => {
+      useAuthStore.setState({
+        permissions: ["manage:api_key"],
+        globalPermissions,
+      });
+      renderPage();
+      expect(
+        screen.queryByRole("button", { name: "Create an API key" }) !== null,
+      ).toBe(offered);
+    },
+  );
 });

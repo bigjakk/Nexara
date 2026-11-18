@@ -94,8 +94,13 @@ function pbsConfig(
  * Opens the editor beside the app-wide must-save dialog, as the app has them:
  * a generated key reaches that dialog through usePBSKeyStore, not through the
  * editor. The QueryClient is returned so a test can look inside its caches.
+ * `readOnly` opens it as a role without manage:storage does, from Configuration.
  */
-async function openEditor(config: StorageConfigResponse, storageType = "pbs") {
+async function openEditor(
+  config: StorageConfigResponse,
+  storageType = "pbs",
+  readOnly = false,
+) {
   mockedGet.mockResolvedValue(config);
   const user = userEvent.setup();
   const { queryClient } = renderWithProviders(
@@ -105,12 +110,18 @@ async function openEditor(config: StorageConfigResponse, storageType = "pbs") {
         storageId="s1"
         storageName="store01"
         storageType={storageType}
+        readOnly={readOnly}
       />
       <PendingPBSKeyDialog />
     </>,
   );
-  await user.click(screen.getByRole("button", { name: "Edit" }));
-  await screen.findByRole("button", { name: "Save changes" });
+  await user.click(
+    screen.getByRole("button", { name: readOnly ? "Configuration" : "Edit" }),
+  );
+  // Read-only, the form is in once its Enable box is: there is no Save.
+  await (readOnly
+    ? screen.findByRole("checkbox", { name: "Enable" })
+    : screen.findByRole("button", { name: "Save changes" }));
   return { user, queryClient };
 }
 
@@ -639,6 +650,69 @@ describe("EditStorageDialog — Ceph keyring", () => {
     delete ownCeph.monhost;
     await openEditor(ownCeph, "rbd");
 
+    expect(screen.queryByLabelText(/^Keyring/)).toBeNull();
+  });
+});
+
+// GET .../config takes only view:storage, so a role without manage:storage
+// reads the configuration from Configuration: every field disabled, no Save,
+// and a secret field as blank as it is to an editor.
+describe("EditStorageDialog — read-only", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    signIn(OPERATOR);
+    mockedList.mockResolvedValue([]);
+  });
+
+  it("shows a PBS store's settings, and offers no change", async () => {
+    await openEditor(pbsConfig({ "encryption-key": FINGERPRINT }), "pbs", true);
+
+    expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+    const server = screen.getByLabelText(/^Server/);
+    expect(server).toHaveValue("pbs.example.com");
+    expect(server).toBeDisabled();
+    const password = screen.getByLabelText(/^Password or API token/);
+    expect(password).toHaveValue("");
+    expect(password).toBeDisabled();
+    expect(screen.getByText("AA:BB:CC:DD:EE:FF:00:11")).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: "Keep the current key" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Enable" })).toBeDisabled();
+    expect(screen.getByText("Backups")).toBeInTheDocument();
+  });
+
+  // Radix opens a Select on pointerdown, which a disabled fieldset does not
+  // stop, so the Select is disabled in its own right.
+  it("opens no Select", async () => {
+    const { user } = await openEditor(
+      { storage: "store01", type: "dir", content: "images" },
+      "dir",
+      true,
+    );
+
+    const preallocation = screen.getByRole("combobox", {
+      name: /^Preallocation/,
+    });
+    await user.click(preallocation);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("shows no keyring field for an external Ceph store", async () => {
+    await openEditor(
+      {
+        storage: "store01",
+        type: "rbd",
+        content: "images",
+        monhost: "192.0.2.11,192.0.2.12",
+      },
+      "rbd",
+      true,
+    );
+
+    const monitors = screen.getByLabelText("Monitor hosts");
+    expect(monitors).toHaveValue("192.0.2.11,192.0.2.12");
+    expect(monitors).toBeDisabled();
     expect(screen.queryByLabelText(/^Keyring/)).toBeNull();
   });
 });

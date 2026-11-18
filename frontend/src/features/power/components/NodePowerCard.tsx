@@ -36,6 +36,8 @@ function NodePowerCardBody({ clusterId, nodeName, online, className }: Props) {
   const { t } = useTranslation("power");
   const devices = useUpsDevices();
   const servers = useNutServers();
+  // Adding the node to what a UPS powers takes manage:ups install-wide.
+  const canAddFeed = usePermissions().hasGlobalPermission("manage", "ups");
   const all = devices.data ?? [];
   // Nothing to say on an install that watches no UPS at all.
   if (all.length === 0) return null;
@@ -50,7 +52,7 @@ function NodePowerCardBody({ clusterId, nodeName, online, className }: Props) {
     <Panel title={t("nodePowerCard.power")} className={className}>
       {feeding.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          <Trans t={t} i18nKey="nodePowerCard.noUPSNexaraKnowsPowers" components={{ node: <>{nodeName}</>, navlink: <Link to="/power" className="text-primary hover:underline" /> }} />
+          <Trans t={t} i18nKey={canAddFeed ? "nodePowerCard.noUPSNexaraKnowsPowers" : "nodePowerCard.noUPSNexaraKnowsPowersNode"} components={{ node: <>{nodeName}</>, navlink: <Link to="/power" className="text-primary hover:underline" /> }} />
         </p>
       ) : (
         // One block per UPS, divided by a rule: no box inside the panel.

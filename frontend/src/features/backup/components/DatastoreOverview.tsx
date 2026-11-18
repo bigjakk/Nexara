@@ -45,6 +45,8 @@ interface DatastoreOverviewProps {
   datastores: PBSDatastoreStatus[];
   /** The server they are on. */
   pbsId: string;
+  /** The role may run GC and prune here: manage:backup on the server's scope. */
+  canManage: boolean;
 }
 
 /**
@@ -55,6 +57,7 @@ interface DatastoreOverviewProps {
 export function DatastoreOverview({
   datastores,
   pbsId,
+  canManage,
 }: DatastoreOverviewProps) {
   if (datastores.length === 0) {
     return (
@@ -68,7 +71,12 @@ export function DatastoreOverview({
     <div className="space-y-4">
       {datastores.length > 1 && <DatastoreChart pbsId={pbsId} />}
       {datastores.map((ds) => (
-        <DatastorePanel key={ds.store} pbsId={pbsId} datastore={ds} />
+        <DatastorePanel
+          key={ds.store}
+          pbsId={pbsId}
+          datastore={ds}
+          canManage={canManage}
+        />
       ))}
     </div>
   );
@@ -121,9 +129,11 @@ function verifySub(facts: VerifyFacts, verifyNew: boolean): string {
 function DatastorePanel({
   pbsId,
   datastore: ds,
+  canManage,
 }: {
   pbsId: string;
   datastore: PBSDatastoreStatus;
+  canManage: boolean;
 }) {
   const [view, setView] = useState<DatastoreView>("usage");
   const [usageWindow, setUsageWindow] = useState<UsageTimeframe>("24h");
@@ -189,8 +199,12 @@ function DatastorePanel({
             history={backupHistories.pbsServer(pbsId, ds.store)}
             title={ds.store}
           />
-          <GCDialog pbsId={pbsId} store={ds.store} />
-          <PruneDialog pbsId={pbsId} store={ds.store} />
+          {canManage && (
+            <>
+              <GCDialog pbsId={pbsId} store={ds.store} />
+              <PruneDialog pbsId={pbsId} store={ds.store} />
+            </>
+          )}
         </>
       }
     >

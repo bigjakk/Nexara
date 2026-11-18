@@ -25,6 +25,9 @@ import { ACTIVE_MIGRATION_STATUSES, jobSummary } from "../lib/job-summary";
 import type { MigrationJob } from "../types/migration";
 import { DateTime } from "@/components/DateTime";
 
+const WHAT_A_JOB_IS =
+  "A job moves one guest and records its pre-flight checks, its progress and its outcome.";
+
 const TYPE_LABEL: Record<MigrationJob["migration_type"], string> = {
   "intra-cluster": "Within the cluster",
   "cross-cluster": "Between clusters",
@@ -56,7 +59,9 @@ export function MigrationsPage() {
   const guestNames = useMigrationGuestNames(jobs);
   const cancel = useCancelMigration();
   const { hasPermission } = usePermissions();
-  const canCancel = hasPermission("manage", "migration");
+  // Creating, checking, running and cancelling a job take manage:migration
+  // on its clusters; reading the page takes only view.
+  const canManage = hasPermission("manage", "migration");
   const summary =
     jobSummary(
       "migration",
@@ -70,7 +75,7 @@ export function MigrationsPage() {
       <PageHeader
         title="Migrations"
         summary={summary}
-        actions={<MigrateWizard />}
+        actions={canManage ? <MigrateWizard /> : undefined}
       />
 
       {isLoading ? (
@@ -85,7 +90,11 @@ export function MigrationsPage() {
         <EmptyState
           icon={ArrowLeftRight}
           title="No migration jobs yet"
-          description="A job moves one guest and records its pre-flight checks, its progress and its outcome. New migration starts one."
+          description={
+            canManage
+              ? `${WHAT_A_JOB_IS} New migration starts one.`
+              : WHAT_A_JOB_IS
+          }
         />
       ) : (
         <Panel flush title="Jobs" aside={String(jobs.length)}>
@@ -140,7 +149,7 @@ export function MigrationsPage() {
                     <TableCell className="py-1 text-right">
                       {/* Only a job not yet run: the server refuses one that
                         has started, and a check would put one back. */}
-                      {canCancel && job.status === "pending" && (
+                      {canManage && job.status === "pending" && (
                         <Button
                           aria-label={`Cancel the migration of ${name ?? `${kind} ${String(job.vmid)}`}`}
                           variant="ghost"

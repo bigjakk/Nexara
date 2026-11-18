@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import {
   useCreateSDNController,
   useUpdateSDNController,
@@ -31,6 +31,9 @@ import { useTranslation } from "react-i18next";
 interface CreateSDNControllerDialogProps {
   clusterId: string;
   initialData?: SDNController;
+  /** With initialData: show the controller without letting it change, for a
+   *  role without manage:network. */
+  readOnly?: boolean;
 }
 
 const CONTROLLER_TYPES = ["evpn", "bgp", "isis"] as const;
@@ -38,6 +41,7 @@ const CONTROLLER_TYPES = ["evpn", "bgp", "isis"] as const;
 export function CreateSDNControllerDialog({
   clusterId,
   initialData,
+  readOnly = false,
 }: CreateSDNControllerDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -150,12 +154,16 @@ export function CreateSDNControllerDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit Controller ${initialData.controller}`}
+            aria-label={`${readOnly ? "View" : "Edit"} Controller ${initialData.controller}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button size="sm">
@@ -167,10 +175,14 @@ export function CreateSDNControllerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit controller" : "Create SDN controller"}
+            {readOnly
+              ? "View controller"
+              : isEdit
+                ? "Edit controller"
+                : "Create SDN controller"}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Controller ID</Label>
@@ -307,25 +319,27 @@ export function CreateSDNControllerDialog({
               />
             </div>
           </div>
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !controller || !type}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

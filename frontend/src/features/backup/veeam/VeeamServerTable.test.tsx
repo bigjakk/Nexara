@@ -2,35 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { apiClient } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 import { VeeamServerTable } from "./VeeamServerTable";
-import type { VeeamProbeResult, VeeamServer } from "../types/backup";
+import { server } from "./veeam.fixtures";
+import type { VeeamProbeResult } from "../types/backup";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock(),
 );
 
 const mockedPost = vi.mocked(apiClient.post);
-
-function server(over: Partial<VeeamServer> = {}): VeeamServer {
-  return {
-    id: "veeam-1",
-    name: "Veeam Primary",
-    base_url: "https://vbr.example.com:9419",
-    username: "ad\\jdoe",
-    api_revision: "1.3-rev2",
-    product_version: "13.1.0.411",
-    license_edition: "EnterprisePlus",
-    tls_fingerprint: "",
-    verify_tls: true,
-    enabled: true,
-    last_sync_at: "2026-08-26T12:05:00Z",
-    last_sync_error: "",
-    created_at: "2026-08-26T12:00:00Z",
-    updated_at: "2026-08-26T12:00:00Z",
-    ...over,
-  };
-}
 
 function probe(over: Partial<VeeamProbeResult> = {}): VeeamProbeResult {
   return {
@@ -52,7 +35,33 @@ function probe(over: Partial<VeeamProbeResult> = {}): VeeamProbeResult {
 describe("VeeamServerTable", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    grantPermissions("manage:veeam", "delete:veeam");
   });
+
+  // The registry's writes are install-wide checks: Test and Edit take
+  // manage:veeam, Delete delete:veeam; a grant on one cluster admits neither.
+  it.each<[string, string[], string[], boolean, boolean]>([
+    ["no grant", [], [], false, false],
+    ["both on a cluster", ["manage:veeam", "delete:veeam"], [], false, false],
+    ["manage:veeam", ["manage:veeam"], ["manage:veeam"], true, false],
+    ["delete:veeam", ["delete:veeam"], ["delete:veeam"], false, true],
+  ])(
+    "offers a row's actions by grant: %s",
+    (_, permissions, globalPermissions, manage, remove) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      renderWithProviders(
+        <VeeamServerTable
+          servers={[server()]}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByTitle("Test connection") !== null).toBe(manage);
+      expect(screen.queryByTitle("Edit") !== null).toBe(manage);
+      expect(screen.queryByTitle("Delete") !== null).toBe(remove);
+    },
+  );
 
   it("shows version and edition without expanding", () => {
     renderWithProviders(

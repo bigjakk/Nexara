@@ -25,7 +25,8 @@ import { ResourceTable } from "../components/ResourceTable";
 import { countInventory } from "../lib/inventory-summary";
 import { DeployTemplateDialog } from "@/features/vms/components/DeployTemplateDialog";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
-import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
+import { useGuestActionAllowed } from "@/features/vms/lib/vm-action-defs";
 import type { ResourceKind } from "@/features/vms/types/vm";
 
 export function InventoryPage() {
@@ -33,6 +34,8 @@ export function InventoryPage() {
   const { t: tc } = useTranslation("common");
   const { t: td } = useTranslation("dashboard");
   const { rows, isLoading, error, failedClusterIds } = useInventoryData();
+  // Deploy takes manage on the template's kind, as the clone route does.
+  const allowed = useGuestActionAllowed();
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
   const failedClusterNames = failedClusterIds
@@ -101,11 +104,9 @@ export function InventoryPage() {
             description={t("noResourcesDescription")}
           />
         ) : (
-          <EmptyState
+          <NoClustersEmptyState
             icon={Package}
-            title={td("noClustersRegistered")}
             description={td("addClusterToGetStarted")}
-            action={<AddClusterDialog />}
           />
         ))}
 
@@ -165,22 +166,24 @@ export function InventoryPage() {
                           {row.nodeName}
                         </TableCell>
                         <TableCell className="py-1.5 text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={() => {
-                              setDeployTarget({
-                                clusterId: row.clusterId,
-                                vmId: row.id,
-                                kind: row.type as ResourceKind,
-                                name: row.name,
-                              });
-                            }}
-                          >
-                            <Rocket />
-                            {t("deploy", { ns: "vms" })}
-                          </Button>
+                          {allowed("deploy", row.type as ResourceKind) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="gap-1.5"
+                              onClick={() => {
+                                setDeployTarget({
+                                  clusterId: row.clusterId,
+                                  vmId: row.id,
+                                  kind: row.type as ResourceKind,
+                                  name: row.name,
+                                });
+                              }}
+                            >
+                              <Rocket />
+                              {t("deploy", { ns: "vms" })}
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

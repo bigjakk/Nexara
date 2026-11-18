@@ -52,6 +52,7 @@
   "containerRootdir": "Container",
   "snippets": "Snippets",
   "editStorage": "Edit storage",
+  "configuration": "Configuration",
   "diskActionsActions": {
     "resizingDiskDiskName": "Resizing disk {{diskName}}",
     "movingDiskDiskNameToTargetStorage": "Moving disk {{diskName}} to {{targetStorage}}"

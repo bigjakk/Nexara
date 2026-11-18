@@ -68,6 +68,49 @@ describe("SearchBar", () => {
     expect(screen.queryByRole("option", { name: refused })).not.toBeInTheDocument();
   });
 
+  // Each admin page takes what its route guard takes (App.tsx), install-wide;
+  // Roles takes manage:role, not manage:user.
+  it.each<[string[], string[], string[]]>([
+    [["manage:user", "manage:role"], [], []],
+    [
+      ["manage:user"],
+      ["manage:user"],
+      ["Admin: Users", "Admin: LDAP", "Admin: OIDC/SSO"],
+    ],
+    [["manage:role"], ["manage:role"], ["Admin: Roles"]],
+  ])(
+    "with %j, %j install-wide, offers the admin pages %j",
+    async (permissions, globalPermissions, offered) => {
+      useAuthStore.setState({ permissions, globalPermissions });
+      vi.mocked(apiClient.list).mockResolvedValue([] as never);
+      const user = setupUser();
+      renderWithProviders(<SearchBar />);
+
+      await user.click(
+        screen.getByRole("button", { name: /Search or jump to/ }),
+      );
+      await user.type(screen.getByRole("combobox"), "admin");
+      const first = offered[0];
+      if (first === undefined) {
+        expect(await screen.findByText(/No results/i)).toBeInTheDocument();
+      } else {
+        expect(
+          await screen.findByRole("option", { name: new RegExp(first) }),
+        ).toBeInTheDocument();
+      }
+      for (const label of [
+        "Admin: Users",
+        "Admin: Roles",
+        "Admin: LDAP",
+        "Admin: OIDC/SSO",
+      ]) {
+        expect(
+          screen.queryByRole("option", { name: new RegExp(label) }) !== null,
+        ).toBe(offered.includes(label));
+      }
+    },
+  );
+
   // A running VM whose vCPUs are halted reads as its halted state here too,
   // not as Running (lib/guest-state.ts is the one source).
   it("shows a halted VM's dot as its halted state", async () => {

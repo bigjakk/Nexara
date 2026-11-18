@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DatabaseBackup, ServerOff } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +21,7 @@ import {
   useVeeamServers,
 } from "../api/backup-queries";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
+import { useCanAddPBSServer } from "../hooks/useCanAddPBSServer";
 import { DatastoreOverview } from "../components/DatastoreOverview";
 import { SnapshotTable } from "../components/SnapshotTable";
 import { SyncJobTable } from "../components/SyncJobTable";
@@ -87,6 +89,7 @@ function AddVeeamServerAction() {
 }
 
 export function BackupDashboardPage() {
+  const { t } = useTranslation("backup");
   const [providerTab, setProviderTab] = useState<ProviderTab>("pbs");
   const serversQuery = usePBSServers();
   const servers = serversQuery.data ?? [];
@@ -125,7 +128,17 @@ export function BackupDashboardPage() {
     ? selectedClusterId
     : (clusters[0]?.id ?? "");
   const backupJobsQuery = useBackupJobs(activeClusterId);
-  const { hasPermission } = usePermissions();
+  const { hasPermission, hasGlobalPermission } = usePermissions();
+  const canAddPBS = useCanAddPBSServer();
+  // A PBS server's routes take their grant on the cluster it is attached to,
+  // and install-wide when it is standalone (requirePBSPerm, PBSHandler).
+  const onServer = activeServer?.cluster_id
+    ? hasPermission
+    : hasGlobalPermission;
+  const canEditServer = onServer("manage", "pbs");
+  const canDeleteServer = onServer("delete", "pbs");
+  const canManageBackups = onServer("manage", "backup");
+  const canDeleteBackups = onServer("delete", "backup");
 
   const datastores = dsStatusQuery.data ?? [];
   const snapshots = snapshotsQuery.data ?? [];
@@ -254,7 +267,13 @@ export function BackupDashboardPage() {
                 actions={
                   <ServerActions
                     name={activeServer.name}
+                    canEdit={canEditServer}
+                    canDelete={canDeleteServer}
                     onEdit={() => {
+                      setEditOpen(true);
+                    }}
+                    // A viewer is shown the server's settings, read-only.
+                    onView={() => {
                       setEditOpen(true);
                     }}
                     onDelete={() => {
@@ -267,6 +286,7 @@ export function BackupDashboardPage() {
                 server={activeServer}
                 open={editOpen}
                 onOpenChange={setEditOpen}
+                readOnly={!canEditServer}
               />
               <DeletePBSServerDialog
                 server={activeServer}
@@ -288,7 +308,11 @@ export function BackupDashboardPage() {
             <EmptyState
               icon={DatabaseBackup}
               title="No PBS servers yet"
-              description="Register a Proxmox Backup Server to see its datastores, snapshots and jobs here, and to restore from it."
+              description={
+                canAddPBS
+                  ? "Register a Proxmox Backup Server to see its datastores, snapshots and jobs here, and to restore from it."
+                  : t("noPBSServersAddedYet")
+              }
             />
           )}
 
@@ -296,7 +320,12 @@ export function BackupDashboardPage() {
             <EmptyState
               icon={ServerOff}
               title="PBS server unreachable"
-              description="Could not connect to the PBS server. Check credentials and connectivity."
+              description={
+                // Its credentials are changed with Edit (manage:pbs).
+                canEditServer
+                  ? "Could not connect to the PBS server. Check credentials and connectivity."
+                  : "Could not connect to the PBS server."
+              }
             />
           )}
 
@@ -340,11 +369,18 @@ export function BackupDashboardPage() {
                   <DatastoreOverview
                     datastores={datastores}
                     pbsId={activeServerId}
+                    canManage={canManageBackups}
                   />
                 </TabsContent>
 
                 <TabsContent value="snapshots">
-                  <SnapshotTable snapshots={snapshots} pbsId={activeServerId} />
+                  <SnapshotTable
+                    snapshots={snapshots}
+                    pbsId={activeServerId}
+                    canManage={canManageBackups}
+                    canDelete={canDeleteBackups}
+                    canRestore={hasPermission("manage", "backup")}
+                  />
                 </TabsContent>
 
                 <TabsContent value="schedules">
@@ -381,11 +417,19 @@ export function BackupDashboardPage() {
                 </TabsContent>
 
                 <TabsContent value="replication">
-                  <SyncJobTable jobs={syncJobs} pbsId={activeServerId} />
+                  <SyncJobTable
+                    jobs={syncJobs}
+                    pbsId={activeServerId}
+                    canRun={canManageBackups}
+                  />
                 </TabsContent>
 
                 <TabsContent value="verification">
-                  <VerifyJobTable jobs={verifyJobs} pbsId={activeServerId} />
+                  <VerifyJobTable
+                    jobs={verifyJobs}
+                    pbsId={activeServerId}
+                    canRun={canManageBackups}
+                  />
                 </TabsContent>
 
                 <TabsContent value="tasks">

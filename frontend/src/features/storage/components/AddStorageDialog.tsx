@@ -305,6 +305,10 @@ export function AddStorageDialog({
     );
   }
 
+  // Adding a store takes manage:storage on the cluster, which the create
+  // handler checks; without it there is no Add storage at all.
+  if (!hasPermission("manage", "storage")) return null;
+
   return (
     <Dialog
       open={open}

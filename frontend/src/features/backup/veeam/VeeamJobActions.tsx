@@ -49,7 +49,7 @@ const STOPPING_STATUS = "Stopping";
  * Run and Enable are additive and go straight through.
  */
 export function VeeamJobActions({ serverId, job }: VeeamJobActionsProps) {
-  const { canExecute } = usePermissions();
+  const { canExecute, hasGlobalPermission } = usePermissions();
   const [confirming, setConfirming] = useState<"stop" | "disable" | null>(null);
   // The 204 outcome: Veeam accepted the start but the job had no objects to
   // process, so no run exists. Surfaced explicitly — an operator who clicked
@@ -61,11 +61,14 @@ export function VeeamJobActions({ serverId, job }: VeeamJobActionsProps) {
   const stopJob = useStopVeeamJob(serverId);
   const setEnabled = useSetVeeamJobEnabled(serverId);
 
-  // The permission is execute:veeam, resolved per cluster on the server. This
-  // hides the buttons for a caller who holds it nowhere; a caller who holds it
-  // on a different cluster still sees them and gets a 403, which is the same
-  // shape every other cluster-scoped action in Nexara has.
-  if (!canExecute("veeam")) return null;
+  // execute:veeam on the cluster the job's platform maps to, held anywhere as
+  // for every cluster-scoped action; a job with no cluster (never run, or its
+  // platform not mapped) takes it install-wide.
+  const allowed =
+    job.cluster_id === null
+      ? hasGlobalPermission("execute", "veeam")
+      : canExecute("veeam");
+  if (!allowed) return null;
 
   // A live run beats the stored status, which is only as fresh as the last
   // inventory pass. A job started from Nexara has a session immediately and a

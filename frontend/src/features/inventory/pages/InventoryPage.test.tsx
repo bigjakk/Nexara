@@ -1,6 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { InventoryPage } from "./InventoryPage";
 
 // Mock the inventory queries hook
@@ -22,6 +24,40 @@ vi.mock("@/features/dashboard/api/dashboard-queries", () => ({
 import { useInventoryData } from "../api/inventory-queries";
 
 const mockUseInventoryData = vi.mocked(useInventoryData);
+
+// A guest as the inventory reads it.
+const row = {
+  key: "c1:vm:1",
+  id: "vm-1",
+  type: "vm" as const,
+  name: "linux01",
+  status: "running" as const,
+  clusterName: "cluster01",
+  clusterId: "c1",
+  nodeName: "pve-01",
+  vmid: 100,
+  cpuCount: 4,
+  memTotal: 8589934592,
+  diskTotal: 107374182400,
+  uptime: 86400,
+  tags: "",
+  haState: "",
+  pool: "",
+  template: false,
+  ostype: "",
+  configOstype: "",
+  cpuPercent: 50,
+  memPercent: 60,
+  diskReadBps: null,
+  diskWriteBps: null,
+  netInBps: null,
+  netOutBps: null,
+};
+
+// A grant made in one test must not carry into the next.
+afterEach(() => {
+  grantPermissions();
+});
 
 describe("InventoryPage", () => {
   it("renders loading state", () => {
@@ -99,34 +135,32 @@ describe("InventoryPage", () => {
     expect(screen.getByText("1 resource total")).toBeInTheDocument();
   });
 
+  // Deploy is a clone, which takes manage on the template's kind; the
+  // Templates tab offered it to a Viewer.
+  it.each([
+    [["manage:vm"], true],
+    [["view:vm"], false],
+  ])(
+    "with %j offers Deploy on a template: %s",
+    async (permissions, offered) => {
+      grantPermissions(...permissions);
+      mockUseInventoryData.mockReturnValue({
+        rows: [{ ...row, template: true }],
+        isLoading: false,
+        error: null,
+        failedClusterIds: [],
+      });
+      renderWithProviders(<InventoryPage />);
+      await userEvent
+        .setup()
+        .click(screen.getByRole("tab", { name: /Templates/ }));
+      expect(screen.queryByRole("button", { name: /Deploy/ }) !== null).toBe(
+        offered,
+      );
+    },
+  );
+
   it("says what the estate holds under the title", () => {
-    const row = {
-      key: "c1:vm:1",
-      id: "vm-1",
-      type: "vm" as const,
-      name: "linux01",
-      status: "running" as const,
-      clusterName: "cluster01",
-      clusterId: "c1",
-      nodeName: "pve-01",
-      vmid: 100,
-      cpuCount: 4,
-      memTotal: 8589934592,
-      diskTotal: 107374182400,
-      uptime: 86400,
-      tags: "",
-      haState: "",
-      pool: "",
-      template: false,
-      ostype: "",
-      configOstype: "",
-      cpuPercent: 50,
-      memPercent: 60,
-      diskReadBps: null,
-      diskWriteBps: null,
-      netInBps: null,
-      netOutBps: null,
-    };
     mockUseInventoryData.mockReturnValue({
       rows: [
         row,

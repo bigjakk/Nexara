@@ -21,6 +21,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Trash2, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useSDNZones,
   useSDNVNets,
@@ -49,6 +50,15 @@ import type { SDNSubnet, SDNVNet } from "../types/network";
 
 interface SDNTableProps {
   clusterId: string;
+}
+
+/** What the role may do to SDN objects, as the routes check it. */
+interface SDNAccess {
+  /** Create, edit and apply: manage:network on the cluster. Without it each
+   *  object's dialog opens read-only, the one place its settings show. */
+  canEdit: boolean;
+  /** Delete: delete:network on the cluster. */
+  canRemove: boolean;
 }
 
 /** The trash button at the end of a row: quiet until it is pointed at. */
@@ -127,7 +137,9 @@ function DeleteConfirmButton({
 function VNetSubnetsRow({
   clusterId,
   vnet,
-}: {
+  canEdit,
+  canRemove,
+}: SDNAccess & {
   clusterId: string;
   vnet: SDNVNet;
 }) {
@@ -173,15 +185,21 @@ function VNetSubnetsRow({
           }}
         >
           <div className="flex justify-end gap-1">
-            <CreateSDNVNetDialog clusterId={clusterId} initialData={vnet} />
-            <DeleteConfirmButton
-              name={vnet.vnet}
-              kind="VNet"
-              onConfirm={() => {
-                deleteVNet.mutate(vnet.vnet);
-              }}
-              isPending={deleteVNet.isPending}
+            <CreateSDNVNetDialog
+              clusterId={clusterId}
+              initialData={vnet}
+              readOnly={!canEdit}
             />
+            {canRemove && (
+              <DeleteConfirmButton
+                name={vnet.vnet}
+                kind="VNet"
+                onConfirm={() => {
+                  deleteVNet.mutate(vnet.vnet);
+                }}
+                isPending={deleteVNet.isPending}
+              />
+            )}
           </div>
         </TableCell>
       </TableRow>
@@ -194,7 +212,12 @@ function VNetSubnetsRow({
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold">Subnets</span>
-                <CreateSDNSubnetDialog clusterId={clusterId} vnet={vnet.vnet} />
+                {canEdit && (
+                  <CreateSDNSubnetDialog
+                    clusterId={clusterId}
+                    vnet={vnet.vnet}
+                  />
+                )}
               </div>
               {isLoading ? (
                 <p className="text-sm text-muted-foreground">Loading...</p>
@@ -239,19 +262,22 @@ function VNetSubnetsRow({
                                 clusterId={clusterId}
                                 vnet={vnet.vnet}
                                 initialData={s}
+                                readOnly={!canEdit}
                               />
-                              <Button
-                                aria-label={`Delete Subnet ${s.subnet}`}
-                                variant="ghost"
-                                size="icon"
-                                className={ROW_DELETE_CLASS}
-                                onClick={() => {
-                                  setPendingSubnetDelete(s);
-                                }}
-                                disabled={deleteSubnet.isPending}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              {canRemove && (
+                                <Button
+                                  aria-label={`Delete Subnet ${s.subnet}`}
+                                  variant="ghost"
+                                  size="icon"
+                                  className={ROW_DELETE_CLASS}
+                                  onClick={() => {
+                                    setPendingSubnetDelete(s);
+                                  }}
+                                  disabled={deleteSubnet.isPending}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -308,7 +334,11 @@ function VNetSubnetsRow({
   );
 }
 
-function ControllersTab({ clusterId }: { clusterId: string }) {
+function ControllersTab({
+  clusterId,
+  canEdit,
+  canRemove,
+}: SDNAccess & { clusterId: string }) {
   const { data: controllers, isLoading } = useSDNControllers(clusterId);
   const deleteController = useDeleteSDNController(clusterId);
 
@@ -357,15 +387,18 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
                       <CreateSDNControllerDialog
                         clusterId={clusterId}
                         initialData={ctrl}
+                        readOnly={!canEdit}
                       />
-                      <DeleteConfirmButton
-                        name={ctrl.controller}
-                        kind="Controller"
-                        onConfirm={() => {
-                          deleteController.mutate(ctrl.controller);
-                        }}
-                        isPending={deleteController.isPending}
-                      />
+                      {canRemove && (
+                        <DeleteConfirmButton
+                          name={ctrl.controller}
+                          kind="Controller"
+                          onConfirm={() => {
+                            deleteController.mutate(ctrl.controller);
+                          }}
+                          isPending={deleteController.isPending}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -378,7 +411,11 @@ function ControllersTab({ clusterId }: { clusterId: string }) {
   );
 }
 
-function IPAMTab({ clusterId }: { clusterId: string }) {
+function IPAMTab({
+  clusterId,
+  canEdit,
+  canRemove,
+}: SDNAccess & { clusterId: string }) {
   const { data: ipams, isLoading } = useSDNIPAMs(clusterId);
   const deleteIPAM = useDeleteSDNIPAM(clusterId);
 
@@ -420,15 +457,18 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
                       <CreateSDNIPAMDialog
                         clusterId={clusterId}
                         initialData={ipam}
+                        readOnly={!canEdit}
                       />
-                      <DeleteConfirmButton
-                        name={ipam.ipam}
-                        kind="IPAM"
-                        onConfirm={() => {
-                          deleteIPAM.mutate(ipam.ipam);
-                        }}
-                        isPending={deleteIPAM.isPending}
-                      />
+                      {canRemove && (
+                        <DeleteConfirmButton
+                          name={ipam.ipam}
+                          kind="IPAM"
+                          onConfirm={() => {
+                            deleteIPAM.mutate(ipam.ipam);
+                          }}
+                          isPending={deleteIPAM.isPending}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -441,7 +481,11 @@ function IPAMTab({ clusterId }: { clusterId: string }) {
   );
 }
 
-function DNSTab({ clusterId }: { clusterId: string }) {
+function DNSTab({
+  clusterId,
+  canEdit,
+  canRemove,
+}: SDNAccess & { clusterId: string }) {
   const { data: dnsPlugins, isLoading } = useSDNDNSPlugins(clusterId);
   const deleteDNS = useDeleteSDNDNS(clusterId);
 
@@ -483,15 +527,18 @@ function DNSTab({ clusterId }: { clusterId: string }) {
                       <CreateSDNDNSDialog
                         clusterId={clusterId}
                         initialData={dns}
+                        readOnly={!canEdit}
                       />
-                      <DeleteConfirmButton
-                        name={dns.dns}
-                        kind="DNS"
-                        onConfirm={() => {
-                          deleteDNS.mutate(dns.dns);
-                        }}
-                        isPending={deleteDNS.isPending}
-                      />
+                      {canRemove && (
+                        <DeleteConfirmButton
+                          name={dns.dns}
+                          kind="DNS"
+                          onConfirm={() => {
+                            deleteDNS.mutate(dns.dns);
+                          }}
+                          isPending={deleteDNS.isPending}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -523,6 +570,12 @@ export function SDNTable({ clusterId }: SDNTableProps) {
   const deleteZone = useDeleteSDNZone(clusterId);
   const applySDN = useApplySDN(clusterId);
   const [applyOpen, setApplyOpen] = useState(false);
+  const { canManage, canDelete } = usePermissions();
+  const access: SDNAccess = {
+    canEdit: canManage("network"),
+    canRemove: canDelete("network"),
+  };
+  const { canEdit, canRemove } = access;
 
   // The panels are Radix tab panels, so only the kind on show is mounted and
   // reads its data; the switch in the panel picks it.
@@ -544,30 +597,34 @@ export function SDNTable({ clusterId }: SDNTableProps) {
           title="SDN"
           aside={`${countOf(zones?.length ?? 0, "zone", "zones")}, ${countOf(vnets?.length ?? 0, "VNet", "VNets")}. A change reaches the nodes when it is applied.`}
           actions={
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setApplyOpen(true);
-                }}
-                disabled={applySDN.isPending}
-              >
-                <RefreshCw className="h-4 w-4" />
-                Apply changes
-              </Button>
-              {view === "zones" && (
-                <CreateSDNZoneDialog clusterId={clusterId} />
-              )}
-              {view === "vnets" && (
-                <CreateSDNVNetDialog clusterId={clusterId} />
-              )}
-              {view === "controllers" && (
-                <CreateSDNControllerDialog clusterId={clusterId} />
-              )}
-              {view === "ipam" && <CreateSDNIPAMDialog clusterId={clusterId} />}
-              {view === "dns" && <CreateSDNDNSDialog clusterId={clusterId} />}
-            </>
+            canEdit ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setApplyOpen(true);
+                  }}
+                  disabled={applySDN.isPending}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Apply changes
+                </Button>
+                {view === "zones" && (
+                  <CreateSDNZoneDialog clusterId={clusterId} />
+                )}
+                {view === "vnets" && (
+                  <CreateSDNVNetDialog clusterId={clusterId} />
+                )}
+                {view === "controllers" && (
+                  <CreateSDNControllerDialog clusterId={clusterId} />
+                )}
+                {view === "ipam" && (
+                  <CreateSDNIPAMDialog clusterId={clusterId} />
+                )}
+                {view === "dns" && <CreateSDNDNSDialog clusterId={clusterId} />}
+              </>
+            ) : undefined
           }
         >
           <div className="px-[18px] pb-3">
@@ -627,15 +684,18 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                           <CreateSDNZoneDialog
                             clusterId={clusterId}
                             initialData={zone}
+                            readOnly={!canEdit}
                           />
-                          <DeleteConfirmButton
-                            name={zone.zone}
-                            kind="Zone"
-                            onConfirm={() => {
-                              deleteZone.mutate(zone.zone);
-                            }}
-                            isPending={deleteZone.isPending}
-                          />
+                          {canRemove && (
+                            <DeleteConfirmButton
+                              name={zone.zone}
+                              kind="Zone"
+                              onConfirm={() => {
+                                deleteZone.mutate(zone.zone);
+                              }}
+                              isPending={deleteZone.isPending}
+                            />
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -673,6 +733,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
                       key={vnet.vnet}
                       clusterId={clusterId}
                       vnet={vnet}
+                      {...access}
                     />
                   ))}
                 </TableBody>
@@ -686,7 +747,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
             aria-labelledby={undefined}
             className="mt-0"
           >
-            <ControllersTab clusterId={clusterId} />
+            <ControllersTab clusterId={clusterId} {...access} />
           </TabsContent>
 
           <TabsContent
@@ -695,7 +756,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
             aria-labelledby={undefined}
             className="mt-0"
           >
-            <IPAMTab clusterId={clusterId} />
+            <IPAMTab clusterId={clusterId} {...access} />
           </TabsContent>
 
           <TabsContent
@@ -704,7 +765,7 @@ export function SDNTable({ clusterId }: SDNTableProps) {
             aria-labelledby={undefined}
             className="mt-0"
           >
-            <DNSTab clusterId={clusterId} />
+            <DNSTab clusterId={clusterId} {...access} />
           </TabsContent>
         </Panel>
       </Tabs>

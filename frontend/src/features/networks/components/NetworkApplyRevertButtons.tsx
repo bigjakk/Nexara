@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useApplyNetworkConfig,
   useRevertNetworkConfig,
@@ -25,6 +26,10 @@ export function NetworkApplyRevertButtons({
   const apply = useApplyNetworkConfig(clusterId, nodeName);
   const revert = useRevertNetworkConfig(clusterId, nodeName);
   const [pending, setPending] = useState<"apply" | "revert" | null>(null);
+  // Both the apply and the revert route take manage:network on the cluster.
+  const canManage = usePermissions().canManage("network");
+
+  if (!canManage) return null;
 
   return (
     <>

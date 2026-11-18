@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { VeeamOrphanTable } from "./VeeamOrphanTable";
 import type { VeeamOrphanedObject } from "../types/backup";
 
@@ -26,6 +27,36 @@ function orphan(over: Partial<VeeamOrphanedObject> = {}): VeeamOrphanedObject {
 }
 
 describe("VeeamOrphanTable", () => {
+  beforeEach(() => {
+    grantPermissions("manage:veeam");
+  });
+
+  // Pinning an object to a guest takes manage:veeam on the cluster its
+  // platform maps to: without it neither the map row nor the advice to use it.
+  it.each([
+    ["view:veeam", false],
+    ["manage:veeam", true],
+  ])("offers the map to a guest by grant: %s", async (permission, offered) => {
+    grantPermissions(permission);
+    const user = userEvent.setup();
+    renderWithProviders(
+      <VeeamOrphanTable serverId="srv-1" objects={[orphan()]} />,
+    );
+
+    expect(screen.queryByText(/Map one to a guest/) !== null).toBe(offered);
+    await user.click(screen.getByText("linux03"));
+    // The row is open: the identity that matched no guest is shown either way.
+    expect(
+      screen.getByText("316e531d-55c0-4fef-adc2-f1bb9c4e1873"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/map to guest vmid/i) !== null).toBe(
+      offered,
+    );
+    expect(
+      screen.queryByRole("button", { name: /map to this guest/i }) !== null,
+    ).toBe(offered);
+  });
+
   it("says nothing is orphaned rather than rendering an empty table", () => {
     renderWithProviders(<VeeamOrphanTable serverId="srv-1" objects={[]} />);
     expect(screen.getByText(/matches a guest/i)).toBeInTheDocument();

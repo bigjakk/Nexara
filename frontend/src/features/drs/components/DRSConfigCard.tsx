@@ -23,6 +23,7 @@ import type { DRSMode, DRSConfigRequest } from "../types/drs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle } from "lucide-react";
 import { WarningCallout } from "@/components/WarningCallout";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 
 interface DRSConfigCardProps {
@@ -31,6 +32,12 @@ interface DRSConfigCardProps {
 
 export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
   const { t } = useTranslation("clusters");
+  // Saving takes manage:drs; without it the card shows the settings read-only.
+  // The native balancer is set in the cluster's options, which take
+  // manage:cluster.
+  const { hasPermission } = usePermissions();
+  const canEdit = hasPermission("manage", "drs");
+  const canManageCluster = hasPermission("manage", "cluster");
   const { data: config, isLoading } = useDRSConfig(clusterId);
   const updateConfig = useUpdateDRSConfig(clusterId);
   // The card shows a failed save itself (the hook opts out of the app's
@@ -123,7 +130,11 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
             <p>
               <Trans
                 t={t}
-                i18nKey="drsConfigCard.thisClusterSProxmoxCRS"
+                i18nKey={
+                  canManageCluster
+                    ? "drsConfigCard.thisClusterSProxmoxCRS"
+                    : "drsConfigCard.thisClusterSProxmoxCRSReadOnly"
+                }
                 components={{
                   strong: <strong />,
                   strong2: <strong />,
@@ -153,6 +164,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           onValueChange={(v) => {
             setMode(v as DRSMode);
           }}
+          disabled={!canEdit}
         >
           <SelectTrigger id="drs-mode">
             <SelectValue />
@@ -185,6 +197,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           min={0}
           max={1}
           step={0.05}
+          disabled={!canEdit}
         />
         <span className="w-10 text-right font-mono text-sm text-muted-foreground">
           {(cpuWeight * 100).toFixed(0)}%
@@ -204,6 +217,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           min={0}
           max={1}
           step={0.05}
+          disabled={!canEdit}
         />
         <span className="w-10 text-right font-mono text-sm text-muted-foreground">
           {(memWeight * 100).toFixed(0)}%
@@ -240,6 +254,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           min={0.05}
           max={1}
           step={0.05}
+          disabled={!canEdit}
         />
         <span className="w-10 text-right font-mono text-sm text-muted-foreground">
           {(threshold * 100).toFixed(0)}%
@@ -268,6 +283,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           onChange={(e) => {
             setEvalInterval(Number(e.target.value));
           }}
+          disabled={!canEdit}
         />
         <span className="whitespace-nowrap text-sm text-muted-foreground">
           {t("drsConfigCard.seconds")}
@@ -289,6 +305,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           onChange={(e) => {
             setBootHoldoff(Number(e.target.value));
           }}
+          disabled={!canEdit}
         />
         <span className="whitespace-nowrap text-sm text-muted-foreground">
           {t("drsBootHoldoffUnit")}
@@ -310,6 +327,7 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           id="include-containers"
           checked={includeContainers}
           onCheckedChange={setIncludeContainers}
+          disabled={!canEdit}
         />
       </SettingRow>
       <SettingRow
@@ -325,32 +343,35 @@ export function DRSConfigCard({ clusterId }: DRSConfigCardProps) {
           id="exclude-veeam-workers"
           checked={excludeVeeamWorkers}
           onCheckedChange={setExcludeVeeamWorkers}
+          disabled={!canEdit}
         />
       </SettingRow>
 
-      <SettingsFooter>
-        {saveStatus === "saved" && (
-          <span className="text-sm text-muted-foreground">
-            {t("drsConfigCard.savedSuccessfully")}
-          </span>
-        )}
-        {saveStatus === "error" && (
-          <span className="text-sm text-destructive">
-            {updateConfig.error instanceof Error
-              ? updateConfig.error.message
-              : t("drsConfigCard.failedToSave")}
-          </span>
-        )}
-        <Button
-          size="sm"
-          onClick={handleSave}
-          disabled={updateConfig.isPending || weightsOff}
-        >
-          {updateConfig.isPending
-            ? t("drsConfigCard.saving")
-            : t("drsConfigCard.saveConfiguration")}
-        </Button>
-      </SettingsFooter>
+      {canEdit && (
+        <SettingsFooter>
+          {saveStatus === "saved" && (
+            <span className="text-sm text-muted-foreground">
+              {t("drsConfigCard.savedSuccessfully")}
+            </span>
+          )}
+          {saveStatus === "error" && (
+            <span className="text-sm text-destructive">
+              {updateConfig.error instanceof Error
+                ? updateConfig.error.message
+                : t("drsConfigCard.failedToSave")}
+            </span>
+          )}
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={updateConfig.isPending || weightsOff}
+          >
+            {updateConfig.isPending
+              ? t("drsConfigCard.saving")
+              : t("drsConfigCard.saveConfiguration")}
+          </Button>
+        </SettingsFooter>
+      )}
     </SettingsSection>
   );
 }

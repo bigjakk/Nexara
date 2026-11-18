@@ -16,7 +16,7 @@ import {
   useTestNotificationChannel,
 } from "../api/alert-queries";
 import { ChannelForm } from "./ChannelForm";
-import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -54,8 +54,10 @@ const CHANNEL_TYPE_LABELS: Record<ChannelType, string> = {
 
 export function ChannelsTable() {
   const { t } = useTranslation("alerts");
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission("manage", "notification_channel");
+  // Adding, testing, editing and deleting a channel take
+  // manage:notification_channel install-wide (registry_alerts.go).
+  const { hasGlobalPermission } = usePermissions();
+  const canManage = hasGlobalPermission("manage", "notification_channel");
   const channelsQuery = useNotificationChannels();
   const { data: channels, isLoading } = channelsQuery;
   const deleteMutation = useDeleteNotificationChannel();

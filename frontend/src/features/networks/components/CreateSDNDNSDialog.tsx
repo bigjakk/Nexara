@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import { useCreateSDNDNS, useUpdateSDNDNS } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNDNS, CreateSDNDNSRequest } from "../types/network";
@@ -25,6 +25,9 @@ import { useTranslation } from "react-i18next";
 interface CreateSDNDNSDialogProps {
   clusterId: string;
   initialData?: SDNDNS;
+  /** With initialData: show the DNS plugin without letting it change, for a
+   *  role without manage:network. */
+  readOnly?: boolean;
 }
 
 const DNS_TYPES = ["powerdns"] as const;
@@ -32,6 +35,7 @@ const DNS_TYPES = ["powerdns"] as const;
 export function CreateSDNDNSDialog({
   clusterId,
   initialData,
+  readOnly = false,
 }: CreateSDNDNSDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -100,12 +104,16 @@ export function CreateSDNDNSDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit DNS ${initialData.dns}`}
+            aria-label={`${readOnly ? "View" : "Edit"} DNS ${initialData.dns}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button size="sm">
@@ -117,10 +125,14 @@ export function CreateSDNDNSDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit DNS" : "Create SDN DNS plugin"}
+            {readOnly
+              ? "View DNS"
+              : isEdit
+                ? "Edit DNS"
+                : "Create SDN DNS plugin"}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>DNS ID</Label>
@@ -170,25 +182,27 @@ export function CreateSDNDNSDialog({
               }}
             />
           </div>
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !dns || !type}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

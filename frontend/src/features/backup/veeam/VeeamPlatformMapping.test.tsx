@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 import { VeeamPlatformMapping } from "./VeeamPlatformMapping";
 import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
 
@@ -50,6 +51,30 @@ describe("VeeamPlatformMapping", () => {
     vi.clearAllMocks();
     mockedList.mockResolvedValue([{ id: C02, name: "cluster02" }]);
   });
+
+  // Mapping a platform is an install-wide manage:veeam check: anyone else is
+  // shown the mapping, read-only.
+  it.each<[string, string[], string[], boolean]>([
+    ["view:veeam", ["view:veeam"], ["view:veeam"], false],
+    ["manage:veeam on a cluster", ["manage:veeam"], [], false],
+    ["manage:veeam install-wide", ["manage:veeam"], ["manage:veeam"], true],
+  ])(
+    "offers the mapping as a choice by grant: %s",
+    (_, permissions, globalPermissions, offered) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      renderWithProviders(
+        <VeeamPlatformMapping
+          serverId="srv-1"
+          platforms={[platform()]}
+          infrastructure={[]}
+        />,
+      );
+      const select = screen.getByRole("combobox", {
+        name: "Nexara cluster for cluster01",
+      });
+      expect(select.hasAttribute("disabled")).toBe(!offered);
+    },
+  );
 
   it("warns that an unmapped connection is invisible, not merely untidy", () => {
     renderWithProviders(

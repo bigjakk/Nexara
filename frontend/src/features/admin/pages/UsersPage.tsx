@@ -33,6 +33,7 @@ import { RoleAssignDialog } from "../components/RoleAssignDialog";
 import { CreateUserDialog } from "../components/CreateUserDialog";
 import { AdminNav } from "../components/AdminNav";
 import { SYSTEM_USER_ID } from "@/lib/constants";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useAuthStore } from "@/stores/auth-store";
 
 const SOURCE_LABEL_KEYS: Record<string, "local" | "ldap" | "oidc"> = {
@@ -48,6 +49,9 @@ export function UsersPage() {
   // Your own row offers nothing the server refuses on your own account:
   // the active switch, the resets and the delete.
   const me = useAuthStore((s) => s.user?.id);
+  // Assigning and revoking a role take manage:role install-wide
+  // (registry_rbac.go), which this page's manage:user guard does not give.
+  const canManageRoles = usePermissions().hasGlobalPermission("manage", "role");
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const resetTotp = useAdminResetTOTP();
@@ -174,15 +178,17 @@ export function UsersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setRoleDialogUserId(user.id);
-                        }}
-                      >
-                        {t("manageRoles")}
-                      </Button>
+                      {canManageRoles && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setRoleDialogUserId(user.id);
+                          }}
+                        >
+                          {t("manageRoles")}
+                        </Button>
+                      )}
                       {user.id !== me && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

@@ -16,9 +16,11 @@ import { RunState } from "./StateText";
 interface VerifyJobTableProps {
   jobs: PBSVerifyJob[];
   pbsId: string;
+  /** Running a job takes manage:backup on the server's scope. */
+  canRun: boolean;
 }
 
-export function VerifyJobTable({ jobs, pbsId }: VerifyJobTableProps) {
+export function VerifyJobTable({ jobs, pbsId, canRun }: VerifyJobTableProps) {
   const runMutation = useRunVerifyJob();
 
   if (jobs.length === 0) {
@@ -57,18 +59,20 @@ export function VerifyJobTable({ jobs, pbsId }: VerifyJobTableProps) {
                 <RunState state={job.last_run_state} />
               </TableCell>
               <TableCell>
-                <Button
-                  aria-label={`Run verify job ${job.job_id}`}
-                  title="Run now"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    runMutation.mutate({ pbsId, jobId: job.job_id });
-                  }}
-                  disabled={runMutation.isPending}
-                >
-                  <Play className="h-4 w-4" />
-                </Button>
+                {canRun && (
+                  <Button
+                    aria-label={`Run verify job ${job.job_id}`}
+                    title="Run now"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      runMutation.mutate({ pbsId, jobId: job.job_id });
+                    }}
+                    disabled={runMutation.isPending}
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
+                )}
               </TableCell>
             </TableRow>
           ))}

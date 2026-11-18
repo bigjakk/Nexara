@@ -165,6 +165,7 @@ const SHOWN_IN_PLACE: [
         }
         open
         onOpenChange={vi.fn()}
+        readOnly={false}
       />
     ),
     async (u) => {

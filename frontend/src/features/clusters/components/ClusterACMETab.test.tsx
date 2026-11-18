@@ -65,8 +65,10 @@ vi.mock("@/lib/api-client", async () =>
   }),
 );
 
+// Whether the user may manage certificates, which every write here takes.
+let mockCanManage = true;
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ canManage: () => true }),
+  useAuth: () => ({ canManage: () => mockCanManage }),
 }));
 
 // The app's mutation-error net toasts through sonner, so this one mock sees every
@@ -181,9 +183,29 @@ async function pressSave(user: UserEvent) {
 beforeEach(() => {
   vi.resetAllMocks();
   putMock.mockResolvedValue({ status: "ok" });
+  mockCanManage = true;
 });
 
 describe("ClusterACMETab node certificates view", () => {
+  // Adding a domain takes manage:certificate: only then does an empty list
+  // suggest it.
+  it.each([
+    [false, "No ACME domains configured."],
+    [
+      true,
+      "No ACME domains configured. Add a domain before ordering certificates.",
+    ],
+  ])(
+    "with no domains and manage:certificate %s, says %j",
+    async (manages, text) => {
+      mockCanManage = manages;
+      serve([{ digest: "d1" }]);
+      renderTab();
+
+      expect(await screen.findByText(text)).toBeInTheDocument();
+    },
+  );
+
   // A role may view certificates without being able to list nodes: the view
   // then has no node to ask, and must not report that as "none found".
   it("says the node list could not be read instead of reporting no certificates", async () => {

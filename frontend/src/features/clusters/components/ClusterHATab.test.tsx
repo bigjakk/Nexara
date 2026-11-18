@@ -369,6 +369,26 @@ describe("ClusterHATab — HA resource settings", () => {
       screen.queryByRole("button", { name: "Edit group ha-group01" }),
     ).not.toBeInTheDocument();
   });
+
+  // Once PVE 9 migrated groups, the card points at Rules only for whoever may
+  // write one: rules take manage:ha.
+  it.each([false, true])(
+    "on PVE 9 with a group left, points at Rules with manage:ha %s",
+    async (manages) => {
+      mockCanManage = manages;
+      const user = await openResources(PVE9, RESOURCES, [
+        { group: "ha-group01", nodes: "pve-01", restricted: 0, nofailback: 0 },
+      ]);
+      await user.click(screen.getByRole("button", { name: "Groups / Rules" }));
+
+      expect(
+        await screen.findByText(/Any existing groups are shown read-only/),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Creating or editing groups is disabled/) !== null,
+      ).toBe(manages);
+    },
+  );
 });
 
 describe("ClusterHATab — a State that stops the guest", () => {

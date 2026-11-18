@@ -42,6 +42,8 @@ beforeEach(() => {
       role: "user",
     },
     permissions: ["manage:alert"],
+    // These rules name no cluster, which takes manage:alert install-wide.
+    globalPermissions: ["manage:alert"],
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -58,6 +60,7 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
 });

@@ -75,11 +75,6 @@ describe("NodeMemoryModules", () => {
   it.each<[string, NodeMemoryModulesResponse, string]>([
     ["never read, with the daily pass on", notRead, "once a day"],
     [
-      "never read, with the pass off",
-      { ...notRead, auto_read: false },
-      "Read now reads it",
-    ],
-    [
       "unavailable before any read",
       {
         ...notRead,
@@ -107,6 +102,22 @@ describe("NodeMemoryModules", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /read now/i })).toBeNull();
   });
+
+  // Read now takes manage:node: only a role offered it is told of it.
+  it.each([
+    [false, "Not read yet."],
+    [
+      true,
+      "Not read yet. Read now reads it with dmidecode over the cluster's SSH credentials.",
+    ],
+  ])(
+    "never read, with the pass off and canRead %s: %j",
+    async (canRead, text) => {
+      mockedGet.mockResolvedValue({ ...notRead, auto_read: false });
+      render(canRead);
+      expect(await screen.findByText(text)).toBeInTheDocument();
+    },
+  );
 
   it("lists every slot, an empty one included, and reads the node now on request", async () => {
     mockedGet.mockResolvedValue(goodRead);

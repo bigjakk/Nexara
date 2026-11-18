@@ -17,6 +17,7 @@ import { ClusterHistoryButton } from "@/features/history/components/ClusterHisto
 import { backupHistories } from "@/features/history/lib/backup-histories";
 import { useTestVeeamServer } from "../api/backup-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { describeError } from "@/lib/api-error";
 import type { VeeamProbeResult, VeeamServer } from "../types/backup";
 import { VeeamProbeSummary } from "./VeeamProbeSummary";
@@ -52,6 +53,9 @@ interface ServerCtx {
   onTestError: (id: string, message: string) => void;
   onEdit: (server: VeeamServer) => void;
   onDelete: (server: VeeamServer) => void;
+  /** Test and Edit take manage:veeam install-wide, Delete delete:veeam. */
+  canManage: boolean;
+  canDelete: boolean;
 }
 
 /**
@@ -194,32 +198,38 @@ const COLUMNS: ColumnDef<VeeamServer, ServerSortKey, ServerCtx>[] = [
           history={backupHistories.veeamServer(server.id)}
           title={server.name}
         />
-        <VeeamServerTestButton
-          server={server}
-          onStart={ctx.onTestStart}
-          onResult={ctx.onTestResult}
-          onError={ctx.onTestError}
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          title="Edit"
-          onClick={() => {
-            ctx.onEdit(server);
-          }}
-        >
-          <Pencil className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          title="Delete"
-          onClick={() => {
-            ctx.onDelete(server);
-          }}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {ctx.canManage && (
+          <>
+            <VeeamServerTestButton
+              server={server}
+              onStart={ctx.onTestStart}
+              onResult={ctx.onTestResult}
+              onError={ctx.onTestError}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Edit"
+              onClick={() => {
+                ctx.onEdit(server);
+              }}
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+        {ctx.canDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Delete"
+            onClick={() => {
+              ctx.onDelete(server);
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     ),
   },
@@ -242,6 +252,7 @@ export function VeeamServerTable({
   // another's, and a shared mutation result would do exactly that.
   const [probes, setProbes] = useState<Record<string, VeeamProbeResult>>({});
   const [probeErrors, setProbeErrors] = useState<Record<string, string>>({});
+  const { hasGlobalPermission } = usePermissions();
 
   const cellCtx: ServerCtx = {
     expanded,
@@ -250,6 +261,8 @@ export function VeeamServerTable({
     onTestError: handleTestError,
     onEdit,
     onDelete,
+    canManage: hasGlobalPermission("manage", "veeam"),
+    canDelete: hasGlobalPermission("delete", "veeam"),
   };
 
   /**

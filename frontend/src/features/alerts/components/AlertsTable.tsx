@@ -27,6 +27,7 @@ import {
   useResolveAlert,
 } from "../api/alert-queries";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { AlertInstance } from "@/types/api";
 import { DateTime } from "@/components/DateTime";
 import { useTranslation } from "react-i18next";
@@ -190,6 +191,14 @@ export function AlertRow({
   formatDate: (s?: string) => ReactNode;
 }) {
   const { t } = useTranslation("alerts");
+  // An alert on a cluster takes acknowledge:alert there; one that names no
+  // cluster takes it install-wide (AcknowledgeAlert and ResolveAlert in
+  // handlers/alerts.go).
+  const actsInstallWide = usePermissions().hasGlobalPermission(
+    "acknowledge",
+    "alert",
+  );
+  const mayAct = Boolean(alert.cluster_id) || actsInstallWide;
   return (
     <>
       <TableRow className="cursor-pointer" onClick={onToggle}>
@@ -222,18 +231,21 @@ export function AlertRow({
           >
             {/* Acknowledge is the common answer to a firing alert; Resolve
                 closes it by hand, so it is the quieter of the two. */}
-            <div className="flex gap-1">
-              {alert.state === "firing" && (
-                <Button variant="outline" size="sm" onClick={onAcknowledge}>
-                  {t("alertsTable.acknowledge")}
-                </Button>
-              )}
-              {(alert.state === "firing" || alert.state === "acknowledged") && (
-                <Button variant="ghost" size="sm" onClick={onResolve}>
-                  {t("alertsTable.resolve")}
-                </Button>
-              )}
-            </div>
+            {mayAct && (
+              <div className="flex gap-1">
+                {alert.state === "firing" && (
+                  <Button variant="outline" size="sm" onClick={onAcknowledge}>
+                    {t("alertsTable.acknowledge")}
+                  </Button>
+                )}
+                {(alert.state === "firing" ||
+                  alert.state === "acknowledged") && (
+                  <Button variant="ghost" size="sm" onClick={onResolve}>
+                    {t("alertsTable.resolve")}
+                  </Button>
+                )}
+              </div>
+            )}
           </TableCell>
         )}
       </TableRow>

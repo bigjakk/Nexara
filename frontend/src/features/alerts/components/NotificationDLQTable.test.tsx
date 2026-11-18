@@ -33,6 +33,7 @@ beforeEach(() => {
       role: "user",
     },
     permissions: ["manage:notification_dlq"],
+    globalPermissions: ["manage:notification_dlq"],
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -56,8 +57,35 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
+});
+
+describe("NotificationDLQTable — permission", () => {
+  // Retry, dismiss and delete take manage:notification_dlq install-wide
+  // (registry_notification_dlq.go): a grant on a cluster offers none.
+  it.each<[string, string[], boolean]>([
+    ["on a cluster only", [], false],
+    ["install-wide", ["manage:notification_dlq"], true],
+  ])(
+    "with manage:notification_dlq %s (install-wide: %j) offers the entry's actions: %s",
+    async (_held, globalPermissions, offered) => {
+      useAuthStore.setState({ globalPermissions });
+      renderWithProviders(<NotificationDLQTable />);
+      const row = (await screen.findByText("oncall-webhook")).closest("tr");
+      if (!row) throw new Error("entry row not rendered");
+      for (const name of [
+        /^Retry$/,
+        /^Dismiss$/,
+        /^Delete failed notification/,
+      ]) {
+        expect(within(row).queryByRole("button", { name }) !== null).toBe(
+          offered,
+        );
+      }
+    },
+  );
 });
 
 async function clickDelete(user: ReturnType<typeof userEvent.setup>) {

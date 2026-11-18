@@ -141,13 +141,16 @@ export function NodeMemoryModulesNote({
     <div className="space-y-1.5 text-[12.5px]">
       <div>
         <p className="font-medium">Memory modules</p>
+        {/* Read now takes manage:node: only a role offered it is told of it. */}
         <Note>
           {data === undefined
             ? "Could not load the memory layout for this node."
             : data.status === "never"
               ? data.auto_read
                 ? "Not read yet. Nexara reads each node's memory layout once a day with dmidecode over the cluster's SSH credentials."
-                : "Not read yet. Read now reads it with dmidecode over the cluster's SSH credentials."
+                : canRead
+                  ? "Not read yet. Read now reads it with dmidecode over the cluster's SSH credentials."
+                  : "Not read yet."
               : (data.reason ?? "The memory layout could not be read.")}
         </Note>
       </div>

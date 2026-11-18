@@ -100,6 +100,7 @@ function StoragePanel({
   title,
   count,
   createLabel,
+  canCreate,
   showCreate,
   onToggleCreate,
   form,
@@ -109,6 +110,8 @@ function StoragePanel({
   /** How many there are, in words, once known and above zero. */
   count: string | undefined;
   createLabel: string;
+  /** Whether the Create button is offered: creating takes manage:node. */
+  canCreate: boolean;
   showCreate: boolean;
   onToggleCreate: () => void;
   form: ReactNode;
@@ -120,16 +123,18 @@ function StoragePanel({
       title={title}
       aside={count}
       actions={
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5"
-          aria-expanded={showCreate}
-          onClick={onToggleCreate}
-        >
-          <Plus className="h-4 w-4" />
-          {createLabel}
-        </Button>
+        canCreate ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            aria-expanded={showCreate}
+            onClick={onToggleCreate}
+          >
+            <Plus className="h-4 w-4" />
+            {createLabel}
+          </Button>
+        ) : undefined
       }
     >
       {showCreate && (
@@ -233,9 +238,12 @@ function DestroyTrigger({ label }: { label: string }) {
 export function ZFSPoolsSection({
   clusterId,
   nodeName,
+  canEdit,
 }: {
   clusterId: string;
   nodeName: string;
+  /** Whether Create and Destroy are offered: both take manage:node. */
+  canEdit: boolean;
 }) {
   const { t } = useTranslation("clusters");
   const poolsQuery = useNodeZFSPools(clusterId, nodeName);
@@ -291,6 +299,7 @@ export function ZFSPoolsSection({
       title="ZFS pools"
       count={countOf(pools, "pool", "pools")}
       createLabel="Create ZFS"
+      canCreate={canEdit}
       showCreate={showCreate}
       onToggleCreate={() => {
         setShowCreate(!showCreate);
@@ -408,7 +417,7 @@ export function ZFSPoolsSection({
               <TableHead>Free</TableHead>
               <TableHead>Fragmentation</TableHead>
               <TableHead>Health</TableHead>
-              <TableHead className="w-12" />
+              {canEdit && <TableHead className="w-12" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -432,65 +441,67 @@ export function ZFSPoolsSection({
                     {p.health === "ONLINE" ? "Online" : p.health}
                   </StateText>
                 </TableCell>
-                <TableCell className="text-right">
-                  <AlertDialog
-                    onOpenChange={(open) => {
-                      setDestroying(open ? p.name : null);
-                    }}
-                  >
-                    <DestroyTrigger label={`Destroy pool ${p.name}`} />
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Destroy ZFS pool</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to destroy{" "}
-                          <span className="font-mono font-semibold">
-                            {p.name}
-                          </span>
-                          ? This will permanently delete the pool and all data
-                          on it. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <CleanupOptions
-                        disks={cleanupDisks}
-                        onDisksChange={setCleanupDisks}
-                        config={cleanupConfig}
-                        onConfigChange={setCleanupConfig}
-                      />
-                      {deleteError && (
-                        <p className="text-sm text-destructive">
-                          {deleteError}
-                        </p>
-                      )}
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          disabled={deleteZFS.isPending}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            settle(
-                              deleteZFS.mutateAsync({
-                                poolName: p.name,
-                                cleanupDisks,
-                                cleanupConfig,
-                              }),
-                              {
-                                action: t(
-                                  "nodeStorageSectionsActions.destroyingZFSPoolName",
-                                  { name: p.name },
-                                ),
-                                onError: () => undefined, // shown above from the mutation's state
-                              },
-                            );
-                          }}
-                        >
-                          {deleteZFS.isPending ? "Destroying…" : "Destroy"}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </TableCell>
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <AlertDialog
+                      onOpenChange={(open) => {
+                        setDestroying(open ? p.name : null);
+                      }}
+                    >
+                      <DestroyTrigger label={`Destroy pool ${p.name}`} />
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Destroy ZFS pool</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy{" "}
+                            <span className="font-mono font-semibold">
+                              {p.name}
+                            </span>
+                            ? This will permanently delete the pool and all data
+                            on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <CleanupOptions
+                          disks={cleanupDisks}
+                          onDisksChange={setCleanupDisks}
+                          config={cleanupConfig}
+                          onConfigChange={setCleanupConfig}
+                        />
+                        {deleteError && (
+                          <p className="text-sm text-destructive">
+                            {deleteError}
+                          </p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteZFS.isPending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              settle(
+                                deleteZFS.mutateAsync({
+                                  poolName: p.name,
+                                  cleanupDisks,
+                                  cleanupConfig,
+                                }),
+                                {
+                                  action: t(
+                                    "nodeStorageSectionsActions.destroyingZFSPoolName",
+                                    { name: p.name },
+                                  ),
+                                  onError: () => undefined, // shown above from the mutation's state
+                                },
+                              );
+                            }}
+                          >
+                            {deleteZFS.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -591,9 +602,12 @@ function AddStorageCheckbox({
 export function LVMSection({
   clusterId,
   nodeName,
+  canEdit,
 }: {
   clusterId: string;
   nodeName: string;
+  /** Whether Create and Destroy are offered: both take manage:node. */
+  canEdit: boolean;
 }) {
   const { t } = useTranslation("clusters");
   const vgsQuery = useNodeLVM(clusterId, nodeName);
@@ -634,6 +648,7 @@ export function LVMSection({
       title="LVM volume groups"
       count={countOf(vgs, "volume group", "volume groups")}
       createLabel="Create LVM"
+      canCreate={canEdit}
       showCreate={showCreate}
       onToggleCreate={() => {
         setShowCreate(!showCreate);
@@ -682,7 +697,7 @@ export function LVMSection({
               <TableHead>Free</TableHead>
               <TableHead>Physical volumes</TableHead>
               <TableHead>Logical volumes</TableHead>
-              <TableHead className="w-12" />
+              {canEdit && <TableHead className="w-12" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -699,67 +714,71 @@ export function LVMSection({
                 </TableCell>
                 <TableCell className="tabular-nums">{vg.pv_count}</TableCell>
                 <TableCell className="tabular-nums">{vg.lv_count}</TableCell>
-                <TableCell className="text-right">
-                  <AlertDialog
-                    onOpenChange={(open) => {
-                      setDestroying(open ? vg.name : null);
-                    }}
-                  >
-                    <DestroyTrigger label={`Destroy volume group ${vg.name}`} />
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          Destroy LVM volume group
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to destroy{" "}
-                          <span className="font-mono font-semibold">
-                            {vg.name}
-                          </span>
-                          ? This will permanently delete the volume group and
-                          all data on it. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <CleanupOptions
-                        disks={lvmCleanupDisks}
-                        onDisksChange={setLvmCleanupDisks}
-                        config={lvmCleanupConfig}
-                        onConfigChange={setLvmCleanupConfig}
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <AlertDialog
+                      onOpenChange={(open) => {
+                        setDestroying(open ? vg.name : null);
+                      }}
+                    >
+                      <DestroyTrigger
+                        label={`Destroy volume group ${vg.name}`}
                       />
-                      {deleteError && (
-                        <p className="text-sm text-destructive">
-                          {deleteError}
-                        </p>
-                      )}
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          disabled={deleteLVM.isPending}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            settle(
-                              deleteLVM.mutateAsync({
-                                name: vg.name,
-                                cleanupDisks: lvmCleanupDisks,
-                                cleanupConfig: lvmCleanupConfig,
-                              }),
-                              {
-                                action: t(
-                                  "nodeStorageSectionsActions.destroyingVolumeGroupName",
-                                  { name: vg.name },
-                                ),
-                                onError: () => undefined, // shown above from the mutation's state
-                              },
-                            );
-                          }}
-                        >
-                          {deleteLVM.isPending ? "Destroying…" : "Destroy"}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </TableCell>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            Destroy LVM volume group
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy{" "}
+                            <span className="font-mono font-semibold">
+                              {vg.name}
+                            </span>
+                            ? This will permanently delete the volume group and
+                            all data on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <CleanupOptions
+                          disks={lvmCleanupDisks}
+                          onDisksChange={setLvmCleanupDisks}
+                          config={lvmCleanupConfig}
+                          onConfigChange={setLvmCleanupConfig}
+                        />
+                        {deleteError && (
+                          <p className="text-sm text-destructive">
+                            {deleteError}
+                          </p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteLVM.isPending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              settle(
+                                deleteLVM.mutateAsync({
+                                  name: vg.name,
+                                  cleanupDisks: lvmCleanupDisks,
+                                  cleanupConfig: lvmCleanupConfig,
+                                }),
+                                {
+                                  action: t(
+                                    "nodeStorageSectionsActions.destroyingVolumeGroupName",
+                                    { name: vg.name },
+                                  ),
+                                  onError: () => undefined, // shown above from the mutation's state
+                                },
+                              );
+                            }}
+                          >
+                            {deleteLVM.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -772,9 +791,12 @@ export function LVMSection({
 export function LVMThinSection({
   clusterId,
   nodeName,
+  canEdit,
 }: {
   clusterId: string;
   nodeName: string;
+  /** Whether Create and Destroy are offered: both take manage:node. */
+  canEdit: boolean;
 }) {
   const { t } = useTranslation("clusters");
   const poolsQuery = useNodeLVMThin(clusterId, nodeName);
@@ -815,6 +837,7 @@ export function LVMThinSection({
       title="LVM-thin pools"
       count={countOf(pools, "pool", "pools")}
       createLabel="Create LVM-thin"
+      canCreate={canEdit}
       showCreate={showCreate}
       onToggleCreate={() => {
         setShowCreate(!showCreate);
@@ -863,7 +886,7 @@ export function LVMThinSection({
               <TableHead>Size</TableHead>
               <TableHead>Used</TableHead>
               <TableHead>Data</TableHead>
-              <TableHead className="w-12" />
+              {canEdit && <TableHead className="w-12" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -880,70 +903,72 @@ export function LVMThinSection({
                 <TableCell className="tabular-nums">
                   {p.data_percent.toFixed(1)}%
                 </TableCell>
-                <TableCell className="text-right">
-                  <AlertDialog
-                    onOpenChange={(open) => {
-                      setDestroying(open ? `${p.vg}/${p.lv}` : null);
-                    }}
-                  >
-                    <DestroyTrigger
-                      label={`Destroy thin pool ${p.vg}/${p.lv}`}
-                    />
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          Destroy LVM-thin pool
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Are you sure you want to destroy{" "}
-                          <span className="font-mono font-semibold">
-                            {p.vg}/{p.lv}
-                          </span>
-                          ? This will permanently delete the thin pool and all
-                          data on it. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <CleanupOptions
-                        disks={thinCleanupDisks}
-                        onDisksChange={setThinCleanupDisks}
-                        config={thinCleanupConfig}
-                        onConfigChange={setThinCleanupConfig}
+                {canEdit && (
+                  <TableCell className="text-right">
+                    <AlertDialog
+                      onOpenChange={(open) => {
+                        setDestroying(open ? `${p.vg}/${p.lv}` : null);
+                      }}
+                    >
+                      <DestroyTrigger
+                        label={`Destroy thin pool ${p.vg}/${p.lv}`}
                       />
-                      {thinDeleteError && (
-                        <p className="text-sm text-destructive">
-                          {thinDeleteError}
-                        </p>
-                      )}
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          disabled={deleteThin.isPending}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            settle(
-                              deleteThin.mutateAsync({
-                                lv: p.lv,
-                                vg: p.vg,
-                                cleanupDisks: thinCleanupDisks,
-                                cleanupConfig: thinCleanupConfig,
-                              }),
-                              {
-                                action: t(
-                                  "nodeStorageSectionsActions.destroyingThinPoolVgLv",
-                                  { vg: p.vg, lv: p.lv },
-                                ),
-                                onError: () => undefined, // shown above from the mutation's state
-                              },
-                            );
-                          }}
-                        >
-                          {deleteThin.isPending ? "Destroying…" : "Destroy"}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </TableCell>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            Destroy LVM-thin pool
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to destroy{" "}
+                            <span className="font-mono font-semibold">
+                              {p.vg}/{p.lv}
+                            </span>
+                            ? This will permanently delete the thin pool and all
+                            data on it. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <CleanupOptions
+                          disks={thinCleanupDisks}
+                          onDisksChange={setThinCleanupDisks}
+                          config={thinCleanupConfig}
+                          onConfigChange={setThinCleanupConfig}
+                        />
+                        {thinDeleteError && (
+                          <p className="text-sm text-destructive">
+                            {thinDeleteError}
+                          </p>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            disabled={deleteThin.isPending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              settle(
+                                deleteThin.mutateAsync({
+                                  lv: p.lv,
+                                  vg: p.vg,
+                                  cleanupDisks: thinCleanupDisks,
+                                  cleanupConfig: thinCleanupConfig,
+                                }),
+                                {
+                                  action: t(
+                                    "nodeStorageSectionsActions.destroyingThinPoolVgLv",
+                                    { vg: p.vg, lv: p.lv },
+                                  ),
+                                  onError: () => undefined, // shown above from the mutation's state
+                                },
+                              );
+                            }}
+                          >
+                            {deleteThin.isPending ? "Destroying…" : "Destroy"}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>
@@ -956,9 +981,12 @@ export function LVMThinSection({
 export function DirectorySection({
   clusterId,
   nodeName,
+  canEdit,
 }: {
   clusterId: string;
   nodeName: string;
+  /** Whether Create is offered: it takes manage:node. */
+  canEdit: boolean;
 }) {
   const dirsQuery = useNodeDirectories(clusterId, nodeName);
   const dirs = dirsQuery.data;
@@ -995,6 +1023,7 @@ export function DirectorySection({
       title="Directory storage"
       count={countOf(dirs, "entry", "entries")}
       createLabel="Create directory"
+      canCreate={canEdit}
       showCreate={showCreate}
       onToggleCreate={() => {
         setShowCreate(!showCreate);

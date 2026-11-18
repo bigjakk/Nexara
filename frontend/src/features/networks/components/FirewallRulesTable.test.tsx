@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
 import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { FirewallRulesTable } from "./FirewallRulesTable";
 import type { FirewallRule } from "../types/network";
@@ -63,10 +64,37 @@ const RULES: FirewallRule[] = [
 let api: ReturnType<typeof stubApi>;
 let qc: QueryClient;
 
+beforeEach(() => {
+  grantPermissions("manage:network", "delete:network");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
+
+// Adding a rule takes manage:network and deleting one delete:network; a
+// Viewer was offered both, and the server refused them.
+it.each([
+  { permissions: [], add: false, remove: false },
+  { permissions: ["manage:network"], add: true, remove: false },
+  { permissions: ["delete:network"], add: false, remove: true },
+])(
+  "with $permissions offers Add rule: $add, a rule's delete: $remove",
+  async ({ permissions, add, remove }) => {
+    grantPermissions(...permissions);
+    stubApi({ [RULES_PATH]: listOf(RULES) });
+    renderWithProviders(<FirewallRulesTable clusterId={CLUSTER} />, {
+      router: false,
+    });
+    await screen.findByText("admin ssh");
+
+    expect({
+      add: screen.queryByRole("button", { name: "Add rule" }) !== null,
+      remove: screen.queryByRole("button", { name: "Delete rule 0" }) !== null,
+    }).toEqual({ add, remove });
+  },
+);
 
 async function openDeleteFor(pos: number, rules: FirewallRule[] = RULES) {
   api = stubApi({ [RULES_PATH]: listOf(rules) });

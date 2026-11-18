@@ -113,7 +113,7 @@ export function PowerPage() {
         <EmptyState
           icon={BatteryCharging}
           title={t("powerPage.noNUTServersYet")}
-          description={t("powerPage.addTheUpsdThatReports")}
+          description={canManage ? t("powerPage.addTheUpsdThatReports") : t("powerPage.upsDevicesAppearOnceAServer")}
         />
       ) : (
         <>

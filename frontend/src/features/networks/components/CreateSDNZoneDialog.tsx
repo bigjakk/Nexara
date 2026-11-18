@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import { useCreateSDNZone, useUpdateSDNZone } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNZone, CreateSDNZoneRequest } from "../types/network";
@@ -26,6 +26,9 @@ import { useTranslation } from "react-i18next";
 interface CreateSDNZoneDialogProps {
   clusterId: string;
   initialData?: SDNZone;
+  /** With initialData: show the zone without letting it change, for a role
+   *  without manage:network. */
+  readOnly?: boolean;
 }
 
 const ZONE_TYPES = ["simple", "vlan", "qinq", "vxlan", "evpn"] as const;
@@ -33,6 +36,7 @@ const ZONE_TYPES = ["simple", "vlan", "qinq", "vxlan", "evpn"] as const;
 export function CreateSDNZoneDialog({
   clusterId,
   initialData,
+  readOnly = false,
 }: CreateSDNZoneDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -165,12 +169,16 @@ export function CreateSDNZoneDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit Zone ${initialData.zone}`}
+            aria-label={`${readOnly ? "View" : "Edit"} Zone ${initialData.zone}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button size="sm">
@@ -181,9 +189,11 @@ export function CreateSDNZoneDialog({
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit zone" : "Create SDN zone"}</DialogTitle>
+          <DialogTitle>
+            {readOnly ? "View zone" : isEdit ? "Edit zone" : "Create SDN zone"}
+          </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           {/* Zone ID & Type */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -407,26 +417,27 @@ export function CreateSDNZoneDialog({
               />
             </div>
           </div>
-
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !zone || !type}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

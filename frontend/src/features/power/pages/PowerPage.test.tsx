@@ -3,6 +3,7 @@ import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
+import { grantPermissions } from "@/test/permissions";
 import { nutServer, upsDevice as device, upsFeed } from "../power.fixtures";
 import { PowerPage } from "./PowerPage";
 
@@ -48,5 +49,18 @@ describe("PowerPage", () => {
     expect(within(first as HTMLElement).getByText("Not protected")).toBeInTheDocument();
     expect(within(second as HTMLElement).getByText("Unreachable")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add nut server/i })).not.toBeInTheDocument();
+  });
+
+  // Adding a NUT server takes manage:ups install-wide; a viewer is not told to add one.
+  it.each([
+    { perms: ["view:ups"], can: false },
+    { perms: ["view:ups", "manage:ups"], can: true },
+  ])("asks for a NUT server only of a role that may add one: $perms", async ({ perms, can }) => {
+    grantPermissions(...perms);
+    vi.mocked(apiClient.list).mockResolvedValue([]);
+    renderWithProviders(<PowerPage />);
+
+    expect(await screen.findByText("No NUT servers yet")).toBeInTheDocument();
+    expect(screen.queryByText(/^Add the upsd that reports your UPS/) !== null).toBe(can);
   });
 });

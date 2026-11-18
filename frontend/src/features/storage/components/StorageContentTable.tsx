@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useQueryClient } from "@tanstack/react-query";
 import type { StorageContentItem } from "../types/storage";
 import { useDeleteContent } from "../api/storage-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import { sessionScope } from "@/lib/api-client";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { contentKindName } from "../lib/store-rows";
@@ -42,6 +43,9 @@ export function StorageContentTable({
 }: StorageContentTableProps) {
   const deleteMutation = useDeleteContent();
   const queryClient = useQueryClient();
+  // Deleting a volume takes delete:storage, and the selection is only for
+  // that: without it the table has no checkboxes and no Delete.
+  const canDelete = usePermissions().hasPermission("delete", "storage");
   const [deletingVolid, setDeletingVolid] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -190,13 +194,15 @@ export function StorageContentTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-10">
-              <Checkbox
-                checked={
-                  allSelected ? true : someSelected ? "indeterminate" : false
-                }
-                onCheckedChange={toggleAll}
-                aria-label="Select all items"
-              />
+              {canDelete && (
+                <Checkbox
+                  checked={
+                    allSelected ? true : someSelected ? "indeterminate" : false
+                  }
+                  onCheckedChange={toggleAll}
+                  aria-label="Select all items"
+                />
+              )}
             </TableHead>
             <TableHead>Volume</TableHead>
             <TableHead className="hidden md:table-cell">Kind</TableHead>
@@ -214,13 +220,15 @@ export function StorageContentTable({
               data-state={selected.has(item.volid) ? "selected" : undefined}
             >
               <TableCell>
-                <Checkbox
-                  checked={selected.has(item.volid)}
-                  onCheckedChange={() => {
-                    toggleRow(item.volid);
-                  }}
-                  aria-label={`Select ${item.volid}`}
-                />
+                {canDelete && (
+                  <Checkbox
+                    checked={selected.has(item.volid)}
+                    onCheckedChange={() => {
+                      toggleRow(item.volid);
+                    }}
+                    aria-label={`Select ${item.volid}`}
+                  />
+                )}
               </TableCell>
               <TableCell className="max-w-[28rem]">
                 <div
@@ -255,20 +263,22 @@ export function StorageContentTable({
                 {item.vmid ? item.vmid : "—"}
               </TableCell>
               <TableCell>
-                <div className="flex items-center justify-end">
-                  <Button
-                    aria-label={`Delete ${item.volid}`}
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => {
-                      handleDelete(item.volid);
-                    }}
-                    disabled={deletingVolid === item.volid || bulkDeleting}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {canDelete && (
+                  <div className="flex items-center justify-end">
+                    <Button
+                      aria-label={`Delete ${item.volid}`}
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        handleDelete(item.volid);
+                      }}
+                      disabled={deletingVolid === item.volid || bulkDeleting}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           ))}

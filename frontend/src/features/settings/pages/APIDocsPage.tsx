@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel, PropertyList, PropertyRow } from "@/components/page/Panel";
 import { useExpandedRows } from "@/hooks/useExpandedRows";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { APIEndpoint } from "@/types/api";
 import { useAPIDocs } from "../api/api-docs-queries";
 import { APIEndpointRow } from "../components/APIEndpointRow";
@@ -24,6 +25,11 @@ export function APIDocsPage() {
     new Set(),
   );
   const { expanded, toggle } = useExpandedRows();
+  // Creating a key takes manage:api_key install-wide (registry_api_keys.go).
+  const canCreateKey = usePermissions().hasGlobalPermission(
+    "manage",
+    "api_key",
+  );
 
   const filtered = useMemo(() => {
     if (!endpoints) return [];
@@ -97,14 +103,16 @@ export function APIDocsPage() {
           </>
         }
         actions={
-          <Button
-            variant="outline"
-            onClick={() => {
-              void navigate("/settings/api-keys");
-            }}
-          >
-            Create an API key
-          </Button>
+          canCreateKey ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                void navigate("/settings/api-keys");
+              }}
+            >
+              Create an API key
+            </Button>
+          ) : undefined
         }
       />
 

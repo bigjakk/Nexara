@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { usePermissions } from "@/hooks/usePermissions";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -69,6 +70,10 @@ export function DisksTab({
   const [smartDisk, setSmartDisk] = useState<string | null>(null);
   const initGPT = useInitializeGPT(clusterId, nodeName);
   const wipeDisk = useWipeDisk(clusterId, nodeName);
+  // Every write on this tab takes manage:node: a disk's GPT and wipe, and the
+  // create and destroy of a pool, a volume group and a directory.
+  const canEdit = usePermissions().canManage("node");
+  const rowActions = isOnline && canEdit;
   // Both row actions only set this; the disk is touched from its confirmation.
   const [pending, setPending] = useState<{
     disk: string;
@@ -107,7 +112,7 @@ export function DisksTab({
                 <TableHead>Type</TableHead>
                 <TableHead>Health</TableHead>
                 <TableHead>Wearout</TableHead>
-                {isOnline && <TableHead className="w-12" />}
+                {rowActions && <TableHead className="w-12" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -152,7 +157,7 @@ export function DisksTab({
                   <TableCell className="tabular-nums">
                     {d.wearout && d.wearout !== "N/A" ? d.wearout : <NoValue />}
                   </TableCell>
-                  {isOnline && (
+                  {rowActions && (
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -206,10 +211,26 @@ export function DisksTab({
       {/* ZFS / LVM / LVM-Thin / Directory sections (only when online) */}
       {isOnline && (
         <>
-          <ZFSPoolsSection clusterId={clusterId} nodeName={nodeName} />
-          <LVMSection clusterId={clusterId} nodeName={nodeName} />
-          <LVMThinSection clusterId={clusterId} nodeName={nodeName} />
-          <DirectorySection clusterId={clusterId} nodeName={nodeName} />
+          <ZFSPoolsSection
+            clusterId={clusterId}
+            nodeName={nodeName}
+            canEdit={canEdit}
+          />
+          <LVMSection
+            clusterId={clusterId}
+            nodeName={nodeName}
+            canEdit={canEdit}
+          />
+          <LVMThinSection
+            clusterId={clusterId}
+            nodeName={nodeName}
+            canEdit={canEdit}
+          />
+          <DirectorySection
+            clusterId={clusterId}
+            nodeName={nodeName}
+            canEdit={canEdit}
+          />
         </>
       )}
 

@@ -79,6 +79,32 @@ describe("RestoreDialog — Start after restore", () => {
   });
 });
 
+// With no PBS storage on the cluster, how to add one is said only to a role
+// that may add storage (manage:storage).
+describe("RestoreDialog — no PBS storage", () => {
+  it.each([
+    [["manage:backup"], false],
+    [["manage:backup", "manage:storage"], true],
+  ])("with %j it says how to add one: %s", async (permissions, advised) => {
+    vi.mocked(apiClient.list).mockResolvedValue([]);
+    vi.mocked(apiClient.get).mockResolvedValue([]);
+    useAuthStore.setState({ permissions });
+    try {
+      const user = setupUser();
+      renderWithProviders(<RestoreDialog snapshot={SNAPSHOT} pbsId="p1" />);
+      await user.click(screen.getByRole("button", { name: "Restore" }));
+      expect(
+        await screen.findByText(/^No PBS storage found on this PVE cluster\./),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/must be added as a storage/) !== null).toBe(
+        advised,
+      );
+    } finally {
+      useAuthStore.setState({ permissions: [] });
+    }
+  });
+});
+
 // The server refuses a force restore to a caller without delete on the
 // archive's kind, so the dialog disables the tick and never sends force.
 describe("RestoreDialog — Overwrite existing VM", () => {

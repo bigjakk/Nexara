@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useLiveUpdates } from "@/hooks/useLiveUpdates";
 import { useLoadBranding } from "@/hooks/useLoadBranding";
@@ -123,6 +124,12 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout, logoutAll } = useAuth();
+  // The API keys page and every route it calls take manage:api_key
+  // install-wide (registry_api_keys.go).
+  const canUseAPIKeys = usePermissions().hasGlobalPermission(
+    "manage",
+    "api_key",
+  );
   const { data: clusters } = useClusters();
   const brandingQuery = useLoadBranding();
   const appTitle = useBrandingStore((s) => s.appTitle);
@@ -307,14 +314,16 @@ export function AppShell() {
                   <ShieldCheck className="mr-2 h-4 w-4" />
                   {t("security")}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    void navigate("/settings/api-keys");
-                  }}
-                >
-                  <Key className="mr-2 h-4 w-4" />
-                  API keys
-                </DropdownMenuItem>
+                {canUseAPIKeys && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      void navigate("/settings/api-keys");
+                    }}
+                  >
+                    <Key className="mr-2 h-4 w-4" />
+                    API keys
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleShowChangelog}>
                   <Sparkles className="mr-2 h-4 w-4" />

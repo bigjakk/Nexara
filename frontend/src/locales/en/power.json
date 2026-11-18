@@ -2,6 +2,7 @@
   "nodePowerCard": {
     "power": "Power",
     "noUPSNexaraKnowsPowers": "No UPS Nexara knows powers <node/>. Add it to a UPS's Powers tab on the <navlink>Power page</navlink> to have it checked.",
+    "noUPSNexaraKnowsPowersNode": "No UPS Nexara knows powers <node/>.",
     "poweredByLinkNameLink": "Powered by <navlink><name/></navlink><span> via <server/></span>",
     "battery": "Battery",
     "runtime": "Runtime",
@@ -158,6 +159,7 @@
     "cancel": "Cancel",
     "cutThePower": "Cut the power",
     "upsdRunsCommandsOnlyFor": "upsd runs commands only for an account from its upsd.users. Add one with instcmds to this UPS's NUT server, on the Power page's NUT servers tab.",
+    "upsdRunsCommandsOnlyForNoAccount": "upsd runs commands only for an account from its upsd.users, and none is stored for this UPS's NUT server.",
     "upsdChecksTheStoredAccount": "upsd checks the stored account only when a command runs, so the first command is its test.",
     "upsdLastTookACommand": "upsd last took a command from the stored account on {{verifiedAt}}.",
     "nexaraKnowsNothingThisUPS": "Nexara knows nothing this UPS powers.",
@@ -222,6 +224,7 @@
     "whatThisUPSPowers": "What this UPS powers",
     "add": "Add",
     "nothingYetNexaraFindsThe": "Nothing yet. Nexara finds the nodes this UPS powers from upsmon logins; add a node without upsmon by hand to have it checked, and other loads, such as a switch, to keep track of them.",
+    "nothingYetFoundFromLogins": "Nothing yet. Nexara finds the nodes this UPS powers from upsmon logins.",
     "powers": "Powers",
     "shutdown": "Shutdown",
     "howItWasAdded": "How it was added",
@@ -267,7 +270,8 @@
     "power": "Power",
     "theLatestUPSReadings": "the latest UPS readings",
     "upsDevices": "UPS devices",
-    "noUPSMonitoredYetLink": "No UPS monitored yet. <navlink>Add a NUT server</navlink>"
+    "noUPSMonitoredYetLink": "No UPS monitored yet. <navlink>Add a NUT server</navlink>",
+    "noUPSMonitoredYet": "No UPS monitored yet."
   },
   "upsVariableDialog": {
     "settingNameOnName2": "Setting {{name}} on {{name2}}",
@@ -318,6 +322,7 @@
     "addNUTServer": "Add NUT server",
     "noNUTServersYet": "No NUT servers yet",
     "addTheUpsdThatReports": "Add the upsd that reports your UPS. Nexara reads it like any other client and never logs in as a monitor, so upsmon on your nodes keeps deciding when they shut down.",
+    "upsDevicesAppearOnceAServer": "UPS devices appear here once a NUT server that reports them is added.",
     "theLatestUPSReadings": "the latest UPS readings",
     "powerEvents": "Power events",
     "upsDevices": "UPS devices",

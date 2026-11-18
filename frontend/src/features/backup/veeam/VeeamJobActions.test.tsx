@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { ReactElement } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
@@ -40,7 +41,12 @@ function stubFetch(body: unknown = { started: true }) {
   );
 }
 
-function setPermissions(permissions: string[]) {
+// Held install-wide unless a test says otherwise: the fixtures' rows belong to
+// no cluster, which only an install-wide grant reaches.
+function setPermissions(
+  permissions: string[],
+  globalPermissions = permissions,
+) {
   useAuthStore.setState({
     user: {
       id: "u1",
@@ -49,6 +55,7 @@ function setPermissions(permissions: string[]) {
       role: "user",
     },
     permissions,
+    globalPermissions,
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -65,7 +72,44 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
+  });
+});
+
+// execute:veeam is checked on the cluster the row's platform maps to, and a
+// row with no cluster (never run, or its platform not mapped) takes it
+// install-wide; a grant on some cluster offers a mapped row's controls.
+describe.each<[string, (clusterId: string | null) => ReactElement]>([
+  [
+    "VeeamJobActions",
+    (clusterId) => (
+      <VeeamJobActions serverId="srv-1" job={job({ cluster_id: clusterId })} />
+    ),
+  ],
+  [
+    "VeeamSessionActions",
+    (clusterId) => (
+      <VeeamSessionActions
+        serverId="srv-1"
+        session={runningSession({ cluster_id: clusterId })}
+      />
+    ),
+  ],
+])("%s by the row's cluster", (_, actions) => {
+  it.each<[string, string | null, string[], boolean]>([
+    ["a mapped row, to a cluster's holder", "c1", [], true],
+    ["an unattributed row, to a cluster's holder", null, [], false],
+    [
+      "an unattributed row, to an install-wide holder",
+      null,
+      ["execute:veeam"],
+      true,
+    ],
+  ])("%s", (_, clusterId, globalPermissions, offered) => {
+    setPermissions(["view:veeam", "execute:veeam"], globalPermissions);
+    const { container } = renderWithProviders(actions(clusterId));
+    expect(container.childElementCount > 0).toBe(offered);
   });
 });
 

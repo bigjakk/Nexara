@@ -3,13 +3,14 @@ import { Link } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
 import { EditClusterDialog } from "@/features/clusters/components/EditClusterDialog";
 import { DeleteClusterDialog } from "@/features/clusters/components/DeleteClusterDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
 import type { NodeResponse, VMResponse, ClusterResponse } from "@/types/api";
 import { ClusterStatusBadge } from "@/components/ClusterStatusBadge";
-import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Panel } from "@/components/page/Panel";
 import { StatusIcon } from "@/components/StatusIcon";
@@ -85,6 +86,10 @@ function LoadCell({
 
 export function ClustersListPage() {
   const { data: clusters, isLoading, error } = useClusters();
+  // As on the cluster's page: Edit takes manage:cluster, Delete delete:cluster.
+  const { hasPermission } = usePermissions();
+  const canEditCluster = hasPermission("manage", "cluster");
+  const canDeleteCluster = hasPermission("delete", "cluster");
   const [editCluster, setEditCluster] = useState<ClusterResponse | null>(null);
   const [deleteCluster, setDeleteCluster] = useState<ClusterResponse | null>(
     null,
@@ -127,7 +132,8 @@ export function ClustersListPage() {
       <PageHeader
         title="Clusters"
         summary={summary ?? "The Proxmox VE clusters Nexara manages."}
-        actions={<AddClusterDialog />}
+        // With no cluster yet the empty state carries the one Add cluster.
+        actions={clusters?.length === 0 ? undefined : <AddClusterDialog />}
       />
 
       {error != null && (
@@ -148,9 +154,8 @@ export function ClustersListPage() {
 
       {!isLoading && !error && clusters?.length === 0 && (
         <div data-testid="empty-state">
-          <EmptyState
+          <NoClustersEmptyState
             icon={Layers}
-            title="No clusters"
             description="No clusters configured. Add one to get started."
           />
         </div>
@@ -257,28 +262,32 @@ export function ClustersListPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-0.5">
-                        <Button
-                          aria-label={`Edit ${cluster.name}`}
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            setEditCluster(cluster);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          aria-label={`Delete ${cluster.name}`}
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          onClick={() => {
-                            setDeleteCluster(cluster);
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {canEditCluster && (
+                          <Button
+                            aria-label={`Edit ${cluster.name}`}
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                            onClick={() => {
+                              setEditCluster(cluster);
+                            }}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDeleteCluster && (
+                          <Button
+                            aria-label={`Delete ${cluster.name}`}
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => {
+                              setDeleteCluster(cluster);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

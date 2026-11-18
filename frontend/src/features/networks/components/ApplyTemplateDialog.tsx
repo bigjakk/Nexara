@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { WarningCallout } from "@/components/WarningCallout";
-import { Play } from "lucide-react";
+import { Eye, Play } from "lucide-react";
 import { useApplyFirewallTemplate } from "../api/network-queries";
 import type { FirewallTemplate } from "../types/network";
 import { useTranslation } from "react-i18next";
@@ -19,6 +19,9 @@ import i18n from "@/lib/i18n";
 interface ApplyTemplateDialogProps {
   clusterId: string;
   template: FirewallTemplate;
+  /** Applying takes manage:network on the cluster. Without it the dialog
+   *  only lists the template's rules, which nothing else on the page shows. */
+  canApply: boolean;
 }
 
 function ruleCount(n: number): string {
@@ -35,6 +38,7 @@ function ruleCount(n: number): string {
 export function ApplyTemplateDialog({
   clusterId,
   template,
+  canApply,
 }: ApplyTemplateDialogProps) {
   const { t } = useTranslation("networks");
   const [open, setOpen] = useState(false);
@@ -42,6 +46,9 @@ export function ApplyTemplateDialog({
   const blocks = template.rules.some(
     (r) => r.action === "DROP" || r.action === "REJECT",
   );
+  const title = canApply
+    ? t("applyTemplateDialog.applyTemplateName", { name: template.name })
+    : t("applyTemplateDialog.rulesOfName", { name: template.name });
 
   const handleApply = () => {
     apply.mutate(template.id, {
@@ -64,25 +71,37 @@ export function ApplyTemplateDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          aria-label={t("applyTemplateDialog.applyTemplateName", { name: template.name })}
+          aria-label={
+            canApply
+              ? title
+              : t("applyTemplateDialog.viewRulesName", { name: template.name })
+          }
           variant="ghost"
           size="icon"
           className="h-8 w-8"
           disabled={clusterId.length === 0}
         >
-          <Play className="h-4 w-4" />
+          {canApply ? (
+            <Play className="h-4 w-4" />
+          ) : (
+            <Eye className="h-4 w-4" />
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("applyTemplateDialog.applyTemplateName", { name: template.name })}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            {t("applyTemplateDialog.addsLengthAtTheTop", { length: ruleCount(template.rules.length) })}
-          </p>
+          {canApply && (
+            <p className="text-sm text-muted-foreground">
+              {t("applyTemplateDialog.addsLengthAtTheTop", {
+                length: ruleCount(template.rules.length),
+              })}
+            </p>
+          )}
 
-          {blocks && (
+          {canApply && blocks && (
             <WarningCallout title={t("applyTemplateDialog.thisCanLockYouOut")}>
               <p>
                 {t("applyTemplateDialog.rulesAreCheckedFromThe")}
@@ -123,11 +142,15 @@ export function ApplyTemplateDialog({
               setOpen(false);
             }}
           >
-            {t("applyTemplateDialog.cancel")}
+            {canApply
+              ? t("applyTemplateDialog.cancel")
+              : t("applyTemplateDialog.close")}
           </Button>
-          <Button onClick={handleApply} disabled={apply.isPending}>
-            {t("applyTemplateDialog.applyToCluster")}
-          </Button>
+          {canApply && (
+            <Button onClick={handleApply} disabled={apply.isPending}>
+              {t("applyTemplateDialog.applyToCluster")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

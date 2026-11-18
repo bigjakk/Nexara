@@ -32,6 +32,7 @@ import {
   useCluster,
   useClusterNodes,
 } from "@/features/clusters/api/cluster-queries";
+import { usePermissions } from "@/hooks/usePermissions";
 import { formatBytes, formatPercent } from "@/lib/format";
 import { usageLevel } from "@/lib/usage-level";
 import { useClusterStorage, useStorageContent } from "../api/storage-queries";
@@ -79,6 +80,12 @@ export function StorageDetailPage() {
   const nodesQuery = useClusterNodes(clusterId);
   const contentQuery = useStorageContent(clusterId, storageId);
   const clusterQuery = useCluster(clusterId);
+  // What the store's routes take: manage:storage to edit it or add content,
+  // delete:storage to remove it; Evacuate moves VM disks, manage:vm.
+  const { hasPermission } = usePermissions();
+  const canManageStorage = hasPermission("manage", "storage");
+  const canDeleteStorage = hasPermission("delete", "storage");
+  const canMoveVMDisks = hasPermission("manage", "vm");
 
   const pools = useMemo(() => storageQuery.data ?? [], [storageQuery.data]);
   const pool = useMemo(
@@ -224,7 +231,7 @@ export function StorageDetailPage() {
   ).size;
   const shownKind = filterableTypes.some((t) => t === kind) ? kind : ALL_KINDS;
   const shownItems = shownKind === ALL_KINDS ? items : filterByType(shownKind);
-  const canEvacuate = hasImages && evacuateTargets.length > 0;
+  const canEvacuate = canMoveVMDisks && hasImages && evacuateTargets.length > 0;
   const canPullOCI = hasVztmpl && pveSupportsOCI;
   const contentLoaded = !contentQuery.isLoading && !contentQuery.isError;
 
@@ -268,26 +275,30 @@ export function StorageDetailPage() {
         }
         actions={
           <>
+            {/* Read-only without manage:storage: its configuration is
+                view:storage's to read. */}
             <EditStorageDialog
               clusterId={clusterId}
               storageId={pool.id}
               storageName={pool.storage}
               storageType={pool.type}
+              readOnly={!canManageStorage}
             />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="px-2"
-                  aria-label="More actions"
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {canEvacuate && (
-                  <>
+            {/* No menu when neither of its items is offered. */}
+            {(canEvacuate || canDeleteStorage) && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="px-2"
+                    aria-label="More actions"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canEvacuate && (
                     <DropdownMenuItem
                       className="gap-2"
                       onClick={() => {
@@ -297,20 +308,22 @@ export function StorageDetailPage() {
                       <ArrowRightLeft className="h-4 w-4" />
                       Evacuate
                     </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuItem
-                  className="gap-2 text-destructive focus:text-destructive"
-                  onClick={() => {
-                    setDeleteOpen(true);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  )}
+                  {canEvacuate && canDeleteStorage && <DropdownMenuSeparator />}
+                  {canDeleteStorage && (
+                    <DropdownMenuItem
+                      className="gap-2 text-destructive focus:text-destructive"
+                      onClick={() => {
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </>
         }
       />
@@ -407,19 +420,21 @@ export function StorageDetailPage() {
                     ]}
                   />
                 )}
-                <UploadDialog
-                  clusterId={clusterId}
-                  storageId={pool.id}
-                  supportedContent={pool.content}
-                />
-                {(hasIso || hasVztmpl || hasImport) && (
+                {canManageStorage && (
+                  <UploadDialog
+                    clusterId={clusterId}
+                    storageId={pool.id}
+                    supportedContent={pool.content}
+                  />
+                )}
+                {canManageStorage && (hasIso || hasVztmpl || hasImport) && (
                   <URLDownloadDialog
                     clusterId={clusterId}
                     storageId={pool.id}
                     supportedContent={pool.content}
                   />
                 )}
-                {hasVztmpl && (
+                {canManageStorage && hasVztmpl && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -528,16 +543,18 @@ export function StorageDetailPage() {
           onOpenChange={setEvacuateOpen}
         />
       )}
-      <DeleteStorageDialog
-        clusterId={clusterId}
-        storageId={pool.id}
-        storageName={pool.storage}
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onDeleted={() => {
-          void navigate(`/storage?cluster=${clusterId}`);
-        }}
-      />
+      {canDeleteStorage && (
+        <DeleteStorageDialog
+          clusterId={clusterId}
+          storageId={pool.id}
+          storageName={pool.storage}
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          onDeleted={() => {
+            void navigate(`/storage?cluster=${clusterId}`);
+          }}
+        />
+      )}
       {hasVztmpl && (
         <ApplianceBrowserDialog
           clusterId={clusterId}

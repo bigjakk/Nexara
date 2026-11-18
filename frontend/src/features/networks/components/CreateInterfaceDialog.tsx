@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import { InterfaceFormDialog } from "./InterfaceFormDialog";
 
 interface CreateInterfaceDialogProps {
@@ -14,6 +15,10 @@ export function CreateInterfaceDialog({
   nodeName,
 }: CreateInterfaceDialogProps) {
   const [open, setOpen] = useState(false);
+  // The create route takes manage:network on the cluster.
+  const canManage = usePermissions().canManage("network");
+
+  if (!canManage) return null;
 
   return (
     <>

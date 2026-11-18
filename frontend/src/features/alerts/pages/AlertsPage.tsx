@@ -15,15 +15,23 @@ import {
 } from "../api/alert-queries";
 import { alertSummaryLine } from "../lib/alert-summary";
 import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 
 export function AlertsPage() {
   const { t } = useTranslation("alerts");
   const { hasPermission } = useAuth();
+  const { hasGlobalPermission } = usePermissions();
   const canManage = hasPermission("manage", "alert");
-  const canManageChannels = hasPermission("manage", "notification_channel");
-  const canViewDLQ = hasPermission("view", "notification_dlq");
+  // The channel and dead-letter routes take their grants install-wide
+  // (registry_alerts.go, registry_notification_dlq.go).
+  const canManageChannels = hasGlobalPermission(
+    "manage",
+    "notification_channel",
+  );
+  const canViewDLQ = hasGlobalPermission("view", "notification_dlq");
   const { data: summary } = useAlertSummary();
-  const { data: dlqSummary } = useNotificationDLQSummary();
+  // The summary takes the same install-wide read: no polling for 403s.
+  const { data: dlqSummary } = useNotificationDLQSummary(canViewDLQ);
   const dlqOpenCount =
     (dlqSummary?.pending ?? 0) + (dlqSummary?.rate_limited ?? 0);
 

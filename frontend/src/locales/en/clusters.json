@@ -93,6 +93,7 @@
     "howNexaraSpreadsGuestsAcross": "How Nexara spreads guests across this cluster's nodes.",
     "proxmoxNativeDynamicLoadBalancer": "Proxmox native dynamic load balancer is active",
     "thisClusterSProxmoxCRS": "This cluster's Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS <strong>Automatic</strong> mode is disabled to avoid conflicting migrations; <strong2>Advisory</strong2> still works as a read-only second opinion. Manage the native balancer under <navlink>Datacenter → Options → CRS</navlink>.",
+    "thisClusterSProxmoxCRSReadOnly": "This cluster's Proxmox CRS is auto-rebalancing HA-managed guests. Nexara DRS <strong>Automatic</strong> mode is disabled to avoid conflicting migrations; <strong2>Advisory</strong2> still works as a read-only second opinion.",
     "mode": "Mode",
     "disabledTurnsDRSOffAdvisory": "Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs.",
     "disabledTurnsDRSOffAdvisoryNative": "Disabled turns DRS off. Advisory logs recommendations without acting. Automatic will live-migrate VMs. Automatic is unavailable while Proxmox native CRS rebalancing is on.",
@@ -183,6 +184,7 @@
     "tlsCertificate": "TLS certificate",
     "fetching": "Fetching...",
     "refetchCertificate": "Re-fetch certificate",
+    "refetchNeedsGlobal": "Re-fetching the certificate needs manage:cluster, manage:pbs or manage:veeam across the whole install.",
     "fetchCertificateFailed": "Failed to fetch TLS certificate",
     "currentFingerprint": "Current SHA-256 fingerprint",
     "newFingerprint": "New SHA-256 fingerprint",
@@ -266,6 +268,9 @@
     "rebootingNodeName": "Rebooting {{nodeName}}",
     "takingOutOfMaintenance": "Taking {{nodeName}} out of maintenance",
     "puttingIntoMaintenance": "Putting {{nodeName}} into maintenance"
+  },
+  "nodePowerActions": {
+    "maintenanceNeedsSSH": "Node maintenance needs SSH credentials for this cluster. Use Evacuate instead."
   },
   "nodeShutdownConfirmActions": {
     "shuttingDownNodeName": "Shutting down {{nodeName}}"

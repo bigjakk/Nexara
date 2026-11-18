@@ -56,6 +56,9 @@ interface InterfaceFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** The interface to edit. Omit to create a new one. */
   existing?: NetworkInterface;
+  /** With existing: show the interface without letting it change, for a role
+   *  without manage:network. */
+  readOnly?: boolean;
 }
 
 export function InterfaceFormDialog({
@@ -64,6 +67,7 @@ export function InterfaceFormDialog({
   open,
   onOpenChange,
   existing,
+  readOnly = false,
 }: InterfaceFormDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = existing !== undefined;
@@ -192,12 +196,15 @@ export function InterfaceFormDialog({
         <DialogHeader>
           <DialogTitle>
             {isEdit
-              ? `Edit ${interfaceTypeLabel(type)}: ${existing.iface}`
+              ? `${readOnly ? "View" : "Edit"} ${interfaceTypeLabel(type)}: ${existing.iface}`
               : `Create ${interfaceTypeLabel(type)} on ${nodeName}`}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+        <fieldset
+          disabled={readOnly}
+          className="grid min-w-0 gap-x-6 gap-y-4 sm:grid-cols-2"
+        >
           {/* --- Identity and addressing --- */}
           <Field label="Name">
             <Input
@@ -314,6 +321,7 @@ export function InterfaceFormDialog({
             <Field label="Mode">
               <Select
                 value={form.bond_mode ?? ""}
+                disabled={readOnly}
                 onValueChange={(v) => {
                   setForm((prev) => {
                     const next = { ...prev, bond_mode: v };
@@ -352,7 +360,7 @@ export function InterfaceFormDialog({
                 <Select
                   value={form.bond_xmit_hash_policy ?? ""}
                   onValueChange={set("bond_xmit_hash_policy")}
-                  disabled={!supportsHashPolicy(bondMode)}
+                  disabled={readOnly || !supportsHashPolicy(bondMode)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="—" />
@@ -393,6 +401,7 @@ export function InterfaceFormDialog({
                 <Select
                   value={form.ovs_bridge ?? ""}
                   onValueChange={set("ovs_bridge")}
+                  disabled={readOnly}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select bridge" />
@@ -533,20 +542,23 @@ export function InterfaceFormDialog({
             )}
           </div>
 
-          {/* --- Advanced --- */}
-          <div className="sm:col-span-2">
-            <button
-              type="button"
-              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-              onClick={() => {
-                setShowAdvanced((v) => !v);
-              }}
-            >
-              {showAdvanced ? "Hide advanced" : "Show advanced"}
-            </button>
-          </div>
+          {/* --- Advanced: open when read-only, as its toggle would be
+              disabled with the rest --- */}
+          {!readOnly && (
+            <div className="sm:col-span-2">
+              <button
+                type="button"
+                className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                onClick={() => {
+                  setShowAdvanced((v) => !v);
+                }}
+              >
+                {showAdvanced ? "Hide advanced" : "Show advanced"}
+              </button>
+            </div>
+          )}
 
-          {showAdvanced && (
+          {(showAdvanced || readOnly) && (
             <>
               <Field label="MTU" hint="1280–65520, blank for the default">
                 <Input
@@ -571,16 +583,18 @@ export function InterfaceFormDialog({
               )}
             </>
           )}
-        </div>
+        </fieldset>
 
         {errorMessage && (
           <p className="text-sm text-destructive">{errorMessage}</p>
         )}
 
-        <p className="text-xs text-muted-foreground">
-          Changes are staged as a pending configuration. Use Apply config to
-          activate them, or Revert to discard.
-        </p>
+        {!readOnly && (
+          <p className="text-xs text-muted-foreground">
+            Changes are staged as a pending configuration. Use Apply config to
+            activate them, or Revert to discard.
+          </p>
+        )}
 
         <div className="flex justify-end gap-2">
           <Button
@@ -589,20 +603,22 @@ export function InterfaceFormDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            {readOnly ? "Close" : "Cancel"}
           </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={missingRequired || mutation.isPending}
-          >
-            {mutation.isPending
-              ? isEdit
-                ? "Saving…"
-                : "Creating…"
-              : isEdit
-                ? "Save"
-                : "Create"}
-          </Button>
+          {!readOnly && (
+            <Button
+              onClick={handleSubmit}
+              disabled={missingRequired || mutation.isPending}
+            >
+              {mutation.isPending
+                ? isEdit
+                  ? "Saving…"
+                  : "Creating…"
+                : isEdit
+                  ? "Save"
+                  : "Create"}
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

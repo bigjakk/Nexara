@@ -99,10 +99,21 @@ describe("MigrationsPage", () => {
     expect(screen.getByText("Migrations")).toBeInTheDocument();
   });
 
-  it("shows new migration button", () => {
-    renderPage();
-    expect(screen.getByText("New migration")).toBeInTheDocument();
-  });
+  // Creating a job takes manage:migration; the page takes only view:migration.
+  it.each([
+    { perms: ["view:migration"], can: false },
+    { perms: ["view:migration", "manage:migration"], can: true },
+  ])(
+    "offers New migration only to a role that may create one: $perms",
+    ({ perms, can }) => {
+      useAuthStore.setState({ permissions: perms });
+      renderPage();
+      expect(
+        screen.queryByRole("button", { name: "New migration" }) !== null,
+      ).toBe(can);
+      expect(screen.queryByText(/New migration starts one/) !== null).toBe(can);
+    },
+  );
 
   it("shows empty state when no jobs", () => {
     renderPage();

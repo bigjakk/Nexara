@@ -133,6 +133,10 @@ export function QuickConnect({
     setOpen(false);
   }
 
+  // Every console it opens is a guest's: without console on either kind its
+  // list would be empty.
+  if (!canConsole("vm") && !canConsole("container")) return null;
+
   return (
     <>
       {appearance === "compact" ? (

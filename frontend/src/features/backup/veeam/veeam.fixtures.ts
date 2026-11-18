@@ -1,4 +1,4 @@
-import type { VeeamJob, VeeamSession } from "../types/backup";
+import type { VeeamJob, VeeamServer, VeeamSession } from "../types/backup";
 
 /**
  * Shared Veeam row fixtures for the table and action tests.
@@ -9,6 +9,27 @@ import type { VeeamJob, VeeamSession } from "../types/backup";
  * the bundle. It lives here rather than under `src/test/` because the shapes
  * are Veeam's, and they move when `types/backup.ts` does.
  */
+
+/** A registered server that has synced, as the server registry lists it. */
+export function server(over: Partial<VeeamServer> = {}): VeeamServer {
+  return {
+    id: "veeam-1",
+    name: "Veeam Primary",
+    base_url: "https://vbr.example.com:9419",
+    username: "ad\\jdoe",
+    api_revision: "1.3-rev2",
+    product_version: "13.1.0.411",
+    license_edition: "EnterprisePlus",
+    tls_fingerprint: "",
+    verify_tls: true,
+    enabled: true,
+    last_sync_at: "2026-08-26T12:05:00Z",
+    last_sync_error: "",
+    created_at: "2026-08-26T12:00:00Z",
+    updated_at: "2026-08-26T12:00:00Z",
+    ...over,
+  };
+}
 
 /** A finished backup job, the shape the tables render most of the time. */
 export function job(over: Partial<VeeamJob> = {}): VeeamJob {

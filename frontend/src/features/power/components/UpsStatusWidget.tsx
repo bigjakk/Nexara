@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QueryFailureNote, QueryStateNotice } from "@/components/QueryStateNotice";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useUpsDevices } from "../api/ups-queries";
 import { formatRuntime } from "../lib/ups-state";
 import { UpsStatusBadges } from "./UpsBadges";
@@ -11,6 +12,8 @@ export function UpsStatusWidget() {
   const { t } = useTranslation("power");
   const devices = useUpsDevices();
   const list = devices.data ?? [];
+  // Adding a NUT server takes manage:ups install-wide.
+  const canAddServer = usePermissions().hasGlobalPermission("manage", "ups");
 
   return (
     <Card className="h-full">
@@ -48,9 +51,11 @@ export function UpsStatusWidget() {
             query={devices}
             subject={t("upsStatusWidget.upsDevices")}
             empty={
-              <>
+              canAddServer ? (
                 <Trans t={t} i18nKey="upsStatusWidget.noUPSMonitoredYetLink" components={{ navlink: <Link to="/power" className="underline" /> }} />
-              </>
+              ) : (
+                t("upsStatusWidget.noUPSMonitoredYet")
+              )
             }
           />
         )}

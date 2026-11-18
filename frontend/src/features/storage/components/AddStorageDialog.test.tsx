@@ -138,11 +138,19 @@ beforeEach(() => {
       display_name: "Operator",
       role: "user",
     },
-    permissions: [],
+    permissions: ["manage:storage"],
     isAuthenticated: true,
   });
   mockedList.mockResolvedValue([]);
   mockedPost.mockResolvedValue({ status: "created", storage: "store01" });
+});
+
+// Adding a store takes manage:storage, which the create handler checks; a
+// Viewer got the form and a refused create.
+it("is not offered without manage:storage", () => {
+  useAuthStore.setState({ permissions: ["view:storage"] });
+  renderWithProviders(<AddStorageDialog clusterId="c1" />);
+  expect(screen.queryByRole("button", { name: "Add storage" })).toBeNull();
 });
 
 describe("AddStorageDialog — PBS encryption", () => {
@@ -433,7 +441,10 @@ describe("AddStorageDialog — a registered PBS server", () => {
   ])(
     "permissions $permissions, $pick: its own token is used: $reuse",
     async ({ permissions, pick: name, reuse }) => {
-      useAuthStore.setState({ permissions });
+      // Adding a store takes manage:storage; the case is about manage:pbs.
+      useAuthStore.setState({
+        permissions: ["manage:storage", ...permissions],
+      });
       const datastore = name === "pbs01" ? "datastore01" : "datastore02";
       await openAdd("Proxmox Backup Server", null);
       await pick("PBS server", name);
@@ -476,7 +487,7 @@ describe("AddStorageDialog — a registered PBS server", () => {
   );
 
   it("drops the datastore picked for one server when another is picked", async () => {
-    useAuthStore.setState({ permissions: ["manage:pbs"] });
+    useAuthStore.setState({ permissions: ["manage:storage", "manage:pbs"] });
     await openAdd("Proxmox Backup Server", null);
     await pick("PBS server", "pbs01");
     await pick(/^Datastore/, "datastore01");

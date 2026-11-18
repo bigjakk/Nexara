@@ -43,19 +43,23 @@ vi.mock("./SyslogConfigCard", () => ({
 }));
 
 /**
- * Serves an empty audit log to a user holding exactly `held`. The permission
- * answers are worked out from `held`, so a panel that asked about the wrong
- * permission would get the wrong answer rather than a blanket yes.
+ * Serves an empty audit log to a user holding exactly `held`, of which
+ * `installWide` is held on the whole install. The permission answers are
+ * worked out from them, so a panel that asked about the wrong permission
+ * would get the wrong answer rather than a blanket yes.
  */
 function renderFor(
   held: string[],
   items: AuditLogEntry[] = [],
   actions: string[] = [],
+  installWide: string[] = held,
 ) {
   const has = (action: string, resource: string) =>
     held.includes(`${action}:${resource}`);
   vi.mocked(usePermissions).mockReturnValue({
     hasPermission: has,
+    hasGlobalPermission: (action: string, resource: string) =>
+      installWide.includes(`${action}:${resource}`),
     canView: (resource: string) => has("view", resource),
     canManage: (resource: string) => has("manage", resource),
   } as unknown as ReturnType<typeof usePermissions>);
@@ -165,6 +169,14 @@ describe("AuditLogPanel", () => {
     renderFor(["view:audit"]);
 
     // The panel itself did render, so the card's absence is the gate's doing.
+    expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
+    expect(screen.queryByText("syslog card")).not.toBeInTheDocument();
+  });
+
+  it("leaves the syslog card out for manage:audit held on a cluster only", () => {
+    // Every syslog route takes manage:audit install-wide (registry_audit.go).
+    renderFor(["view:audit", "manage:audit"], [], [], ["view:audit"]);
+
     expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
     expect(screen.queryByText("syslog card")).not.toBeInTheDocument();
   });

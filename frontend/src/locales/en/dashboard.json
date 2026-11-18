@@ -48,6 +48,7 @@
   "newCT": "New CT",
   "noClustersRegistered": "No clusters registered",
   "addClusterToGetStarted": "Add a Proxmox cluster to get started with monitoring your infrastructure.",
+  "noClustersAddedYet": "No Proxmox cluster has been added yet. Someone who manages clusters can add one.",
   "nodes": "Nodes",
   "virtualMachines": "Virtual machines",
   "containers": "Containers",

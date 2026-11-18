@@ -19,6 +19,7 @@ import { WarningCallout } from "@/components/WarningCallout";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { ClusterResponse } from "@/types/api";
 import { useMapVeeamPlatform } from "../api/backup-queries";
 import type { VeeamPlatform, VeeamInfrastructureGuest } from "../types/backup";
@@ -52,6 +53,9 @@ export function VeeamPlatformMapping({
     queryFn: () => apiClient.list<ClusterResponse>(apiPath`/api/v1/clusters`),
   });
   const mapPlatform = useMapVeeamPlatform(serverId);
+  // Mapping a platform takes manage:veeam install-wide; without it the
+  // mapping is shown, not offered.
+  const canMap = usePermissions().hasGlobalPermission("manage", "veeam");
   // Which row is in flight, so one pending mutation does not freeze the whole
   // table.
   const [pending, setPending] = useState<string | null>(null);
@@ -123,7 +127,7 @@ export function VeeamPlatformMapping({
                           },
                         );
                       }}
-                      disabled={pending === platform.platform_id}
+                      disabled={!canMap || pending === platform.platform_id}
                     >
                       <SelectTrigger
                         className="w-56"

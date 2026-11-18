@@ -23,9 +23,10 @@ vi.mock("@/lib/api-client", async () =>
   }),
 );
 
-let canManage = true;
+// The resources the user may manage.
+let granted = new Set<string>();
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ canManage: () => canManage }),
+  useAuth: () => ({ canManage: (resource: string) => granted.has(resource) }),
 }));
 
 function pkg(name: string, overrides: Partial<AptPackage> = {}): AptPackage {
@@ -69,7 +70,7 @@ beforeEach(() => {
   getMock.mockReset();
   postMock.mockReset();
   postMock.mockResolvedValue({ id: "job-1" });
-  canManage = true;
+  granted = new Set(["rolling_update", "ssh_credentials"]);
 });
 
 describe("NodeUpdatePanel", () => {
@@ -190,17 +191,26 @@ describe("NodeUpdatePanel", () => {
   });
 
   // The upgrade runs over SSH. Offering the button without credentials would
-  // produce a job that fails at the first node.
-  it("disables the button when the cluster has no SSH credentials", async () => {
-    listMock.mockResolvedValue([pkg("pve-manager")]);
-    getMock.mockResolvedValue({ configured: false });
-    renderPanel();
+  // produce a job that fails at the first node. Storing them takes
+  // manage:ssh_credentials, so only its holder is pointed to Security.
+  it.each([
+    { roles: ["rolling_update", "ssh_credentials"], pointed: true },
+    { roles: ["rolling_update"], pointed: false },
+  ])(
+    "disables the button when the cluster has no SSH credentials: $roles",
+    async ({ roles, pointed }) => {
+      granted = new Set(roles);
+      listMock.mockResolvedValue([pkg("pve-manager")]);
+      getMock.mockResolvedValue({ configured: false });
+      renderPanel();
 
-    expect(
-      await screen.findByRole("button", { name: /Update this node/ }),
-    ).toBeDisabled();
-    expect(screen.getByText(/needs SSH credentials/)).toBeInTheDocument();
-  });
+      expect(
+        await screen.findByRole("button", { name: /Update this node/ }),
+      ).toBeDisabled();
+      expect(screen.getByText(/needs SSH credentials/)).toBeInTheDocument();
+      expect(screen.queryByText(/Add them under/) !== null).toBe(pointed);
+    },
+  );
 
   /**
    * Treating a failed read as "not configured" would state something false
@@ -214,6 +224,18 @@ describe("NodeUpdatePanel", () => {
     expect(
       await screen.findByRole("button", { name: /Update this node/ }),
     ).toBeEnabled();
+    expect(screen.queryByText(/needs SSH credentials/)).not.toBeInTheDocument();
+  });
+
+  // A read still in flight is not "missing": the text flashed while it was.
+  it("says nothing about SSH while it is still being read", async () => {
+    listMock.mockResolvedValue([pkg("pve-manager")]);
+    getMock.mockReturnValue(new Promise(() => undefined));
+    renderPanel();
+
+    expect(
+      await screen.findByRole("button", { name: /Update this node/ }),
+    ).not.toHaveAttribute("title");
     expect(screen.queryByText(/needs SSH credentials/)).not.toBeInTheDocument();
   });
 
@@ -244,8 +266,10 @@ describe("NodeUpdatePanel", () => {
     expect(screen.queryByText(/Up to date/)).not.toBeInTheDocument();
   });
 
-  it("hides the action from a user who cannot manage rolling updates", async () => {
-    canManage = false;
+  // Without manage:rolling_update the credentials are never read, so the
+  // panel cannot say they are missing, even where they are stored.
+  it("hides the action, and what it needs, from a user who cannot manage rolling updates", async () => {
+    granted = new Set();
     serveReady();
     renderPanel();
 
@@ -253,5 +277,6 @@ describe("NodeUpdatePanel", () => {
     expect(
       screen.queryByRole("button", { name: /Update this node/ }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByText(/needs SSH credentials/)).not.toBeInTheDocument();
   });
 });

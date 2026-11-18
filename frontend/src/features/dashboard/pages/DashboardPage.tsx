@@ -22,8 +22,8 @@ import { FleetBoard } from "../components/FleetBoard";
 import { NeedsAttention } from "../components/NeedsAttention";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClusterCard } from "../components/ClusterCard";
-import { EmptyState } from "@/components/EmptyState";
 import { AddClusterDialog } from "../components/AddClusterDialog";
+import { NoClustersEmptyState } from "../components/NoClustersEmptyState";
 import { TimeRangeSelector } from "../components/TimeRangeSelector";
 import { RefreshRateSelector } from "../components/RefreshRateSelector";
 import { LiveMetricCards } from "../components/LiveMetricCards";
@@ -621,11 +621,9 @@ export function DashboardPage() {
       ) : (
         <>
           {!isLoading && data?.clusters.length === 0 && (
-            <EmptyState
+            <NoClustersEmptyState
               icon={ServerCrash}
-              title={t("noClustersRegistered")}
               description={t("addClusterToGetStarted")}
-              action={<AddClusterDialog />}
             />
           )}
 

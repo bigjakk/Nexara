@@ -7,6 +7,8 @@ import { formatExactDateTime } from "@/lib/format";
 
 interface PosturePanelProps {
   posture: SecurityPosture;
+  /** Whether the viewer may start a scan (manage:cve_scan), which the never-scanned line points to. */
+  canScan: boolean;
   /** Optional handler for the "actively exploited" KEV line's button.
    *  Receives the scan_id to deep-link into the filtered vuln view. */
   onShowKEV?: (scanId: string) => void;
@@ -17,13 +19,18 @@ interface PosturePanelProps {
  * covered, and the findings by severity. A zero is quiet; only a number that
  * is a problem takes a colour.
  */
-export function PosturePanel({ posture, onShowKEV }: PosturePanelProps) {
+export function PosturePanel({
+  posture,
+  canScan,
+  onShowKEV,
+}: PosturePanelProps) {
   if (!hasScans(posture)) {
     return (
       <Panel title="Posture">
         <p className="text-sm text-muted-foreground">
-          No scans have been run yet. Use Scan now to check this cluster&apos;s
-          nodes for known vulnerabilities.
+          No scans have been run yet.
+          {canScan &&
+            " Use Scan now to check this cluster's nodes for known vulnerabilities."}
         </p>
       </Panel>
     );

@@ -257,7 +257,16 @@ export function AlertRuleForm() {
   // without it neither the metrics nor the scope is offered.
   const { hasGlobalPermission } = usePermissions();
   const canViewUps = hasGlobalPermission("view", "ups");
-  const scopes = (m: string) => scopesFor(m).filter((sc) => sc !== "ups" || canViewUps);
+  // A rule that names no cluster, global or one UPS, takes manage:alert
+  // install-wide (CreateRule in handlers/alerts.go); a metric left with no
+  // scope is not offered.
+  const canNameNoCluster = hasGlobalPermission("manage", "alert");
+  const scopes = (m: string) =>
+    scopesFor(m).filter(
+      (sc) =>
+        (sc !== "ups" || canViewUps) &&
+        ((sc !== "global" && sc !== "ups") || canNameNoCluster),
+    );
   const upsDevices = useUpsDevices(scopeType === "ups");
 
   const { data: clusters } = useQuery({
@@ -431,7 +440,11 @@ export function AlertRuleForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {METRICS.filter((m) => canViewUps || !UPS_METRICS.has(m.value)).map((m) => (
+                  {METRICS.filter(
+                    (m) =>
+                      (canViewUps || !UPS_METRICS.has(m.value)) &&
+                      scopes(m.value).length > 0,
+                  ).map((m) => (
                     <SelectItem key={m.value} value={m.value}>
                       {m.label}
                     </SelectItem>

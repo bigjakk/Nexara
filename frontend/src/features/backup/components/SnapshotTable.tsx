@@ -33,7 +33,6 @@ import {
   useProtectSnapshot,
   useUpdateSnapshotNotes,
 } from "../api/backup-queries";
-import { usePermissions } from "@/hooks/usePermissions";
 import { formatBytes } from "@/lib/format";
 import { DateTime } from "@/components/DateTime";
 
@@ -48,13 +47,24 @@ function snapKey(snap: PBSSnapshot): string {
 interface SnapshotTableProps {
   snapshots: PBSSnapshot[];
   pbsId: string;
+  /** manage:backup on the server's scope: protect, notes and owner. */
+  canManage: boolean;
+  /** delete:backup on the server's scope. */
+  canDelete: boolean;
+  /** manage:backup on a cluster, which a restore takes on its target. */
+  canRestore: boolean;
 }
 
-export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
+export function SnapshotTable({
+  snapshots,
+  pbsId,
+  canManage,
+  canDelete,
+  canRestore,
+}: SnapshotTableProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<PBSSnapshot | null>(null);
   const [ownerTarget, setOwnerTarget] = useState<PBSSnapshot | null>(null);
-  const canManage = usePermissions().hasPermission("manage", "backup");
   // What a storage made from this server with its token signs in as.
   const serverToken = usePBSServers().data?.find(
     (s) => s.id === pbsId,
@@ -249,38 +259,44 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                           e.stopPropagation();
                         }}
                       >
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title={isProtected(snap) ? "Unprotect" : "Protect"}
-                          onClick={() => {
-                            handleProtect(snap);
-                          }}
-                          disabled={protectingKey === key}
-                          className={
-                            protectError === key ? "text-destructive" : ""
-                          }
-                        >
-                          {protectingKey === key ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : isProtected(snap) ? (
-                            <ShieldOff className="h-4 w-4" />
-                          ) : (
-                            <ShieldCheck className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <RestoreDialog snapshot={snap} pbsId={pbsId} />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          title="Delete"
-                          onClick={() => {
-                            setDeleteTarget(snap);
-                          }}
-                          disabled={isProtected(snap)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        {canManage && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title={isProtected(snap) ? "Unprotect" : "Protect"}
+                            onClick={() => {
+                              handleProtect(snap);
+                            }}
+                            disabled={protectingKey === key}
+                            className={
+                              protectError === key ? "text-destructive" : ""
+                            }
+                          >
+                            {protectingKey === key ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : isProtected(snap) ? (
+                              <ShieldOff className="h-4 w-4" />
+                            ) : (
+                              <ShieldCheck className="h-4 w-4" />
+                            )}
+                          </Button>
+                        )}
+                        {canRestore && (
+                          <RestoreDialog snapshot={snap} pbsId={pbsId} />
+                        )}
+                        {canDelete && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="Delete"
+                            onClick={() => {
+                              setDeleteTarget(snap);
+                            }}
+                            disabled={isProtected(snap)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -372,16 +388,18 @@ export function SnapshotTable({ snapshots, pbsId }: SnapshotTableProps) {
                             }}
                           >
                             <span>{snap.comment || "-"}</span>
-                            <Button
-                              aria-label={`Edit comment for ${snapKey(snap)}`}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                startEditComment(snap);
-                              }}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            {canManage && (
+                              <Button
+                                aria-label={`Edit comment for ${snapKey(snap)}`}
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  startEditComment(snap);
+                                }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
                           </div>
                         )}
                       </div>

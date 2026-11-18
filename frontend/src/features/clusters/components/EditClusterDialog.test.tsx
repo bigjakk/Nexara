@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { apiClient, ApiClientError } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 import { toast } from "sonner";
 import { EditClusterDialog } from "./EditClusterDialog";
 import type { ClusterResponse } from "@/types/api";
@@ -209,4 +211,43 @@ describe("EditClusterDialog after a save", () => {
       );
     });
   });
+});
+
+// Re-fetching the certificate takes manage:cluster, manage:pbs or manage:veeam
+// install-wide: manage:cluster on this cluster alone, which saves, does not.
+describe("EditClusterDialog Re-fetch certificate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedGet.mockResolvedValue({ configured: false });
+  });
+
+  afterEach(() => {
+    grantPermissions();
+  });
+
+  it.each([
+    { global: [] as string[], offered: false },
+    { global: ["manage:cluster"], offered: true },
+    { global: ["manage:pbs"], offered: true },
+    { global: ["manage:veeam"], offered: true },
+  ])(
+    "with manage:cluster on the cluster and $global install-wide: $offered",
+    ({ global, offered }) => {
+      useAuthStore.setState({
+        user: null,
+        permissions: ["manage:cluster", ...global],
+        globalPermissions: global,
+      });
+      render();
+
+      expect(
+        screen.queryByRole("button", { name: "Re-fetch certificate" }) !== null,
+      ).toBe(offered);
+      // Without it the section says what re-fetching takes, as it is where the
+      // server points a changed certificate.
+      expect(
+        screen.queryByText(/Re-fetching the certificate needs/) !== null,
+      ).toBe(!offered);
+    },
+  );
 });

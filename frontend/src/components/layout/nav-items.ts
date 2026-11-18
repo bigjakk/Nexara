@@ -94,7 +94,9 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: "admin",
         to: "/admin/users",
         icon: Users,
+        // As the admin pages' guards take it (App.tsx).
         requiredPermission: "manage:user",
+        global: true,
       },
     ],
   },

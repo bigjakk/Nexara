@@ -392,27 +392,29 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
                                 <SquareArrowOutUpRight className="h-4 w-4" />
                               </Button>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className={cn(
-                                ROW_ACTION_CLASS,
-                                "hover:text-destructive",
-                              )}
-                              title={
-                                deletable
-                                  ? t("delete")
-                                  : row.vm_id
-                                    ? t("deleteDenied")
+                            {/* Not offered without delete on the guest's kind;
+                                an orphan's is disabled, as its row's others. */}
+                            {canDeleteRow(row) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={cn(
+                                  ROW_ACTION_CLASS,
+                                  "hover:text-destructive",
+                                )}
+                                title={
+                                  deletable
+                                    ? t("delete")
                                     : t("openGuestUnavailable")
-                              }
-                              onClick={() => {
-                                setConfirmDelete(key);
-                              }}
-                              disabled={!deletable}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                                }
+                                onClick={() => {
+                                  setConfirmDelete(key);
+                                }}
+                                disabled={!deletable}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>

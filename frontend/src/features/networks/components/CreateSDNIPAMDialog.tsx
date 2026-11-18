@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import { useCreateSDNIPAM, useUpdateSDNIPAM } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNIPAM, CreateSDNIPAMRequest } from "../types/network";
@@ -25,6 +25,9 @@ import { useTranslation } from "react-i18next";
 interface CreateSDNIPAMDialogProps {
   clusterId: string;
   initialData?: SDNIPAM;
+  /** With initialData: show the IPAM without letting it change, for a role
+   *  without manage:network. */
+  readOnly?: boolean;
 }
 
 const IPAM_TYPES = ["pve", "netbox", "phpipam"] as const;
@@ -32,6 +35,7 @@ const IPAM_TYPES = ["pve", "netbox", "phpipam"] as const;
 export function CreateSDNIPAMDialog({
   clusterId,
   initialData,
+  readOnly = false,
 }: CreateSDNIPAMDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -108,12 +112,16 @@ export function CreateSDNIPAMDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit IPAM ${initialData.ipam}`}
+            aria-label={`${readOnly ? "View" : "Edit"} IPAM ${initialData.ipam}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button size="sm">
@@ -124,9 +132,11 @@ export function CreateSDNIPAMDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit IPAM" : "Create SDN IPAM"}</DialogTitle>
+          <DialogTitle>
+            {readOnly ? "View IPAM" : isEdit ? "Edit IPAM" : "Create SDN IPAM"}
+          </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>IPAM ID</Label>
@@ -193,25 +203,27 @@ export function CreateSDNIPAMDialog({
               </div>
             </>
           )}
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !ipam || !type}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

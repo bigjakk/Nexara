@@ -172,6 +172,8 @@ const GLOBAL_PAGES: PageEntry[] = [
     requiredPermission: "view:cve_scan",
     pinned: true,
   },
+  // The four admin pages below take what their route guards take (App.tsx),
+  // install-wide.
   {
     keywords: ["users", "admin", "accounts", "rbac"],
     label: "Admin: Users",
@@ -179,6 +181,7 @@ const GLOBAL_PAGES: PageEntry[] = [
     icon: <Users className="h-4 w-4" />,
     path: "/admin/users",
     requiredPermission: "manage:user",
+    global: true,
   },
   {
     keywords: ["roles", "permissions", "rbac", "admin"],
@@ -186,7 +189,8 @@ const GLOBAL_PAGES: PageEntry[] = [
     description: "Role management",
     icon: <Key className="h-4 w-4" />,
     path: "/admin/roles",
-    requiredPermission: "manage:user",
+    requiredPermission: "manage:role",
+    global: true,
   },
   {
     keywords: ["ldap", "active directory", "ad", "admin"],
@@ -195,6 +199,7 @@ const GLOBAL_PAGES: PageEntry[] = [
     icon: <Globe className="h-4 w-4" />,
     path: "/admin/ldap",
     requiredPermission: "manage:user",
+    global: true,
   },
   {
     keywords: ["oidc", "sso", "oauth", "admin"],
@@ -203,6 +208,7 @@ const GLOBAL_PAGES: PageEntry[] = [
     icon: <Lock className="h-4 w-4" />,
     path: "/admin/oidc",
     requiredPermission: "manage:user",
+    global: true,
   },
   {
     keywords: ["branding", "logo", "title", "admin"],

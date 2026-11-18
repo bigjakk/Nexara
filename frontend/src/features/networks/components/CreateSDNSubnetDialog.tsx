@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import { useCreateSDNSubnet, useUpdateSDNSubnet } from "../api/network-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import type { SDNSubnet, CreateSDNSubnetRequest } from "../types/network";
@@ -20,12 +20,16 @@ interface CreateSDNSubnetDialogProps {
   clusterId: string;
   vnet: string;
   initialData?: SDNSubnet;
+  /** With initialData: show the subnet without letting it change, for a role
+   *  without manage:network. */
+  readOnly?: boolean;
 }
 
 export function CreateSDNSubnetDialog({
   clusterId,
   vnet,
   initialData,
+  readOnly = false,
 }: CreateSDNSubnetDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -109,12 +113,16 @@ export function CreateSDNSubnetDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit Subnet ${initialData.subnet}`}
+            aria-label={`${readOnly ? "View" : "Edit"} Subnet ${initialData.subnet}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button variant="outline" size="sm">
@@ -126,10 +134,14 @@ export function CreateSDNSubnetDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? "Edit subnet" : `Add subnet to ${vnet}`}
+            {readOnly
+              ? "View subnet"
+              : isEdit
+                ? "Edit subnet"
+                : `Add subnet to ${vnet}`}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <div className="space-y-2">
             <Label>Subnet CIDR</Label>
             <Input
@@ -181,25 +193,27 @@ export function CreateSDNSubnetDialog({
               }}
             />
           </div>
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !subnet}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

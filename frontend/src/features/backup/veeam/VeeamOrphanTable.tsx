@@ -21,6 +21,7 @@ import { DefGrid, Panel } from "@/components/page/Panel";
 import { StateText } from "../components/StateText";
 import { useMapVeeamBackupObject } from "../api/backup-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { VeeamOrphanedObject } from "../types/backup";
 import { DateTime } from "@/components/DateTime";
 
@@ -135,6 +136,9 @@ export function VeeamOrphanTable({
   } = useDataTable("veeam-orphans", COLUMNS, objects, byId);
 
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Pinning an object to a guest takes manage:veeam on the cluster its
+  // platform maps to.
+  const canMap = usePermissions().hasPermission("manage", "veeam");
 
   // Switching servers must not leave a row from the previous one expanded.
   useEffect(() => {
@@ -164,8 +168,14 @@ export function VeeamOrphanTable({
         Veeam still holds backups for these, but nothing on the mapped cluster
         matches them: the guest was deleted, or rebuilt with a new identity and
         its old backup left behind. They consume repository space and can
-        usually be removed in the Veeam console. Map one to a guest only if you
-        know the backup really is that guest&apos;s.
+        usually be removed in the Veeam console.
+        {canMap && (
+          <>
+            {" "}
+            Map one to a guest only if you know the backup really is that
+            guest&apos;s.
+          </>
+        )}
       </p>
 
       <Table className="table-fixed" style={{ width: layout.totalWidth }}>
@@ -199,7 +209,11 @@ export function VeeamOrphanTable({
                       colSpan={layout.columns.length}
                       className="bg-muted/30"
                     >
-                      <OrphanDetail serverId={serverId} object={object} />
+                      <OrphanDetail
+                        serverId={serverId}
+                        object={object}
+                        canMap={canMap}
+                      />
                     </TableCell>
                   </TableRow>
                 )}
@@ -215,9 +229,11 @@ export function VeeamOrphanTable({
 function OrphanDetail({
   serverId,
   object,
+  canMap,
 }: {
   serverId: string;
   object: VeeamOrphanedObject;
+  canMap: boolean;
 }) {
   const [vmid, setVmid] = useState("");
   const mapObject = useMapVeeamBackupObject(serverId);
@@ -257,59 +273,61 @@ function OrphanDetail({
         </dd>
       </dl>
 
-      <div className="flex flex-wrap items-end gap-2 border-t pt-3">
-        <div className="space-y-1">
-          <label
-            htmlFor={`vmid-${object.id}`}
-            className="text-xs text-muted-foreground"
-          >
-            Map to guest VMID on {object.cluster_name || "the mapped cluster"}
-          </label>
-          <Input
-            id={`vmid-${object.id}`}
-            value={vmid}
-            onChange={(e) => {
-              setVmid(e.target.value);
+      {canMap && (
+        <div className="flex flex-wrap items-end gap-2 border-t pt-3">
+          <div className="space-y-1">
+            <label
+              htmlFor={`vmid-${object.id}`}
+              className="text-xs text-muted-foreground"
+            >
+              Map to guest VMID on {object.cluster_name || "the mapped cluster"}
+            </label>
+            <Input
+              id={`vmid-${object.id}`}
+              value={vmid}
+              onChange={(e) => {
+                setVmid(e.target.value);
+              }}
+              placeholder="e.g. 105"
+              className="w-40"
+            />
+          </div>
+          {/*
+            No cluster picker, deliberately. The cluster is not the operator's
+            choice: a Veeam platformId IS one Proxmox connection, so the object
+            can only belong to the cluster that platform is mapped to, and
+            offering a picker would invite a cross-cluster mapping the API
+            rejects — and that the API rejects precisely because it would let a
+            holder on one cluster read another's restore-point history.
+          */}
+          <Button
+            size="sm"
+            disabled={
+              !vmidValid || mapObject.isPending || object.cluster_id === null
+            }
+            onClick={() => {
+              settle(
+                mapObject.mutateAsync({
+                  objectId: object.id,
+                  clusterId: object.cluster_id,
+                  vmid: parsed,
+                }),
+                {
+                  action: `Mapping ${object.name || "the backup object"} to guest ${String(parsed)}`,
+                  onError: () => undefined, // shown below from the mutation's state
+                },
+              );
             }}
-            placeholder="e.g. 105"
-            className="w-40"
-          />
+          >
+            Map to this guest
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Recorded as a manual match. Automatic correlation will not overwrite
+            it, but it is dropped if that VMID is later given to a different
+            machine.
+          </p>
         </div>
-        {/*
-          No cluster picker, deliberately. The cluster is not the operator's
-          choice: a Veeam platformId IS one Proxmox connection, so the object
-          can only belong to the cluster that platform is mapped to, and
-          offering a picker would invite a cross-cluster mapping the API
-          rejects — and that the API rejects precisely because it would let a
-          holder on one cluster read another's restore-point history.
-        */}
-        <Button
-          size="sm"
-          disabled={
-            !vmidValid || mapObject.isPending || object.cluster_id === null
-          }
-          onClick={() => {
-            settle(
-              mapObject.mutateAsync({
-                objectId: object.id,
-                clusterId: object.cluster_id,
-                vmid: parsed,
-              }),
-              {
-                action: `Mapping ${object.name || "the backup object"} to guest ${String(parsed)}`,
-                onError: () => undefined, // shown below from the mutation's state
-              },
-            );
-          }}
-        >
-          Map to this guest
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          Recorded as a manual match. Automatic correlation will not overwrite
-          it, but it is dropped if that VMID is later given to a different
-          machine.
-        </p>
-      </div>
+      )}
 
       {mapObject.isError && (
         <p className="text-sm text-destructive">

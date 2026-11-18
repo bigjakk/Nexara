@@ -120,6 +120,29 @@ describe("UpsDetailPage", () => {
     expect(apiClient.delete).toHaveBeenCalledWith(expect.stringContaining("/ups-devices/u1/feeds/f2"));
   });
 
+  // Adding what a UPS powers by hand takes manage:ups install-wide.
+  it.each([
+    { perms: ["view:ups"], can: false },
+    { perms: ["view:ups", "manage:ups"], can: true },
+  ])("asks for a node by hand only of a role that may add one: $perms", async ({ perms, can }) => {
+    useAuthStore.setState({ globalPermissions: perms });
+    vi.mocked(apiClient.get).mockImplementation((path: unknown) =>
+      Promise.resolve(String(path).includes("/metrics") ? { range: "1h", bucket_seconds: 10, points: [] } : upsDevice({ feeds: [] })),
+    );
+    vi.mocked(apiClient.list).mockResolvedValue([]);
+    const user = userEvent.setup();
+    renderWithProviders(
+      <Routes>
+        <Route path="/power/:upsId" element={<UpsDetailPage />} />
+      </Routes>,
+      { router: { initialEntries: ["/power/u1"] } },
+    );
+
+    await user.click(await screen.findByRole("tab", { name: /Powers \(0\)/ }));
+    expect(screen.getByText(/^Nothing yet\./)).toBeInTheDocument();
+    expect(screen.queryByText(/add a node without upsmon by hand/) !== null).toBe(can);
+  });
+
   // A global History: offered with view:audit held install-wide, read from the
   // UPS's own route.
   it("offers the UPS's History and reads it from the UPS's route", async () => {

@@ -6,7 +6,7 @@ import { setupUser } from "@/test/user";
 import { makeStorage } from "@/test/storage.fixtures";
 import { apiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
-import type { NodeResponse } from "@/types/api";
+import type { NodeResponse, StorageResponse } from "@/types/api";
 import { StorageDetailPage } from "./StorageDetailPage";
 
 vi.mock("@/lib/api-client", async () =>
@@ -23,9 +23,19 @@ afterEach(() => {
 
 const PVE_01 = { id: "n1", name: "pve-01" } as NodeResponse;
 
-// Signs in with the History grants, mounts the page for a pool whose host node
-// is "n1", and returns the user. `nodes` answers the cluster's node list.
-function mountPage(shared: boolean, nodes: () => Promise<NodeResponse[]>) {
+const HISTORY_GRANTS = ["view:audit", "view:task", "view:storage"];
+
+// Signs in with the History grants (or `permissions`), mounts the page for a
+// pool whose host node is "n1", and returns the user. `nodes` answers the
+// cluster's node list, `pools` its storage.
+function mountPage(
+  shared: boolean,
+  nodes: () => Promise<NodeResponse[]>,
+  {
+    permissions = HISTORY_GRANTS,
+    pools = [makeStorage({ id: "s1", storage: "store01", shared })],
+  }: { permissions?: string[]; pools?: StorageResponse[] } = {},
+) {
   const user = setupUser();
   useAuthStore.setState({
     user: {
@@ -34,18 +44,14 @@ function mountPage(shared: boolean, nodes: () => Promise<NodeResponse[]>) {
       display_name: "U",
       role: "user",
     },
-    permissions: ["view:audit", "view:task", "view:storage"],
+    permissions,
     isAuthenticated: true,
     isInitialized: true,
   });
   vi.mocked(apiClient.list).mockImplementation((path: unknown) => {
     const p = String(path);
     if (p.endsWith("/nodes")) return nodes();
-    if (p.endsWith("/storage")) {
-      return Promise.resolve([
-        makeStorage({ id: "s1", storage: "store01", shared }),
-      ]);
-    }
+    if (p.endsWith("/storage")) return Promise.resolve(pools);
     return Promise.resolve([]);
   });
   vi.mocked(apiClient.get).mockResolvedValue({ pve_version: "9.0.0" });
@@ -133,4 +139,68 @@ describe("a storage's History tab", () => {
       expect(historyReads()).toEqual([]);
     },
   );
+});
+
+// What the store's routes take: manage:storage to edit it or add content to it,
+// delete:storage to remove it, and manage:vm to move VM disks off it
+// (Evacuate). Each control is offered only with its grant, and the More menu
+// only when one of its items is.
+describe("a store's actions", () => {
+  const POOLS = [
+    makeStorage({ id: "s1", storage: "store01", content: "images,iso,vztmpl" }),
+    // Somewhere for Evacuate to move the disks to.
+    makeStorage({ id: "s2", storage: "store02", content: "images" }),
+  ];
+  const CONTROLS = [
+    "Edit",
+    "Configuration",
+    "Upload",
+    "Download from URL",
+    "More ways to add content",
+    "More actions",
+  ];
+
+  it.each<[string, string[], string[], string[]]>([
+    ["view:storage", [], ["Configuration"], []],
+    [
+      "manage:storage",
+      ["manage:storage"],
+      ["Edit", "Upload", "Download from URL", "More ways to add content"],
+      [],
+    ],
+    [
+      "delete:storage",
+      ["delete:storage"],
+      ["Configuration", "More actions"],
+      ["Delete"],
+    ],
+    [
+      "manage:vm",
+      ["manage:vm"],
+      ["Configuration", "More actions"],
+      ["Evacuate"],
+    ],
+  ])("for a role holding %s", async (_, grants, controls, items) => {
+    const user = mountPage(false, () => Promise.resolve([PVE_01]), {
+      permissions: ["view:storage", ...grants],
+      pools: POOLS,
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "store01" }),
+    ).toBeInTheDocument();
+    for (const name of CONTROLS) {
+      expect(screen.queryByRole("button", { name }) !== null, name).toBe(
+        controls.includes(name),
+      );
+    }
+    if (items.length === 0) return;
+
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    for (const name of ["Evacuate", "Delete"]) {
+      expect(screen.queryByRole("menuitem", { name }) !== null, name).toBe(
+        items.includes(name),
+      );
+    }
+  });
 });

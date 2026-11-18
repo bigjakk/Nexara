@@ -26,6 +26,7 @@ import {
   usePBSSnapshotsByBackupID,
   useTriggerBackup,
   useDeleteSnapshot,
+  usePBSServers,
 } from "@/features/backup/api/backup-queries";
 import { useClusterStorage } from "@/features/clusters/api/cluster-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
@@ -63,10 +64,20 @@ export function BackupPanel({
   kind,
 }: BackupPanelProps) {
   const { t } = useTranslation("backup");
-  // A backup and a restore take manage:backup, a delete delete:backup.
-  const { hasPermission } = usePermissions();
+  // A backup and a restore take manage:backup, a delete delete:backup: on the
+  // PBS server's cluster, or across the install for a server attached to none.
+  // Only a role without the install-wide grant needs the servers to tell.
+  const { hasPermission, hasGlobalPermission } = usePermissions();
   const canBackUp = hasPermission("manage", "backup");
-  const canDeleteBackup = hasPermission("delete", "backup");
+  const deleteAnywhere = hasGlobalPermission("delete", "backup");
+  const deleteSomewhere = hasPermission("delete", "backup");
+  const { data: pbsServers } = usePBSServers(
+    deleteSomewhere && !deleteAnywhere,
+  );
+  const canDeleteFrom = (pbsId: string) =>
+    deleteAnywhere ||
+    (deleteSomewhere &&
+      pbsServers?.find((s) => s.id === pbsId)?.cluster_id != null);
   const backupId = String(vmid);
   const {
     data: backups,
@@ -254,7 +265,7 @@ export function BackupPanel({
                                 defaultNode={nodeName}
                               />
                             )}
-                            {canDeleteBackup && (
+                            {canDeleteFrom(snap.pbs_server_id) && (
                               <Button
                                 variant="ghost"
                                 size="sm"

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterNavSections,
   isNavItemActive,
+  NAV_SECTIONS,
   type NavItem,
   type NavSection,
 } from "./nav-items";
@@ -65,6 +66,19 @@ describe("filterNavSections", () => {
         s.items.map((i) => i.to),
       ),
     ).toEqual(want);
+  });
+
+  // The admin pages' guards take manage:user install-wide (App.tsx).
+  it.each([
+    { held: "on a cluster", global: holds(), shown: false },
+    { held: "install-wide", global: holds("manage:user"), shown: true },
+  ])("offers Admin for manage:user $held: $shown", ({ global, shown }) => {
+    const links = filterNavSections(
+      NAV_SECTIONS,
+      holds("manage:user"),
+      global,
+    ).flatMap((s) => s.items.map((i) => i.to));
+    expect(links.includes("/admin/users")).toBe(shown);
   });
 });
 

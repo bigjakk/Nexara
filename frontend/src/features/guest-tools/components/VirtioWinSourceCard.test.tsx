@@ -8,8 +8,9 @@ import {
   useVirtioWinMirror,
   useUpdateVirtioWinMirror,
 } from "../api/virtio-win-queries";
-import { usePermissions } from "@/hooks/usePermissions";
 import { ApiClientError } from "@/lib/api-client";
+import { grantPermissions } from "@/test/permissions";
+import { useAuthStore } from "@/stores/auth-store";
 import type {
   VirtioWinMirror,
   VirtioWinMirrorRequest,
@@ -18,9 +19,6 @@ import type {
 vi.mock("../api/virtio-win-queries", () => ({
   useVirtioWinMirror: vi.fn(),
   useUpdateVirtioWinMirror: vi.fn(),
-}));
-vi.mock("@/hooks/usePermissions", () => ({
-  usePermissions: vi.fn(),
 }));
 vi.mock("sonner", async () => (await import("@/test/mocks")).sonnerMock());
 
@@ -59,9 +57,7 @@ function mockHooks(mutate: ReturnType<typeof vi.fn>) {
     isPending: false,
     error: null,
   } as unknown as ReturnType<typeof useUpdateVirtioWinMirror>);
-  vi.mocked(usePermissions).mockReturnValue({
-    canManage: () => true,
-  } as unknown as ReturnType<typeof usePermissions>);
+  grantPermissions("manage:settings");
 }
 
 /** Types a source URL in and clicks Save, so a gate has something to refuse. */
@@ -74,6 +70,31 @@ describe("VirtioWinSourceCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  // PUT /virtio-win/mirror is a global check: a manage:settings grant held on
+  // one cluster leaves the card read-only, with no Save.
+  it.each([
+    { scope: "one cluster", global: [], can: false },
+    { scope: "the whole install", global: ["manage:settings"], can: true },
+  ])(
+    "offers Save source only for manage:settings on $scope",
+    ({ global, can }) => {
+      mockHooks(vi.fn());
+      useAuthStore.setState({
+        permissions: ["manage:settings"],
+        globalPermissions: global,
+      });
+      renderWithProviders(<VirtioWinSourceCard />);
+
+      expect(screen.getByLabelText("Base URL")).toHaveProperty(
+        "disabled",
+        !can,
+      );
+      expect(
+        screen.queryByRole("button", { name: "Save source" }) !== null,
+      ).toBe(can);
+    },
+  );
 
   it("sends no acknowledgement on a first save", async () => {
     const user = userEvent.setup();

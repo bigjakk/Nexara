@@ -21,9 +21,16 @@ const settingSelectClass =
 
 /**
  * The rows of the Scanning section that say when a cluster is scanned. Each
- * control saves as it is changed.
+ * control saves as it is changed. The save takes manage:cve_scan on the
+ * cluster; without it the rows only show the schedule.
  */
-export function ScanScheduleSettings({ clusterId }: { clusterId: string }) {
+export function ScanScheduleSettings({
+  clusterId,
+  canManage,
+}: {
+  clusterId: string;
+  canManage: boolean;
+}) {
   const { data: schedule, isLoading } = useCVEScanSchedule(clusterId);
   const updateSchedule = useUpdateCVEScanSchedule();
 
@@ -55,6 +62,7 @@ export function ScanScheduleSettings({ clusterId }: { clusterId: string }) {
         <Switch
           id="cve-scan-enabled"
           checked={enabled}
+          disabled={!canManage}
           onCheckedChange={() => {
             updateSchedule.mutate({
               clusterId,
@@ -70,6 +78,7 @@ export function ScanScheduleSettings({ clusterId }: { clusterId: string }) {
           <select
             id="cve-scan-interval"
             value={intervalHours}
+            disabled={!canManage}
             onChange={(e) => {
               updateSchedule.mutate({
                 clusterId,

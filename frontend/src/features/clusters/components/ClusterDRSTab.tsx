@@ -9,6 +9,7 @@ import { DRSHistoryTable } from "@/features/drs/components/DRSHistoryTable";
 import { HistoryTabContent } from "@/features/history/components/HistoryTab";
 import { useCanViewHistory } from "@/features/history/hooks/useCanViewHistory";
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface ClusterDRSTabProps {
   clusterId: string;
@@ -31,6 +32,9 @@ export function ClusterDRSTab({ clusterId }: ClusterDRSTabProps) {
     history.target.clusterId === null,
   );
   const shown = view === "history" && !canHistory ? "configuration" : view;
+  // Running an evaluation and creating or deleting a rule all take manage:drs.
+  // The evaluation panel shows only what a run returns, so it goes too.
+  const canManage = usePermissions().hasPermission("manage", "drs");
 
   return (
     <Tabs value={shown} onValueChange={setView}>
@@ -56,16 +60,21 @@ export function ClusterDRSTab({ clusterId }: ClusterDRSTabProps) {
           <div className="min-w-0 flex-[999_1_520px]">
             <DRSConfigCard clusterId={clusterId} />
           </div>
-          <div className="min-w-0 flex-[1_1_340px]">
-            <EvaluateButton clusterId={clusterId} />
-          </div>
+          {canManage && (
+            <div className="min-w-0 flex-[1_1_340px]">
+              <EvaluateButton clusterId={clusterId} />
+            </div>
+          )}
         </div>
       </TabsContent>
 
       <TabsContent value="rules" aria-label="Rules" aria-labelledby={undefined}>
         <DRSRulesTable
           clusterId={clusterId}
-          actions={<CreateRuleDialog clusterId={clusterId} />}
+          canDelete={canManage}
+          actions={
+            canManage ? <CreateRuleDialog clusterId={clusterId} /> : undefined
+          }
         />
       </TabsContent>
 

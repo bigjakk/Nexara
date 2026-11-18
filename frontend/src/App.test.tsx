@@ -169,31 +169,45 @@ describe("the app when the session changes hands", () => {
 
 describe("the router's gates", () => {
   // Each had no gate of its own, unlike its gated siblings; the rail hid the
-  // link, but a typed address still opened the page.
-  it.each([
-    ["/clusters", "view:cluster"],
-    ["/events", "view:audit"],
-    ["/admin/branding", "manage:settings"],
-    ["/reports", "view:report"],
-    ["/reports/runs/run-1", "view:report"],
-  ])("refuses %s to a caller without %s", async (path, permission) => {
-    act(() => {
-      storeTokens(authResponse(VIEWER));
-      useAuthStore.getState().setAuthFromResponse(authResponse(VIEWER));
-    });
-    renderTheApp();
-    // The router reads the address at import, so this goes as a Back would.
-    act(() => {
-      window.history.pushState({}, "", path);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
-    try {
-      expect(await screen.findByText(permission)).toBeInTheDocument();
-    } finally {
+  // link, but a typed address still opened the page. The third column is what
+  // the caller holds on one cluster only: a page whose routes all take the
+  // grant install-wide refuses that too.
+  it.each<[string, string, string[]]>([
+    ["/clusters", "view:cluster", []],
+    ["/events", "view:audit", []],
+    ["/admin/branding", "manage:settings", ["manage:settings"]],
+    ["/reports", "view:report", []],
+    ["/reports/runs/run-1", "view:report", []],
+    ["/admin/users", "manage:user", ["manage:user"]],
+    ["/admin/roles", "manage:role", ["manage:role"]],
+    ["/admin/ldap", "manage:user", ["manage:user"]],
+    ["/admin/oidc", "manage:user", ["manage:user"]],
+    ["/settings/api-keys", "manage:api_key", ["manage:api_key"]],
+  ])(
+    "refuses %s to a caller without %s, who holds %j on a cluster only",
+    async (path, permission, onACluster) => {
+      const response = authResponse(VIEWER, {
+        permissions: onACluster,
+        globalPermissions: [],
+      });
       act(() => {
-        window.history.pushState({}, "", "/");
+        storeTokens(response);
+        useAuthStore.getState().setAuthFromResponse(response);
+      });
+      renderTheApp();
+      // The router reads the address at import, so this goes as a Back would.
+      act(() => {
+        window.history.pushState({}, "", path);
         window.dispatchEvent(new PopStateEvent("popstate"));
       });
-    }
-  });
+      try {
+        expect(await screen.findByText(permission)).toBeInTheDocument();
+      } finally {
+        act(() => {
+          window.history.pushState({}, "", "/");
+          window.dispatchEvent(new PopStateEvent("popstate"));
+        });
+      }
+    },
+  );
 });

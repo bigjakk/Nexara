@@ -14,6 +14,7 @@ import { Plus } from "lucide-react";
 import { PGCalculator } from "./PGCalculator";
 import { useCreateCephPool } from "../api/ceph-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "react-i18next";
 
 interface PoolCreateDialogProps {
@@ -33,6 +34,9 @@ export function PoolCreateDialog({
 
   const createPool = useCreateCephPool();
   const settle = useSaveOutcome(open);
+  // Creating a pool takes manage:ceph on the cluster; without it there is no
+  // Create pool at all.
+  const canCreate = usePermissions().canManage("ceph");
 
   function handleCreate() {
     // The dialog stays mounted while closed, so a create that lands after it
@@ -60,6 +64,8 @@ export function PoolCreateDialog({
       },
     );
   }
+
+  if (!canCreate) return null;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

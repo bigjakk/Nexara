@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil } from "lucide-react";
+import { Eye, Plus, Pencil } from "lucide-react";
 import {
   useCreateSDNVNet,
   useUpdateSDNVNet,
@@ -30,11 +30,15 @@ import { useTranslation } from "react-i18next";
 interface CreateSDNVNetDialogProps {
   clusterId: string;
   initialData?: SDNVNet;
+  /** With initialData: show the VNet without letting it change, for a role
+   *  without manage:network. */
+  readOnly?: boolean;
 }
 
 export function CreateSDNVNetDialog({
   clusterId,
   initialData,
+  readOnly = false,
 }: CreateSDNVNetDialogProps) {
   const { t } = useTranslation("networks");
   const isEdit = initialData !== undefined;
@@ -117,12 +121,16 @@ export function CreateSDNVNetDialog({
       <DialogTrigger asChild>
         {isEdit ? (
           <Button
-            aria-label={`Edit VNet ${initialData.vnet}`}
+            aria-label={`${readOnly ? "View" : "Edit"} VNet ${initialData.vnet}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
           >
-            <Pencil className="h-4 w-4" />
+            {readOnly ? (
+              <Eye className="h-4 w-4" />
+            ) : (
+              <Pencil className="h-4 w-4" />
+            )}
           </Button>
         ) : (
           <Button size="sm">
@@ -133,9 +141,11 @@ export function CreateSDNVNetDialog({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit VNet" : "Create SDN VNet"}</DialogTitle>
+          <DialogTitle>
+            {readOnly ? "View VNet" : isEdit ? "Edit VNet" : "Create SDN VNet"}
+          </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={readOnly} className="min-w-0 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>VNet ID</Label>
@@ -150,7 +160,7 @@ export function CreateSDNVNetDialog({
             </div>
             <div className="space-y-2">
               <Label>Zone</Label>
-              <Select value={zone} onValueChange={setZone}>
+              <Select value={zone} onValueChange={setZone} disabled={readOnly}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select zone" />
                 </SelectTrigger>
@@ -207,25 +217,27 @@ export function CreateSDNVNetDialog({
             />
             <Label htmlFor="isolate">Isolate ports</Label>
           </div>
-          {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
+        </fieldset>
+        {errorMessage && (
+          <p className="text-sm text-destructive">{errorMessage}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setOpen(false);
+            }}
+          >
+            {readOnly ? "Close" : "Cancel"}
+          </Button>
+          {!readOnly && (
             <Button
               onClick={handleSubmit}
               disabled={mutation.isPending || !vnet || !zone}
             >
               {isEdit ? "Save" : "Create"}
             </Button>
-          </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

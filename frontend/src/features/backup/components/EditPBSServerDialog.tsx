@@ -25,12 +25,18 @@ interface EditPBSServerDialogProps {
   server: PBSServer;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * For a role that may not change the server (manage:pbs on its scope): the
+   * settings are shown with every field disabled and no Save.
+   */
+  readOnly: boolean;
 }
 
 export function EditPBSServerDialog({
   server,
   open,
   onOpenChange,
+  readOnly,
 }: EditPBSServerDialogProps) {
   const { t } = useTranslation("backup");
   const [name, setName] = useState(server.name);
@@ -123,11 +129,19 @@ export function EditPBSServerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("pbsServerDialog.editTitle")}</DialogTitle>
+          <DialogTitle>
+            {readOnly
+              ? t("pbsServerDialog.viewTitle")
+              : t("pbsServerDialog.editTitle")}
+          </DialogTitle>
           <DialogDescription>
             <Trans
               t={t}
-              i18nKey="pbsServerDialog.editDescription"
+              i18nKey={
+                readOnly
+                  ? "pbsServerDialog.viewDescription"
+                  : "pbsServerDialog.editDescription"
+              }
               values={{ name: server.name }}
               components={{ name: <strong /> }}
             />
@@ -135,110 +149,118 @@ export function EditPBSServerDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-name">
-              {t("serverDialog.serverName")}
-            </Label>
-            <Input
-              id="edit-pbs-name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-              }}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-api-url">
-              {t("pbsServerDialog.apiUrl")}
-            </Label>
-            <Input
-              id="edit-pbs-api-url"
-              value={apiUrl}
-              onChange={(e) => {
-                setApiUrl(e.target.value);
-              }}
-              required
-            />
-            {addressChanged && (
-              <p className="text-xs text-muted-foreground">
-                {t("pbsServerDialog.addressMoved")}
-              </p>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-token-id">
-              {t("pbsServerDialog.tokenId")}
-            </Label>
-            <Input
-              id="edit-pbs-token-id"
-              value={tokenId}
-              onChange={(e) => {
-                setTokenId(e.target.value);
-              }}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-token-secret">
-              {t("pbsServerDialog.tokenSecret")}{" "}
-              <span className="text-muted-foreground font-normal">
-                {addressChanged
-                  ? t("pbsServerDialog.tokenSecretRequired")
-                  : t("pbsServerDialog.tokenSecretKeep")}
-              </span>
-            </Label>
-            <Input
-              id="edit-pbs-token-secret"
-              type="password"
-              placeholder={
-                addressChanged
-                  ? t("pbsServerDialog.tokenSecretReenter")
-                  : t("pbsServerDialog.tokenSecretKeepPlaceholder")
-              }
-              value={tokenSecret}
-              onChange={(e) => {
-                setTokenSecret(e.target.value);
-              }}
-              required={addressChanged}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-fingerprint">
-              {t("pbsServerDialog.tlsFingerprint")}
-            </Label>
-            <Input
-              id="edit-pbs-fingerprint"
-              value={tlsFingerprint}
-              onChange={(e) => {
-                setTlsFingerprint(e.target.value);
-              }}
-              placeholder={t("serverDialog.sha256Fingerprint")}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-pbs-cluster">
-              {t("pbsServerDialog.associatedCluster")}
-              <span className="ml-1 text-xs font-normal text-muted-foreground">
-                {t("pbsServerDialog.associatedClusterHint")}
-              </span>
-            </Label>
-            <select
-              id="edit-pbs-cluster"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-              value={clusterId}
-              onChange={(e) => {
-                setClusterId(e.target.value);
-              }}
-            >
-              <option value="">{t("pbsServerDialog.none")}</option>
-              {clusters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Disables every field at once; the buttons sit outside it. */}
+          <fieldset disabled={readOnly} className="min-w-0 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-name">
+                {t("serverDialog.serverName")}
+              </Label>
+              <Input
+                id="edit-pbs-name"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-api-url">
+                {t("pbsServerDialog.apiUrl")}
+              </Label>
+              <Input
+                id="edit-pbs-api-url"
+                value={apiUrl}
+                onChange={(e) => {
+                  setApiUrl(e.target.value);
+                }}
+                required
+              />
+              {addressChanged && (
+                <p className="text-xs text-muted-foreground">
+                  {t("pbsServerDialog.addressMoved")}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-token-id">
+                {t("pbsServerDialog.tokenId")}
+              </Label>
+              <Input
+                id="edit-pbs-token-id"
+                value={tokenId}
+                onChange={(e) => {
+                  setTokenId(e.target.value);
+                }}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-token-secret">
+                {t("pbsServerDialog.tokenSecret")}{" "}
+                {/* How to change it, which is not this role's to do. */}
+                {!readOnly && (
+                  <span className="text-muted-foreground font-normal">
+                    {addressChanged
+                      ? t("pbsServerDialog.tokenSecretRequired")
+                      : t("pbsServerDialog.tokenSecretKeep")}
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="edit-pbs-token-secret"
+                type="password"
+                placeholder={
+                  readOnly
+                    ? undefined
+                    : addressChanged
+                      ? t("pbsServerDialog.tokenSecretReenter")
+                      : t("pbsServerDialog.tokenSecretKeepPlaceholder")
+                }
+                value={tokenSecret}
+                onChange={(e) => {
+                  setTokenSecret(e.target.value);
+                }}
+                required={addressChanged}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-fingerprint">
+                {t("pbsServerDialog.tlsFingerprint")}
+              </Label>
+              <Input
+                id="edit-pbs-fingerprint"
+                value={tlsFingerprint}
+                onChange={(e) => {
+                  setTlsFingerprint(e.target.value);
+                }}
+                placeholder={t("serverDialog.sha256Fingerprint")}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-pbs-cluster">
+                {t("pbsServerDialog.associatedCluster")}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  {t("pbsServerDialog.associatedClusterHint")}
+                </span>
+              </Label>
+              <select
+                id="edit-pbs-cluster"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                value={clusterId}
+                onChange={(e) => {
+                  setClusterId(e.target.value);
+                }}
+              >
+                <option value="">{t("pbsServerDialog.none")}</option>
+                {clusters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </fieldset>
 
           {privateWarning != null && (
             <PrivateAddressWarning
@@ -268,13 +290,15 @@ export function EditPBSServerDialog({
                 onOpenChange(false);
               }}
             >
-              {t("common:cancel")}
+              {readOnly ? t("common:close") : t("common:cancel")}
             </Button>
-            <Button type="submit" disabled={updatePBS.isPending}>
-              {updatePBS.isPending
-                ? t("common:saving")
-                : t("common:saveChanges")}
-            </Button>
+            {!readOnly && (
+              <Button type="submit" disabled={updatePBS.isPending}>
+                {updatePBS.isPending
+                  ? t("common:saving")
+                  : t("common:saveChanges")}
+              </Button>
+            )}
           </DialogFooter>
         </form>
       </DialogContent>

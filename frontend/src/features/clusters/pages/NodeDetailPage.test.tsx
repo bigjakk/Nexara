@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { bodiesOf, listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
 import { setupUser } from "@/test/user";
 import { DisksTab } from "../components/node/NodeDisksTab";
 import { FirewallTab } from "../components/node/NodeFirewallTab";
@@ -22,9 +23,29 @@ let api: ReturnType<typeof stubApi>;
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  grantPermissions();
+});
+
+/** A physical disk as the node's disk list returns it. */
+const disk = (dev: string) => ({
+  id: dev,
+  dev_path: dev,
+  model: "Example SSD",
+  serial: "",
+  size: 1_000_000_000_000,
+  disk_type: "ssd",
+  health: "PASSED",
+  wearout: "",
+  rpm: 0,
+  vendor: "",
+  wwn: "",
 });
 
 describe("NodeDetailPage header — More actions", () => {
+  beforeEach(() => {
+    grantPermissions("manage:node");
+  });
+
   // The rare and the disruptive actions sit behind a menu, whose items are
   // gone by the time a dialog shows: one must still ask, and send only then.
   it("Reboot asks first and sends only on confirm", async () => {
@@ -59,18 +80,9 @@ describe("NodeDetailPage header — More actions", () => {
 
 describe("NodeDetailPage Disks tab — row actions", () => {
   const DISKS = `/api/v1/clusters/${CLUSTER}/nodes/n1/disks`;
-  const disk = (dev: string) => ({
-    id: dev,
-    dev_path: dev,
-    model: "Example SSD",
-    serial: "",
-    size: 1_000_000_000_000,
-    disk_type: "ssd",
-    health: "PASSED",
-    wearout: "",
-    rpm: 0,
-    vendor: "",
-    wwn: "",
+
+  beforeEach(() => {
+    grantPermissions("manage:node");
   });
 
   // Both actions open one shared confirmation from a row's menu: it must name
@@ -121,6 +133,10 @@ describe("NodeDetailPage Disks tab — row actions", () => {
 
 describe("NodeDetailPage Network tab — deleting an interface", () => {
   const NET = `/api/v1/clusters/${CLUSTER}/networks/${NODE}`;
+
+  beforeEach(() => {
+    grantPermissions("manage:network", "delete:network");
+  });
 
   async function openDeleteFor(iface: string) {
     api = stubApi({
@@ -203,6 +219,10 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
     },
   ];
   let qc: QueryClient;
+
+  beforeEach(() => {
+    grantPermissions("manage:network");
+  });
 
   async function openDeleteFor(pos: number) {
     api = stubApi({ [RULES]: listOf(LIST) });
@@ -389,6 +409,10 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
 describe("NodeDetailPage Network tab — Apply Config and Revert", () => {
   const NET = `/api/v1/clusters/${CLUSTER}/networks/${NODE}`;
 
+  beforeEach(() => {
+    grantPermissions("manage:network", "delete:network");
+  });
+
   it.each([
     {
       button: "Apply config",
@@ -427,6 +451,10 @@ describe("NodeDetailPage Network tab — Apply Config and Revert", () => {
 
 describe("NodeDetailPage Firewall tab — quick-add rules", () => {
   const RULES = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/firewall/rules`;
+
+  beforeEach(() => {
+    grantPermissions("manage:network");
+  });
 
   it.each([
     {
@@ -471,6 +499,10 @@ describe("NodeDetailPage Firewall tab — quick-add rules", () => {
 
 describe("NodeDetailPage Services tab — Stop and Restart", () => {
   const SERVICES = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}/services`;
+
+  beforeEach(() => {
+    grantPermissions("manage:node");
+  });
 
   // The second row is the one acted on, so an action sent for the first
   // shows.
@@ -544,5 +576,103 @@ describe("NodeDetailPage Services tab — Stop and Restart", () => {
     expect(
       within(row).queryByRole("button", { name: "Stop" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// Each tab offers its writes only to a role holding what their routes take:
+// the disk and local-storage writes, and a service's Start, Restart and Stop,
+// take manage:node; a node's firewall rules take manage:network.
+describe("NodeDetailPage tabs — writes offered only with their permission", () => {
+  const NODE_PATH = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}`;
+  const TABS = [
+    {
+      tab: "Disks",
+      permission: "manage:node",
+      reads: {
+        [`/api/v1/clusters/${CLUSTER}/nodes/n1/disks`]: listOf([
+          disk("/dev/sdb"),
+        ]),
+        [`${NODE_PATH}/disks/zfs`]: listOf([
+          {
+            name: "store01",
+            size: 1,
+            alloc: 0,
+            free: 1,
+            frag: 0,
+            dedup: 1,
+            health: "ONLINE",
+          },
+        ]),
+        [`${NODE_PATH}/disks/lvm`]: listOf([
+          { name: "store02", size: 1, free: 1, pv_count: 1, lv_count: 0 },
+        ]),
+        [`${NODE_PATH}/disks/lvmthin`]: listOf([
+          {
+            lv: "store03",
+            vg: "store04",
+            lv_size: 1,
+            used: 0,
+            metadata_size: 1,
+            metadata_used: 0,
+            data_percent: 0,
+          },
+        ]),
+      },
+      ui: <DisksTab clusterId={CLUSTER} nodeId="n1" nodeName={NODE} isOnline />,
+      shown: ["/dev/sdb", "store01", "store02", "store03"],
+      writes: [
+        "Actions for /dev/sdb",
+        "Create ZFS",
+        "Destroy pool store01",
+        "Create LVM",
+        "Destroy volume group store02",
+        "Create LVM-thin",
+        "Destroy thin pool store04/store03",
+        "Create directory",
+      ],
+    },
+    {
+      tab: "Services",
+      permission: "manage:node",
+      reads: {
+        [`${NODE_PATH}/services`]: listOf([
+          { service: "cron", name: "cron", desc: "Cron", state: "running" },
+          { service: "chrony", name: "chrony", desc: "NTP", state: "dead" },
+        ]),
+      },
+      ui: <ServicesTab clusterId={CLUSTER} nodeName={NODE} />,
+      shown: ["cron", "chrony"],
+      writes: ["Restart", "Stop", "Start"],
+    },
+    {
+      tab: "Firewall",
+      permission: "manage:network",
+      reads: {
+        [`${NODE_PATH}/firewall/rules`]: listOf([
+          { pos: 0, type: "in", action: "ACCEPT", enable: 1, comment: "ssh" },
+        ]),
+      },
+      ui: <FirewallTab clusterId={CLUSTER} nodeName={NODE} />,
+      shown: ["ssh"],
+      writes: ["Add accept rule", "Add drop rule", "Delete firewall rule 0"],
+    },
+  ];
+
+  describe.each(TABS)("$tab", ({ permission, reads, ui, shown, writes }) => {
+    it.each([false, true])(
+      `offers its writes only with ${permission}: granted %s`,
+      async (granted) => {
+        grantPermissions(...(granted ? [permission] : []));
+        stubApi(reads);
+        renderWithProviders(ui);
+
+        for (const text of shown) await screen.findByText(text);
+        expect(
+          writes.filter(
+            (name) => screen.queryByRole("button", { name }) !== null,
+          ),
+        ).toEqual(granted ? writes : []);
+      },
+    );
   });
 });

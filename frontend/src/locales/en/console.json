@@ -121,6 +121,8 @@
     "console": "Console",
     "noConsoleIsOpen": "No console is open",
     "openOneHereOrFrom": "Open one here, or from a guest's or a node's own page.",
+    "openOneFromANode": "Open one from a node's own page.",
+    "noConsolePermission": "Your role cannot open a console.",
     "openSessions": "Open sessions",
     "show": "Show",
     "showLabel": "Show {{label}}",

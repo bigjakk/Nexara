@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { apiClient } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 import { AddVeeamServerDialog } from "./AddVeeamServerDialog";
 
 vi.mock("@/lib/api-client", async () =>
@@ -31,7 +33,25 @@ async function openAndFill(url: string) {
 describe("AddVeeamServerDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    grantPermissions("manage:veeam");
   });
+
+  // POST /veeam-servers is an install-wide check: the grant on one cluster
+  // does not admit it.
+  it.each<[string, string[], string[], boolean]>([
+    ["manage:veeam install-wide", ["manage:veeam"], ["manage:veeam"], true],
+    ["manage:veeam on a cluster", ["manage:veeam"], [], false],
+    ["view:veeam", ["view:veeam"], ["view:veeam"], false],
+  ])(
+    "is offered only to a role that may add one: %s",
+    (_, permissions, globalPermissions, offered) => {
+      useAuthStore.setState({ user: null, permissions, globalPermissions });
+      renderWithProviders(<AddVeeamServerDialog />);
+      expect(
+        screen.queryByRole("button", { name: /add veeam server/i }) !== null,
+      ).toBe(offered);
+    },
+  );
 
   it("states the version and edition requirements before anything is typed", async () => {
     const user = userEvent.setup();

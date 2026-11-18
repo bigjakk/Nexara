@@ -25,7 +25,7 @@ import {
   useDismissNotificationDLQ,
   useDeleteNotificationDLQ,
 } from "../api/alert-queries";
-import { useAuth } from "@/hooks/useAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { formatExactDateTime } from "@/lib/format";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
@@ -65,8 +65,10 @@ const STATE_LABELS: Record<DLQState, string> = {
 
 export function NotificationDLQTable() {
   const { t } = useTranslation("alerts");
-  const { hasPermission } = useAuth();
-  const canManage = hasPermission("manage", "notification_dlq");
+  // Retry, dismiss and delete take manage:notification_dlq install-wide
+  // (registry_notification_dlq.go).
+  const { hasGlobalPermission } = usePermissions();
+  const canManage = hasGlobalPermission("manage", "notification_dlq");
   const [stateFilter, setStateFilter] = useState<DLQState | "">("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [retryFeedback, setRetryFeedback] = useState<

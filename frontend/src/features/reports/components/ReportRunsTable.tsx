@@ -128,7 +128,10 @@ export function ReportRunsTable() {
         </p>
       ) : !runs?.length ? (
         <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-          No report runs yet. Generate one from the report types.
+          {/* Only a role that may generate one (generate:report) is asked to. */}
+          {canGenerate
+            ? "No report runs yet. Generate one from the report types."
+            : "No report runs yet."}
         </p>
       ) : (
         <Table>

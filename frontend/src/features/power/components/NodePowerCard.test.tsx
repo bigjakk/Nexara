@@ -72,6 +72,20 @@ describe("NodePowerCard", () => {
     expect(apiClient.put).toHaveBeenCalledWith("/api/v1/ups-devices/u1/feeds/f1", { protected_elsewhere: true });
   });
 
+  // Adding the node to what a UPS powers takes manage:ups install-wide.
+  it.each([
+    { perms: ["view:ups"], can: false },
+    { perms: ["view:ups", "manage:ups"], can: true },
+  ])("points to the Power page only for a role that may add the node: $perms", async ({ perms, can }) => {
+    useAuthStore.setState({ globalPermissions: perms });
+    serve([upsDevice({ feeds: [] })]);
+
+    renderWithProviders(<NodePowerCard clusterId="c1" nodeName="pve-03" online />);
+
+    expect(await screen.findByText(/^No UPS Nexara knows powers/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Power page" }) !== null).toBe(can);
+  });
+
   // A name a UPS driver or an operator supplies is text in a translated
   // sentence, never markup <Trans> would parse into a component.
   it("shows a UPS and server name that contains markup as literal text", async () => {

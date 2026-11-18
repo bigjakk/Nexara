@@ -34,11 +34,17 @@ import { useTranslation } from "react-i18next";
 
 interface DRSRulesTableProps {
   clusterId: string;
+  /** Whether a rule's Delete is offered: both delete routes take manage:drs. */
+  canDelete: boolean;
   /** Controls for the panel's title row: the Add Rule dialog. */
   actions?: ReactNode;
 }
 
-export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
+export function DRSRulesTable({
+  clusterId,
+  canDelete,
+  actions,
+}: DRSRulesTableProps) {
   const { t } = useTranslation("clusters");
   const manualQuery = useDRSRules(clusterId);
   const haQuery = useHARules(clusterId);
@@ -211,24 +217,27 @@ export function DRSRulesTable({ clusterId, actions }: DRSRulesTableProps) {
                         })}
                       />
                     )}
-                    <Button
-                      aria-label={t(
-                        "drsRulesTable.deleteRuleTypeRuleForHaRuleName",
-                        {
-                          ruleType: rule.rule_type,
-                          haRuleName:
-                            rule.ha_rule_name ?? (rule.vm_ids ?? []).join(", "),
-                        },
-                      )}
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        setDeleteTarget(rule);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canDelete && (
+                      <Button
+                        aria-label={t(
+                          "drsRulesTable.deleteRuleTypeRuleForHaRuleName",
+                          {
+                            ruleType: rule.rule_type,
+                            haRuleName:
+                              rule.ha_rule_name ??
+                              (rule.vm_ids ?? []).join(", "),
+                          },
+                        )}
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setDeleteTarget(rule);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))

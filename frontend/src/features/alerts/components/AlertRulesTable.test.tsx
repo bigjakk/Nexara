@@ -40,7 +40,8 @@ function makeRule(overrides: Partial<AlertRule> = {}): AlertRule {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useAuthStore.setState({ globalPermissions: [] });
+  // These rules name no cluster, which takes manage:alert install-wide.
+  useAuthStore.setState({ globalPermissions: ["manage:alert"] });
   vi.mocked(useAuth).mockReturnValue({
     hasPermission: () => true,
   } as unknown as ReturnType<typeof useAuth>);
@@ -82,6 +83,40 @@ describe("AlertRulesTable", () => {
     expect(within(row).queryByRole("button")).not.toBeInTheDocument();
     expect(within(row).getByText("Yes")).toBeInTheDocument();
   });
+
+  // A rule on a cluster takes manage:alert there; one that names no cluster
+  // takes it install-wide (UpdateRule and DeleteRule in handlers/alerts.go).
+  it.each<[string[], boolean]>([
+    [[], false],
+    [["manage:alert"], true],
+  ])(
+    "with %j install-wide offers a global rule's actions: %s",
+    async (globalPermissions, offered) => {
+      useAuthStore.setState({ globalPermissions });
+      mockedList.mockResolvedValue([
+        makeRule({ id: "r-c", name: "On a cluster", cluster_id: "c1" }),
+        makeRule({
+          id: "r-g",
+          name: "Repository full",
+          scope_type: "global",
+          metric: "veeam_repo_used_percent",
+        }),
+      ]);
+      renderWithProviders(<AlertRulesTable />);
+      const row = (name: string) =>
+        screen.getByText(name).closest("tr") as HTMLElement;
+      await screen.findByText("Repository full");
+      for (const name of ["Disable rule", "Delete rule"]) {
+        expect(
+          within(row("On a cluster")).getByRole("button", { name }),
+        ).toBeInTheDocument();
+        expect(
+          within(row("Repository full")).queryByRole("button", { name }) !==
+            null,
+        ).toBe(offered);
+      }
+    },
+  );
 
   // A UPS's rule reads as its UPS, looked up where the caller may list them.
   it("names a UPS's rule by its UPS", async () => {

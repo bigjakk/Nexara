@@ -13,6 +13,7 @@ import { Panel } from "@/components/page/Panel";
 import { SettingRow } from "@/components/page/Settings";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useFirewallOptions,
   useSetFirewallOptions,
@@ -31,6 +32,9 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
   const { t } = useTranslation("networks");
   // Open while turning the cluster firewall off waits on its confirmation.
   const [confirmDisable, setConfirmDisable] = useState<true | null>(null);
+  // The options route takes manage:network on the cluster; without it the
+  // card shows the settings read-only.
+  const canEdit = usePermissions().canManage("network");
 
   // `opts?.enable === 1` is false for a read that failed as readily as for a
   // firewall that is off, and this badge is a statement about the cluster's
@@ -55,7 +59,7 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
   return (
     <Panel
       title={t("firewallOptionsCard.options")}
-      aside={t("firewallOptionsCard.eachChangeIsSavedAs")}
+      aside={canEdit ? t("firewallOptionsCard.eachChangeIsSavedAs") : undefined}
       className="max-w-4xl"
     >
       <div className="divide-y">
@@ -70,24 +74,26 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
           </Badge>
           {/* Turning it off stops every rule being enforced, at once: it asks
               first. Turning it on does not. */}
-          <Button
-            variant="outline"
-            size="sm"
-            className={
-              isEnabled
-                ? "border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                : undefined
-            }
-            onClick={() => {
-              if (isEnabled) setConfirmDisable(true);
-              else setOpts.mutate({ enable: 1 });
-            }}
-            disabled={setOpts.isPending}
-          >
-            {isEnabled
-              ? t("disableFirewall")
-              : t("firewallOptionsCard.enableFirewall")}
-          </Button>
+          {canEdit && (
+            <Button
+              variant="outline"
+              size="sm"
+              className={
+                isEnabled
+                  ? "border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  : undefined
+              }
+              onClick={() => {
+                if (isEnabled) setConfirmDisable(true);
+                else setOpts.mutate({ enable: 1 });
+              }}
+              disabled={setOpts.isPending}
+            >
+              {isEnabled
+                ? t("disableFirewall")
+                : t("firewallOptionsCard.enableFirewall")}
+            </Button>
+          )}
           <ConfirmDeleteDialog
             target={confirmDisable}
             onClose={() => {
@@ -111,6 +117,7 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             onValueChange={(val) => {
               setOpts.mutate({ policy_in: val });
             }}
+            disabled={!canEdit}
           >
             <SelectTrigger id="firewall-policy-in" className="sm:w-44">
               <SelectValue />
@@ -134,6 +141,7 @@ export function FirewallOptionsCard({ clusterId }: FirewallOptionsCardProps) {
             onValueChange={(val) => {
               setOpts.mutate({ policy_out: val });
             }}
+            disabled={!canEdit}
           >
             <SelectTrigger id="firewall-policy-out" className="sm:w-44">
               <SelectValue />

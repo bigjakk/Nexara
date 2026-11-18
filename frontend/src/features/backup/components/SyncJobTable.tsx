@@ -21,9 +21,11 @@ function formatUnixTime(ts: number) {
 interface SyncJobTableProps {
   jobs: PBSSyncJob[];
   pbsId: string;
+  /** Running a job takes manage:backup on the server's scope. */
+  canRun: boolean;
 }
 
-export function SyncJobTable({ jobs, pbsId }: SyncJobTableProps) {
+export function SyncJobTable({ jobs, pbsId, canRun }: SyncJobTableProps) {
   const runMutation = useRunSyncJob();
 
   if (jobs.length === 0) {
@@ -70,18 +72,20 @@ export function SyncJobTable({ jobs, pbsId }: SyncJobTableProps) {
                 {formatUnixTime(job.next_run)}
               </TableCell>
               <TableCell>
-                <Button
-                  aria-label={`Run sync job ${job.job_id}`}
-                  title="Run now"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    runMutation.mutate({ pbsId, jobId: job.job_id });
-                  }}
-                  disabled={runMutation.isPending}
-                >
-                  <Play className="h-4 w-4" />
-                </Button>
+                {canRun && (
+                  <Button
+                    aria-label={`Run sync job ${job.job_id}`}
+                    title="Run now"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      runMutation.mutate({ pbsId, jobId: job.job_id });
+                    }}
+                    disabled={runMutation.isPending}
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
+                )}
               </TableCell>
             </TableRow>
           ))}

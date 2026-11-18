@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 
 import { Panel } from "@/components/page/Panel";
 import { QueryStateNotice } from "@/components/QueryStateNotice";
 import { Button } from "@/components/ui/button";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Table,
   TableBody,
@@ -63,6 +64,11 @@ export function NetworkTab({
   const [pendingDelete, setPendingDelete] = useState<NetworkInterface | null>(
     null,
   );
+  // An interface's update route takes manage:network on the cluster, its
+  // delete delete:network.
+  const { canManage, canDelete } = usePermissions();
+  const canEdit = canManage("network");
+  const canRemove = canDelete("network");
   const count = networkInterfaces?.length ?? 0;
 
   return (
@@ -147,8 +153,10 @@ export function NetworkTab({
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-1">
+                      {/* Without manage:network it opens the form read-only:
+                          the one place an interface's settings show. */}
                       <Button
-                        aria-label={`Edit ${iface.iface}`}
+                        aria-label={`${canEdit ? "Edit" : "View"} ${iface.iface}`}
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-muted-foreground"
@@ -156,20 +164,26 @@ export function NetworkTab({
                           setEditIface(iface);
                         }}
                       >
-                        <Pencil className="h-3.5 w-3.5" />
+                        {canEdit ? (
+                          <Pencil className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
                       </Button>
-                      <Button
-                        aria-label={`Delete ${iface.iface}`}
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => {
-                          setPendingDelete(iface);
-                        }}
-                        disabled={deleteIface.isPending}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      {canRemove && (
+                        <Button
+                          aria-label={`Delete ${iface.iface}`}
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={() => {
+                            setPendingDelete(iface);
+                          }}
+                          disabled={deleteIface.isPending}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -184,6 +198,7 @@ export function NetworkTab({
           clusterId={clusterId}
           nodeName={nodeName}
           existing={editIface}
+          readOnly={!canEdit}
           open
           onOpenChange={(open) => {
             if (!open) setEditIface(null);

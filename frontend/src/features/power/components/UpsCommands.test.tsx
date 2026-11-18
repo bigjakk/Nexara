@@ -68,4 +68,19 @@ describe("UpsCommands", () => {
     await user.click(cut);
     expect(apiClient.post).toHaveBeenLastCalledWith("/api/v1/ups-devices/u1/commands", { command: "load.off", confirm: "ups01" });
   });
+
+  // Storing an account edits the NUT server, which takes manage:ups install-wide.
+  it.each([
+    { perms: ["view:ups", "execute:ups"], can: false },
+    { perms: ["view:ups", "execute:ups", "manage:ups"], can: true },
+  ])("asks for an account only of a role that may store one: $perms", async ({ perms, can }) => {
+    useAuthStore.setState({ globalPermissions: perms });
+    vi.mocked(apiClient.list).mockImplementation((path: unknown) =>
+      Promise.resolve(String(path).includes("nut-servers") ? [nutServer({ has_password: false })] : []),
+    );
+    renderWithProviders(<UpsCommands device={upsDevice({ commands_listed_at: "2026-11-03T12:00:00Z", commands: [] })} />);
+
+    expect(await screen.findByText(/^upsd runs commands only for an account/)).toBeInTheDocument();
+    expect(screen.queryByText(/Add one with instcmds/) !== null).toBe(can);
+  });
 });

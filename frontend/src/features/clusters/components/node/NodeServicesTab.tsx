@@ -13,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useNodeServices, useServiceAction } from "../../api/cluster-queries";
 import { NoValue, StateText, type StateTone } from "./StateText";
 
@@ -37,6 +38,8 @@ export function ServicesTab({
   const servicesQuery = useNodeServices(clusterId, nodeName);
   const services = servicesQuery.data;
   const serviceAction = useServiceAction(clusterId, nodeName);
+  // Start, Restart and Stop take manage:node; without it the list is read-only.
+  const canAct = usePermissions().canManage("node");
   // Restart and Stop only set this and send from its confirmation; Start
   // sends at once.
   const [pendingAction, setPendingAction] = useState<{
@@ -78,7 +81,7 @@ export function ServicesTab({
                 <TableHead>Service</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>State</TableHead>
-                <TableHead className="w-44" />
+                {canAct && <TableHead className="w-44" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -95,43 +98,28 @@ export function ServicesTab({
                       {svc.state}
                     </StateText>
                   </TableCell>
-                  <TableCell className="py-1.5">
-                    <div className="flex justify-end gap-1">
-                      {svc.state !== "running" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1.5 px-2"
-                          onClick={() => {
-                            serviceAction.mutate({
-                              service: svc.service,
-                              action: "start",
-                            });
-                          }}
-                          disabled={serviceAction.isPending}
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                          Start
-                        </Button>
-                      )}
-                      {svc.state === "running" && (
-                        <>
+                  {canAct && (
+                    <TableCell className="py-1.5">
+                      <div className="flex justify-end gap-1">
+                        {svc.state !== "running" && (
                           <Button
                             variant="ghost"
                             size="sm"
                             className="h-7 gap-1.5 px-2"
                             onClick={() => {
-                              setPendingAction({
+                              serviceAction.mutate({
                                 service: svc.service,
-                                action: "restart",
+                                action: "start",
                               });
                             }}
                             disabled={serviceAction.isPending}
                           >
-                            <RotateCw className="h-3.5 w-3.5" />
-                            Restart
+                            <Play className="h-3.5 w-3.5" />
+                            Start
                           </Button>
-                          {!UNSTOPPABLE_SERVICES.has(svc.service) && (
+                        )}
+                        {svc.state === "running" && (
+                          <>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -139,19 +127,36 @@ export function ServicesTab({
                               onClick={() => {
                                 setPendingAction({
                                   service: svc.service,
-                                  action: "stop",
+                                  action: "restart",
                                 });
                               }}
                               disabled={serviceAction.isPending}
                             >
-                              <Square className="h-3.5 w-3.5" />
-                              Stop
+                              <RotateCw className="h-3.5 w-3.5" />
+                              Restart
                             </Button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
+                            {!UNSTOPPABLE_SERVICES.has(svc.service) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 gap-1.5 px-2"
+                                onClick={() => {
+                                  setPendingAction({
+                                    service: svc.service,
+                                    action: "stop",
+                                  });
+                                }}
+                                disabled={serviceAction.isPending}
+                              >
+                                <Square className="h-3.5 w-3.5" />
+                                Stop
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

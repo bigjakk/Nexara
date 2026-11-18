@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
+import { grantPermissions } from "@/test/permissions";
 import { ClusterFirewallTab } from "./ClusterFirewallTab";
 
 const CLUSTER = "c1";
@@ -31,8 +32,55 @@ const LISTS = {
 
 let api: ReturnType<typeof stubApi>;
 
+beforeEach(() => {
+  grantPermissions("manage:network");
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+// Every alias, IP set, entry and security group write takes manage:network,
+// the deletes included (not delete:network). A Viewer was offered them all.
+describe("ClusterFirewallTab — what a role is offered", () => {
+  it.each([
+    { permissions: [], offered: false },
+    { permissions: ["delete:network"], offered: false },
+    { permissions: ["manage:network"], offered: true },
+  ])(
+    "with $permissions offers the adds and deletes: $offered",
+    async ({ permissions, offered }) => {
+      grantPermissions(...permissions);
+      const user = await renderOnTab("Aliases");
+      const seen: Record<string, boolean> = {};
+      const look = (...names: string[]) => {
+        for (const name of names) {
+          seen[name] = screen.queryByRole("button", { name }) !== null;
+        }
+      };
+
+      await screen.findByText("net01");
+      look("Add alias", "Delete alias net01");
+      await user.click(screen.getByRole("button", { name: "IP sets" }));
+      await user.click(await screen.findByText("set02"));
+      await screen.findByText("192.0.2.0/24");
+      look(
+        "Add IP set",
+        "Delete IPSet set02",
+        "Add",
+        "Delete entry 192.0.2.0/24",
+      );
+      seen["CIDR to add"] =
+        screen.queryByRole("textbox", { name: "CIDR to add" }) !== null;
+      await user.click(screen.getByRole("button", { name: "Security groups" }));
+      await screen.findByText("grp01");
+      look("Add group", "Delete security group grp01");
+
+      expect(seen).toEqual(
+        Object.fromEntries(Object.keys(seen).map((name) => [name, offered])),
+      );
+    },
+  );
 });
 
 async function renderOnTab(tab: string) {

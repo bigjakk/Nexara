@@ -3,7 +3,6 @@ import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { setupUser } from "@/test/user";
 import { apiClient } from "@/lib/api-client";
-import { useAuthStore } from "@/stores/auth-store";
 import { SnapshotTable } from "./SnapshotTable";
 import type { PBSSnapshot } from "../types/backup";
 
@@ -31,6 +30,21 @@ function snapshot(backupTime: number): PBSSnapshot {
   };
 }
 
+/** What the page grants, by the server's scope (BackupDashboardPage). */
+interface Grants {
+  canManage: boolean;
+  canDelete: boolean;
+  canRestore: boolean;
+}
+
+const NONE: Grants = { canManage: false, canDelete: false, canRestore: false };
+
+function renderTable(snapshots: PBSSnapshot[], grants: Partial<Grants>) {
+  return renderWithProviders(
+    <SnapshotTable snapshots={snapshots} pbsId="pbs-1" {...NONE} {...grants} />,
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(apiClient.list).mockImplementation((path: unknown) =>
@@ -48,13 +62,9 @@ beforeEach(() => {
 describe("SnapshotTable — change owner", () => {
   it("gives the group to the server's token", async () => {
     const user = setupUser();
-    useAuthStore.setState({ user: null, permissions: ["manage:backup"] });
-    renderWithProviders(
-      <SnapshotTable
-        snapshots={[snapshot(1700000000), snapshot(1700086400)]}
-        pbsId="pbs-1"
-      />,
-    );
+    renderTable([snapshot(1700000000), snapshot(1700086400)], {
+      canManage: true,
+    });
 
     await user.click(screen.getAllByText("121")[0] as HTMLElement);
     await user.click(
@@ -81,11 +91,8 @@ describe("SnapshotTable — change owner", () => {
   // the token a storage signs in as.
   it("fills in nothing when the server's token already owns the group", async () => {
     const user = setupUser();
-    useAuthStore.setState({ user: null, permissions: ["manage:backup"] });
     const owned = { ...snapshot(1700000000), owner: "backup@pbs!test" };
-    renderWithProviders(
-      <SnapshotTable snapshots={[owned, snapshot(1700086400)]} pbsId="pbs-1" />,
-    );
+    renderTable([owned, snapshot(1700086400)], { canManage: true });
 
     await user.click(screen.getAllByText("121")[0] as HTMLElement);
     await user.click(
@@ -98,10 +105,10 @@ describe("SnapshotTable — change owner", () => {
 
   it("offers no change to a caller without manage:backup", async () => {
     const user = setupUser();
-    useAuthStore.setState({ user: null, permissions: ["view:backup"] });
-    renderWithProviders(
-      <SnapshotTable snapshots={[snapshot(1700000000)]} pbsId="pbs-1" />,
-    );
+    renderTable([snapshot(1700000000)], {
+      canDelete: true,
+      canRestore: true,
+    });
 
     await user.click(screen.getByText("121"));
     // The details are open: the change would sit beside their Owner.
@@ -109,5 +116,35 @@ describe("SnapshotTable — change owner", () => {
     expect(
       screen.queryByRole("button", { name: "Change owner of vm/121" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// Each action is offered only with its route's grant: protect, the comment and
+// the owner take manage:backup on the server's scope, a delete delete:backup,
+// and a restore manage:backup on a cluster.
+describe("SnapshotTable — actions", () => {
+  const ACTIONS: [string, keyof Grants][] = [
+    ["Protect", "canManage"],
+    ["Edit comment for vm-121-1700000000", "canManage"],
+    ["Change owner of vm/121", "canManage"],
+    ["Delete", "canDelete"],
+    ["Restore", "canRestore"],
+  ];
+
+  it.each<[string, Partial<Grants>]>([
+    ["no grant", {}],
+    ["manage:backup", { canManage: true }],
+    ["delete:backup", { canDelete: true }],
+    ["a restore's manage:backup", { canRestore: true }],
+  ])("with %s", async (_, grants) => {
+    const user = setupUser();
+    renderTable([snapshot(1700000000)], grants);
+    await user.click(screen.getByText("121"));
+
+    for (const [name, grant] of ACTIONS) {
+      expect(screen.queryByRole("button", { name }) !== null, name).toBe(
+        grants[grant] === true,
+      );
+    }
   });
 });

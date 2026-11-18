@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { ClustersListPage } from "./ClustersListPage";
 import type { ClusterResponse } from "@/types/api";
 
@@ -63,7 +64,34 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// A grant made in one test must not carry into the next.
+afterEach(() => {
+  grantPermissions();
+});
+
 describe("ClustersListPage", () => {
+  // As on the cluster's page: Edit takes manage:cluster, Delete delete:cluster;
+  // a Viewer got both on every row, each answering 403.
+  it.each([
+    [["manage:cluster"], true, false],
+    [["delete:cluster"], false, true],
+    [["view:cluster"], false, false],
+  ])("with %j offers Edit %s and Delete %s", (permissions, edit, del) => {
+    grantPermissions(...permissions);
+    mockUseClusters.mockReturnValue({
+      data: mockClusters,
+      isLoading: false,
+      error: null,
+    });
+    renderWithProviders(<ClustersListPage />);
+    const has = (name: string) =>
+      screen.queryByRole("button", { name }) !== null;
+    expect([has("Edit Prod Cluster"), has("Delete Prod Cluster")]).toEqual([
+      edit,
+      del,
+    ]);
+  });
+
   it("renders cluster names in table", () => {
     mockUseClusters.mockReturnValue({
       data: mockClusters,
@@ -94,6 +122,7 @@ describe("ClustersListPage", () => {
   });
 
   it("shows empty state when no clusters", () => {
+    grantPermissions("manage:cluster");
     mockUseClusters.mockReturnValue({
       data: [],
       isLoading: false,
@@ -104,6 +133,10 @@ describe("ClustersListPage", () => {
     expect(
       screen.getByText("No clusters configured. Add one to get started."),
     ).toBeInTheDocument();
+    // The empty state's, not a second one in the header.
+    expect(
+      screen.getAllByRole("button", { name: /add cluster/i }),
+    ).toHaveLength(1);
   });
 
   it("renders links to cluster detail pages", () => {

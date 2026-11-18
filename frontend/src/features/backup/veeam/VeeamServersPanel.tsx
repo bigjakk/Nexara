@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ServerCog } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/ui/segmented";
 import { EmptyState } from "@/components/EmptyState";
 import { Panel } from "@/components/page/Panel";
 import { ApiClientError } from "@/lib/api-client";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useVeeamServers,
@@ -79,8 +81,14 @@ function VeeamTabBody({
  * gathers from whichever server is selected.
  */
 export function VeeamServersPanel() {
+  const { t } = useTranslation("backup");
   const serversQuery = useVeeamServers();
   const servers = serversQuery.data ?? [];
+  // The server registry's writes are install-wide checks: adding and editing
+  // take manage:veeam, removing delete:veeam.
+  const { hasGlobalPermission } = usePermissions();
+  const canManage = hasGlobalPermission("manage", "veeam");
+  const canDelete = hasGlobalPermission("delete", "veeam");
 
   const [selectedServerId, setSelectedServerId] = useState<string>("");
   const [editTarget, setEditTarget] = useState<VeeamServer | null>(null);
@@ -145,7 +153,11 @@ export function VeeamServersPanel() {
         <EmptyState
           icon={ServerCog}
           title="No Veeam servers yet"
-          description="Connect a Veeam Backup & Replication server to see the state of its Proxmox backup jobs alongside your clusters."
+          description={
+            canManage
+              ? "Connect a Veeam Backup & Replication server to see the state of its Proxmox backup jobs alongside your clusters."
+              : t("noVeeamServersAddedYet")
+          }
         />
         <VeeamRequirementsNote />
       </div>
@@ -203,6 +215,8 @@ export function VeeamServersPanel() {
           actions={
             <ServerActions
               name={activeServer.name}
+              canEdit={canManage}
+              canDelete={canDelete}
               onEdit={() => {
                 setEditTarget(activeServer);
               }}

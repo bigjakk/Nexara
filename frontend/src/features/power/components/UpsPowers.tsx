@@ -88,7 +88,7 @@ export function UpsPowers({ device }: { device: UpsDevice }) {
       >
         {device.feeds.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
-            {t("upsPowers.nothingYetNexaraFindsThe")}
+            {canManage ? t("upsPowers.nothingYetNexaraFindsThe") : t("upsPowers.nothingYetFoundFromLogins")}
           </p>
         ) : (
           <Table>

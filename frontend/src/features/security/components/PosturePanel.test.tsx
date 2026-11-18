@@ -15,6 +15,7 @@ describe("PosturePanel", () => {
           total_nodes: 0,
           scanned_nodes: 0,
         })}
+        canScan
       />,
     );
 

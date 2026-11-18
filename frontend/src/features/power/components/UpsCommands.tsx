@@ -91,7 +91,7 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
     <div className="space-y-4">
       <Panel title={t("upsCommands.commands")} aside={commands.length > 0 ? t("upsCommands.lengthFromUpsd", { length: String(commands.length) }) : undefined}>
         <div className="-mt-2 max-w-[70ch]">
-          <AccountNote hasAccount={hasAccount} verifiedAt={server?.commands_verified_at ?? null} />
+          <AccountNote hasAccount={hasAccount} canAddAccount={hasGlobalPermission("manage", "ups")} verifiedAt={server?.commands_verified_at ?? null} />
         </div>
         {commands.length === 0 && <p className="mt-3 text-sm text-muted-foreground">{t("upsCommands.upsdListsNoInstantCommands")}</p>}
         {/* A tier per band: what it can do on the left, its commands on the right. */}
@@ -189,12 +189,13 @@ export function UpsCommands({ device }: { device: UpsDevice }) {
   );
 }
 
-function AccountNote({ hasAccount, verifiedAt }: { hasAccount: boolean; verifiedAt: string | null }) {
+/** canAddAccount: storing an account edits the NUT server, which takes manage:ups install-wide. */
+function AccountNote({ hasAccount, canAddAccount, verifiedAt }: { hasAccount: boolean; canAddAccount: boolean; verifiedAt: string | null }) {
   const { t } = useTranslation("power");
   if (!hasAccount) {
     return (
       <p className="text-sm text-muted-foreground">
-        {t("upsCommands.upsdRunsCommandsOnlyFor")}
+        {canAddAccount ? t("upsCommands.upsdRunsCommandsOnlyFor") : t("upsCommands.upsdRunsCommandsOnlyForNoAccount")}
       </p>
     );
   }

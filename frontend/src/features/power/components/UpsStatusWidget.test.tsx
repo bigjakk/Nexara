@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
+import { grantPermissions } from "@/test/permissions";
 import { apiClient } from "@/lib/api-client";
 import { upsDevice } from "../power.fixtures";
 import { UpsStatusWidget } from "./UpsStatusWidget";
@@ -20,5 +21,18 @@ describe("UpsStatusWidget", () => {
     expect(screen.getByText("52% · 9m 40s")).toBeInTheDocument();
     expect(screen.getByText("Unreachable")).toBeInTheDocument();
     expect(screen.getByText("— · —")).toBeInTheDocument();
+  });
+
+  // Adding a NUT server takes manage:ups install-wide.
+  it.each([
+    { perms: ["view:ups"], can: false },
+    { perms: ["view:ups", "manage:ups"], can: true },
+  ])("links to adding a NUT server only for a role that may add one: $perms", async ({ perms, can }) => {
+    grantPermissions(...perms);
+    vi.mocked(apiClient.list).mockResolvedValue([]);
+    renderWithProviders(<UpsStatusWidget />);
+
+    expect(await screen.findByText(/^No UPS monitored yet\./)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Add a NUT server" }) !== null).toBe(can);
   });
 });

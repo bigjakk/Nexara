@@ -60,7 +60,7 @@ export function RestoreDialog({
   const [startAfter, setStartAfter] = useState(false);
   // The server holds a start after restore to what the guest's power route
   // needs (execute on its kind), so the tick is offered only to a holder.
-  const { canExecute, canDelete } = usePermissions();
+  const { canExecute, canDelete, canManage } = usePermissions();
   const { t } = useTranslation("vms");
   const startKind = snapshot.backup_type === "ct" ? "container" : "vm";
   const canStart = canExecute(startKind);
@@ -236,9 +236,16 @@ export function RestoreDialog({
               <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>
-                  No PBS storage found on this PVE cluster. The PBS server must
-                  be added as a storage in PVE (Datacenter &gt; Storage &gt; Add
-                  &gt; Proxmox Backup Server) before you can restore.
+                  No PBS storage found on this PVE cluster.
+                  {/* Adding the storage takes manage:storage. */}
+                  {canManage("storage") && (
+                    <>
+                      {" "}
+                      The PBS server must be added as a storage in PVE
+                      (Datacenter &gt; Storage &gt; Add &gt; Proxmox Backup
+                      Server) before you can restore.
+                    </>
+                  )}
                 </span>
               </div>
             )}

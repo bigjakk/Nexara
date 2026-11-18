@@ -20,6 +20,8 @@ import { formatExactDateTime } from "@/lib/format";
 interface ScanHistoryTableProps {
   scans: CVEScan[];
   clusterId: string;
+  /** Deleting a scan takes manage:cve_scan on the cluster; without it there is no Delete. */
+  canManage: boolean;
   onSelectScan: (scanId: string) => void;
 }
 
@@ -120,6 +122,7 @@ function ExpandedScanRow({
 export function ScanHistoryTable({
   scans,
   clusterId,
+  canManage,
   onSelectScan,
 }: ScanHistoryTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -220,19 +223,21 @@ export function ScanHistoryTable({
                     >
                       Findings
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingDelete(scan);
-                      }}
-                      title="Delete scan"
-                      aria-label="Delete scan"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPendingDelete(scan);
+                        }}
+                        title="Delete scan"
+                        aria-label="Delete scan"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

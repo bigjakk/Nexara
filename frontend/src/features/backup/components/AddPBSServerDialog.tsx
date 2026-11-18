@@ -24,6 +24,8 @@ import {
 } from "@/lib/private-address";
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useCanAddPBSServer } from "../hooks/useCanAddPBSServer";
 
 interface FingerprintResponse {
   fingerprint: string;
@@ -59,6 +61,9 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
   const settle = useSaveOutcome(open);
   const clustersQuery = useClusters();
   const clusters = clustersQuery.data ?? [];
+  const canAdd = useCanAddPBSServer();
+  // A standalone server (no cluster) takes manage:pbs install-wide.
+  const canStandalone = usePermissions().hasGlobalPermission("manage", "pbs");
 
   function resetForm() {
     setName("");
@@ -158,6 +163,8 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
 
   const showFingerprint = fingerprint !== null;
 
+  if (!canAdd) return null;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{trigger ?? defaultTrigger}</DialogTrigger>
@@ -228,7 +235,9 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="pbs-cluster">
-                {t("pbsServerDialog.associatedClusterOptional")}
+                {canStandalone
+                  ? t("pbsServerDialog.associatedClusterOptional")
+                  : t("pbsServerDialog.associatedCluster")}
               </Label>
               <select
                 id="pbs-cluster"
@@ -237,8 +246,15 @@ export function AddPBSServerDialog({ trigger }: AddPBSServerDialogProps) {
                 onChange={(e) => {
                   setClusterId(e.target.value);
                 }}
+                required={!canStandalone}
               >
-                <option value="">{t("pbsServerDialog.none")}</option>
+                {canStandalone ? (
+                  <option value="">{t("pbsServerDialog.none")}</option>
+                ) : (
+                  <option value="" disabled>
+                    {t("selectCluster")}
+                  </option>
+                )}
                 {clusters.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

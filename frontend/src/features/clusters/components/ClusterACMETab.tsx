@@ -1156,9 +1156,10 @@ function CertificatesTab({ clusterId }: { clusterId: string }) {
             <Skeleton className="h-16 w-full" />
           </div>
         ) : configuredDomains.length === 0 ? (
+          // Adding a domain takes manage:certificate: only then is it suggested.
           <p className={FLUSH_NOTE}>
-            No ACME domains configured. Add a domain before ordering
-            certificates.
+            No ACME domains configured.
+            {canManageCerts && " Add a domain before ordering certificates."}
           </p>
         ) : (
           <Table>

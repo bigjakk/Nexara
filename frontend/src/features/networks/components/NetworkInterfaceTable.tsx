@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/page/Panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Trash2, Pencil } from "lucide-react";
+import { Eye, Trash2, Pencil } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   useNetworkInterfaces,
   useDeleteNetworkInterface,
@@ -43,6 +44,11 @@ export function NetworkInterfaceTable({
 }: NetworkInterfaceTableProps) {
   const { data: nodeInterfaces, isLoading } = useNetworkInterfaces(clusterId);
   const [selectedNode, setSelectedNode] = useState("");
+  // An interface's create, update, apply and revert routes take
+  // manage:network on the cluster; its delete takes delete:network.
+  const { canManage, canDelete } = usePermissions();
+  const canEdit = canManage("network");
+  const canRemove = canDelete("network");
 
   if (isLoading) {
     return (
@@ -78,7 +84,7 @@ export function NetworkInterfaceTable({
       aside={
         selectedNode
           ? `${String(shownCount)} on ${selectedNode}`
-          : `${String(shownCount)} on ${String(nodes.length)} ${nodes.length === 1 ? "node" : "nodes"}. Pick a node to add an interface or apply its pending changes.`
+          : `${String(shownCount)} on ${String(nodes.length)} ${nodes.length === 1 ? "node" : "nodes"}${canEdit ? ". Pick a node to add an interface or apply its pending changes." : ""}`
       }
       actions={
         <>
@@ -146,6 +152,8 @@ export function NetworkInterfaceTable({
                   nodeName={ni.node}
                   iface={iface}
                   clusterId={clusterId}
+                  canEdit={canEdit}
+                  canRemove={canRemove}
                 />
               ))}
             </Fragment>
@@ -171,10 +179,14 @@ function InterfaceRow({
   nodeName,
   iface,
   clusterId,
+  canEdit,
+  canRemove,
 }: {
   nodeName: string;
   iface: NetworkInterface;
   clusterId: string;
+  canEdit: boolean;
+  canRemove: boolean;
 }) {
   const deleteIface = useDeleteNetworkInterface(clusterId, nodeName);
   const [editing, setEditing] = useState(false);
@@ -223,8 +235,10 @@ function InterfaceRow({
       </TableCell>
       <TableCell className="py-1">
         <div className="flex justify-end gap-1">
+          {/* Without manage:network the same button opens the form
+              read-only: it is the one place an interface's settings show. */}
           <Button
-            aria-label={`Edit ${iface.iface} on ${nodeName}`}
+            aria-label={`${canEdit ? "Edit" : "View"} ${iface.iface} on ${nodeName}`}
             variant="ghost"
             size="icon"
             className="h-8 w-8 text-muted-foreground"
@@ -232,26 +246,33 @@ function InterfaceRow({
               setEditing(true);
             }}
           >
-            <Pencil className="h-4 w-4" />
+            {canEdit ? (
+              <Pencil className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
           </Button>
-          <Button
-            aria-label={`Delete ${iface.iface} on ${nodeName}`}
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-            onClick={() => {
-              setPendingDelete(iface);
-            }}
-            disabled={deleteIface.isPending}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          {canRemove && (
+            <Button
+              aria-label={`Delete ${iface.iface} on ${nodeName}`}
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                setPendingDelete(iface);
+              }}
+              disabled={deleteIface.isPending}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
         {editing && (
           <InterfaceFormDialog
             clusterId={clusterId}
             nodeName={nodeName}
             existing={iface}
+            readOnly={!canEdit}
             open
             onOpenChange={(open) => {
               if (!open) setEditing(false);

@@ -16,6 +16,7 @@ import {
 import { PrivateAddressWarning } from "@/components/PrivateAddressWarning";
 import { useCreateVeeamServer } from "../api/backup-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { VeeamRequirementsNote } from "./VeeamRequirementsNote";
 import { VeeamCertificateStep } from "./VeeamCertificateStep";
 import { useVeeamFingerprint } from "./useVeeamFingerprint";
@@ -43,6 +44,8 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
   const cert = useVeeamFingerprint();
   const createServer = useCreateVeeamServer();
   const settle = useSaveOutcome(open);
+  // POST /veeam-servers takes manage:veeam install-wide.
+  const canAdd = usePermissions().hasGlobalPermission("manage", "veeam");
 
   function resetForm() {
     setName("");
@@ -102,6 +105,8 @@ export function AddVeeamServerDialog({ trigger }: AddVeeamServerDialogProps) {
   // currently in the form, so an in-flight edit cannot leave a stale pin on
   // screen under a different host's name.
   const certificate = cert.fingerprintFor(baseUrl);
+
+  if (!canAdd) return null;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

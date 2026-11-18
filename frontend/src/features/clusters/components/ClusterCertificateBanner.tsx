@@ -3,6 +3,7 @@ import { ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { EditClusterDialog } from "./EditClusterDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useVerifyClusterCertificate } from "../api/cluster-queries";
 import type { ClusterResponse } from "@/types/api";
 
@@ -44,6 +45,9 @@ export function ClusterCertificateBanner({
 }: ClusterCertificateBannerProps) {
   const [editOpen, setEditOpen] = useState(false);
   const verify = useVerifyClusterCertificate(cluster.id);
+  // Verifying and editing both take manage:cluster; without it the banner
+  // still says what is wrong.
+  const canFix = usePermissions().hasPermission("manage", "cluster");
 
   const issue = (cluster.issues ?? []).find(
     (i) => i.type === TLS_FINGERPRINT_ISSUE,
@@ -81,24 +85,26 @@ export function ClusterCertificateBanner({
               other members, so this will not show up as a sync failure.
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={handleVerify}
-              disabled={verify.isPending}
-            >
-              {verify.isPending ? "Verifying…" : "Verify certificate"}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setEditOpen(true);
-              }}
-            >
-              Edit manually
-            </Button>
-          </div>
+          {canFix && (
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={handleVerify}
+                disabled={verify.isPending}
+              >
+                {verify.isPending ? "Verifying…" : "Verify certificate"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setEditOpen(true);
+                }}
+              >
+                Edit manually
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

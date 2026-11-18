@@ -44,6 +44,8 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
   const settle = useSaveOutcome(clusterId);
   const { canManage } = usePermissions();
   const readOnly = !canManage("guest_tools");
+  // Setting the ISO's storage, above, takes manage:storage on the cluster.
+  const canSetStorage = canManage("storage");
 
   const [mode, setMode] = useState<GuestToolsMode>("disabled");
   const [targetVersion, setTargetVersion] = useState("");
@@ -102,7 +104,12 @@ export function GuestToolsPolicyCard({ clusterId }: GuestToolsPolicyCardProps) {
         {noStorage && (
           <WarningCallout title="No virtio-win ISO storage configured">
             <p>
-              Set a target storage under <strong>virtio-win ISO</strong> above.
+              {canSetStorage && (
+                <>
+                  Set a target storage under <strong>virtio-win ISO</strong>{" "}
+                  above.{" "}
+                </>
+              )}
               Detection still works, but nothing can be staged without the ISO.
             </p>
           </WarningCallout>

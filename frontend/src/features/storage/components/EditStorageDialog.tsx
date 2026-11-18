@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Pencil } from "lucide-react";
+import { Eye, Pencil } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +53,11 @@ interface EditStorageDialogProps {
   storageId: string;
   storageName: string;
   storageType: string;
+  /**
+   * For a role without manage:storage: the configuration is shown, from
+   * Configuration, with every field disabled, no Save and no iSCSI scan.
+   */
+  readOnly: boolean;
 }
 
 const ALL_CONTENT_TYPES: { value: StorageContentType; label: string }[] = [
@@ -79,6 +84,7 @@ export function EditStorageDialog({
   storageId,
   storageName,
   storageType,
+  readOnly,
 }: EditStorageDialogProps) {
   const { t } = useTranslation("storage");
   const [open, setOpen] = useState(false);
@@ -313,14 +319,23 @@ export function EditStorageDialog({
     >
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="gap-1.5">
-          <Pencil className="h-3.5 w-3.5" />
-          Edit
+          {readOnly ? (
+            <>
+              <Eye className="h-3.5 w-3.5" />
+              {t("configuration")}
+            </>
+          ) : (
+            <>
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </>
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-baseline gap-x-2.5">
-            Edit {storageName}
+            {readOnly ? storageName : `Edit ${storageName}`}
             <span className="text-sm font-normal text-muted-foreground">
               {typeLabel}
             </span>
@@ -343,219 +358,234 @@ export function EditStorageDialog({
 
         {configQuery.data && (
           <div className="space-y-4 pt-2">
-            {/* Storage name (read-only) */}
-            <div className="space-y-1.5">
-              <Label>ID</Label>
-              <Input value={storageName} disabled />
-            </div>
+            {/* Disables every control here, the ones the shared fields render
+                included; the buttons sit outside it. */}
+            <fieldset disabled={readOnly} className="min-w-0 space-y-4">
+              {/* Storage name (read-only) */}
+              <div className="space-y-1.5">
+                <Label>ID</Label>
+                <Input value={storageName} disabled />
+              </div>
 
-            {/* Type (read-only) */}
-            <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Input value={typeLabel} disabled />
-            </div>
+              {/* Type (read-only) */}
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <Input value={typeLabel} disabled />
+              </div>
 
-            {/* Type-specific fields */}
-            {typeFields.map((field) => (
-              <div key={field.key} className="space-y-1.5">
-                <Label htmlFor={`edit-${field.key}`}>
-                  {field.label}
-                  {field.required && (
-                    <span className="ml-1 text-destructive">*</span>
-                  )}
-                </Label>
-                {field.fixed ? (
-                  <>
+              {/* Type-specific fields */}
+              {typeFields.map((field) => (
+                <div key={field.key} className="space-y-1.5">
+                  <Label htmlFor={`edit-${field.key}`}>
+                    {field.label}
+                    {field.required && (
+                      <span className="ml-1 text-destructive">*</span>
+                    )}
+                  </Label>
+                  {field.fixed ? (
+                    <>
+                      <Input
+                        id={`edit-${field.key}`}
+                        value={params[field.key] ?? ""}
+                        disabled
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Set when the storage was created — Proxmox does not
+                        allow changing it.
+                      </p>
+                    </>
+                  ) : field.scan === "iscsi" && !readOnly ? (
+                    <ISCSITargetField
+                      id={`edit-${field.key}`}
+                      clusterId={clusterId}
+                      portal={params[field.scanFrom ?? "portal"] ?? ""}
+                      value={params[field.key] ?? ""}
+                      onChange={(v) => {
+                        handleParamChange(field.key, v);
+                      }}
+                      placeholder={field.placeholder}
+                    />
+                  ) : field.type === "select" && field.options ? (
+                    <Select
+                      value={params[field.key] ?? ""}
+                      onValueChange={(v) => {
+                        handleParamChange(field.key, v === "_empty" ? "" : v);
+                      }}
+                      disabled={readOnly}
+                    >
+                      <SelectTrigger id={`edit-${field.key}`}>
+                        <SelectValue placeholder="Select..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {field.options.map((opt) => (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value || "_empty"}
+                          >
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : field.type === "checkbox" ? (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={`edit-${field.key}`}
+                        checked={params[field.key] === "1"}
+                        onCheckedChange={(checked) => {
+                          handleParamChange(field.key, checked ? "1" : "0");
+                        }}
+                        disabled={readOnly}
+                      />
+                      <Label
+                        htmlFor={`edit-${field.key}`}
+                        className="text-sm font-normal"
+                      >
+                        {field.help ?? "Enable"}
+                      </Label>
+                    </div>
+                  ) : (
                     <Input
                       id={`edit-${field.key}`}
+                      type={
+                        field.type === "password"
+                          ? "password"
+                          : field.type === "number"
+                            ? "number"
+                            : "text"
+                      }
                       value={params[field.key] ?? ""}
-                      disabled
+                      onChange={(e) => {
+                        handleParamChange(field.key, e.target.value);
+                      }}
+                      // A storage credential, never the Nexara login a browser
+                      // would otherwise offer to fill in.
+                      autoComplete={
+                        field.type === "password" ? "new-password" : undefined
+                      }
+                      placeholder={field.placeholder}
                     />
+                  )}
+                  {field.help !== undefined && field.type !== "checkbox" && (
                     <p className="text-xs text-muted-foreground">
-                      Set when the storage was created — Proxmox does not allow
-                      changing it.
+                      {field.help}
                     </p>
-                  </>
-                ) : field.scan === "iscsi" ? (
-                  <ISCSITargetField
-                    id={`edit-${field.key}`}
-                    clusterId={clusterId}
-                    portal={params[field.scanFrom ?? "portal"] ?? ""}
-                    value={params[field.key] ?? ""}
-                    onChange={(v) => {
-                      handleParamChange(field.key, v);
-                    }}
-                    placeholder={field.placeholder}
-                  />
-                ) : field.type === "select" && field.options ? (
-                  <Select
-                    value={params[field.key] ?? ""}
-                    onValueChange={(v) => {
-                      handleParamChange(field.key, v === "_empty" ? "" : v);
-                    }}
-                  >
-                    <SelectTrigger id={`edit-${field.key}`}>
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {field.options.map((opt) => (
-                        <SelectItem
-                          key={opt.value}
-                          value={opt.value || "_empty"}
-                        >
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : field.type === "checkbox" ? (
+                  )}
+                </div>
+              ))}
+
+              {/* A secret is never read back, so there is nothing to show. */}
+              {cephSecretDef && showCephSecret && !readOnly && (
+                <CephSecretField
+                  id="edit-ceph-secret"
+                  def={cephSecretDef}
+                  value={cephSecret}
+                  onChange={setCephSecret}
+                  editing={!cephSecretRequired}
+                  required={cephSecretRequired}
+                />
+              )}
+
+              {isPBS && (
+                <PBSEncryptionField
+                  idPrefix="edit"
+                  storage={storageName}
+                  current={configQuery.data["encryption-key"]}
+                  value={encryption}
+                  onChange={setEncryption}
+                />
+              )}
+
+              {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
+              {isISCSI ? (
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <Checkbox
-                      id={`edit-${field.key}`}
-                      checked={params[field.key] === "1"}
+                      id="edit-storage-luns"
+                      checked={useLuns}
                       onCheckedChange={(checked) => {
-                        handleParamChange(field.key, checked ? "1" : "0");
+                        setUseLuns(checked === true);
                       }}
+                      disabled={readOnly}
                     />
                     <Label
-                      htmlFor={`edit-${field.key}`}
+                      htmlFor="edit-storage-luns"
                       className="text-sm font-normal"
                     >
-                      {field.help ?? "Enable"}
+                      Use LUNs directly
                     </Label>
                   </div>
-                ) : (
-                  <Input
-                    id={`edit-${field.key}`}
-                    type={
-                      field.type === "password"
-                        ? "password"
-                        : field.type === "number"
-                          ? "number"
-                          : "text"
-                    }
-                    value={params[field.key] ?? ""}
-                    onChange={(e) => {
-                      handleParamChange(field.key, e.target.value);
-                    }}
-                    // A storage credential, never the Nexara login a browser
-                    // would otherwise offer to fill in.
-                    autoComplete={
-                      field.type === "password" ? "new-password" : undefined
-                    }
-                    placeholder={field.placeholder}
-                  />
-                )}
-                {field.help !== undefined && field.type !== "checkbox" && (
-                  <p className="text-xs text-muted-foreground">{field.help}</p>
-                )}
+                  <p className="text-xs text-muted-foreground">
+                    Attach the target&apos;s LUNs to guests as disks. Turn off
+                    to use the target only as a base for LVM on top of it.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label>Content types</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_CONTENT_TYPES.filter((ct) =>
+                      availableContent.includes(ct.value),
+                    ).map((ct) => (
+                      <Badge
+                        key={ct.value}
+                        variant={
+                          selectedContent.has(ct.value) ? "default" : "outline"
+                        }
+                        className={readOnly ? "" : "cursor-pointer select-none"}
+                        onClick={
+                          readOnly
+                            ? undefined
+                            : () => {
+                                toggleContent(ct.value);
+                              }
+                        }
+                      >
+                        {ct.label}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Nodes */}
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-nodes">Nodes (optional)</Label>
+                <NodeRestrictionField
+                  id="edit-nodes"
+                  clusterId={clusterId}
+                  value={nodes}
+                  onChange={setNodes}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Restrict storage to specific cluster nodes.
+                </p>
               </div>
-            ))}
 
-            {cephSecretDef && showCephSecret && (
-              <CephSecretField
-                id="edit-ceph-secret"
-                def={cephSecretDef}
-                value={cephSecret}
-                onChange={setCephSecret}
-                editing={!cephSecretRequired}
-                required={cephSecretRequired}
-              />
-            )}
-
-            {isPBS && (
-              <PBSEncryptionField
-                idPrefix="edit"
-                storage={storageName}
-                current={configQuery.data["encryption-key"]}
-                value={encryption}
-                onChange={setEncryption}
-              />
-            )}
-
-            {/* Content Types (iSCSI expresses its single choice as the LUNs toggle) */}
-            {isISCSI ? (
+              {/* Enabled */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <Checkbox
-                    id="edit-storage-luns"
-                    checked={useLuns}
+                    id="edit-storage-enabled"
+                    checked={enabled}
                     onCheckedChange={(checked) => {
-                      setUseLuns(checked === true);
+                      setEnabled(checked === true);
                     }}
+                    disabled={readOnly}
                   />
                   <Label
-                    htmlFor="edit-storage-luns"
+                    htmlFor="edit-storage-enabled"
                     className="text-sm font-normal"
                   >
-                    Use LUNs directly
+                    Enable
                   </Label>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Attach the target&apos;s LUNs to guests as disks. Turn off to
-                  use the target only as a base for LVM on top of it.
+                  Disabled storage stays configured but is not mounted or used
+                  by any node.
                 </p>
               </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label>Content types</Label>
-                <div className="flex flex-wrap gap-2">
-                  {ALL_CONTENT_TYPES.filter((ct) =>
-                    availableContent.includes(ct.value),
-                  ).map((ct) => (
-                    <Badge
-                      key={ct.value}
-                      variant={
-                        selectedContent.has(ct.value) ? "default" : "outline"
-                      }
-                      className="cursor-pointer select-none"
-                      onClick={() => {
-                        toggleContent(ct.value);
-                      }}
-                    >
-                      {ct.label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Nodes */}
-            <div className="space-y-1.5">
-              <Label htmlFor="edit-nodes">Nodes (optional)</Label>
-              <NodeRestrictionField
-                id="edit-nodes"
-                clusterId={clusterId}
-                value={nodes}
-                onChange={setNodes}
-              />
-              <p className="text-xs text-muted-foreground">
-                Restrict storage to specific cluster nodes.
-              </p>
-            </div>
-
-            {/* Enabled */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="edit-storage-enabled"
-                  checked={enabled}
-                  onCheckedChange={(checked) => {
-                    setEnabled(checked === true);
-                  }}
-                />
-                <Label
-                  htmlFor="edit-storage-enabled"
-                  className="text-sm font-normal"
-                >
-                  Enable
-                </Label>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Disabled storage stays configured but is not mounted or used by
-                any node.
-              </p>
-            </div>
+            </fieldset>
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -564,19 +594,21 @@ export function EditStorageDialog({
                   it is by Escape or the close button — the key Proxmox
                   generates still reaches the must-save dialog. */}
               <Button variant="outline" onClick={closeEditor}>
-                Cancel
+                {readOnly ? t("common:close") : "Cancel"}
               </Button>
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  !hasChanges ||
-                  updateMutation.isPending ||
-                  (isPBS && !pbsEncryptionReady(encryption)) ||
-                  (cephSecretRequired && !cephSecret.trim())
-                }
-              >
-                {updateMutation.isPending ? "Saving..." : "Save changes"}
-              </Button>
+              {!readOnly && (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={
+                    !hasChanges ||
+                    updateMutation.isPending ||
+                    (isPBS && !pbsEncryptionReady(encryption)) ||
+                    (cephSecretRequired && !cephSecret.trim())
+                  }
+                >
+                  {updateMutation.isPending ? "Saving..." : "Save changes"}
+                </Button>
+              )}
             </div>
           </div>
         )}

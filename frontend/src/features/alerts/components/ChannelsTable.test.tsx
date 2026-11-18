@@ -31,6 +31,7 @@ beforeEach(() => {
       role: "user",
     },
     permissions: ["manage:notification_channel"],
+    globalPermissions: ["manage:notification_channel"],
     isAuthenticated: true,
     isInitialized: true,
   });
@@ -47,8 +48,30 @@ afterEach(() => {
   useAuthStore.setState({
     user: null,
     permissions: [],
+    globalPermissions: [],
     isAuthenticated: false,
   });
+});
+
+describe("ChannelsTable — permission", () => {
+  // Testing, editing and deleting a channel take manage:notification_channel
+  // install-wide (registry_alerts.go): a grant on a cluster offers none.
+  it.each<[string, string[], boolean]>([
+    ["on a cluster only", [], false],
+    ["install-wide", ["manage:notification_channel"], true],
+  ])(
+    "with manage:notification_channel %s (install-wide: %j) offers the row's actions: %s",
+    async (_held, globalPermissions, offered) => {
+      useAuthStore.setState({ globalPermissions });
+      renderWithProviders(<ChannelsTable />);
+      const row = await screen.findByRole("row", { name: /oncall-webhook/ });
+      for (const name of ["Test", "Edit", "Delete oncall-webhook"]) {
+        expect(within(row).queryByRole("button", { name }) !== null).toBe(
+          offered,
+        );
+      }
+    },
+  );
 });
 
 async function clickDelete(user: ReturnType<typeof userEvent.setup>) {

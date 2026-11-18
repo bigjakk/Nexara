@@ -535,6 +535,8 @@ curl -X POST https://nexara.example.com/api/v1/rbac/users/$USER_ID/roles \
 
 The assignment's scope shows next to the role name in the user's role dialog; it says `cluster`, not which one. A route that belongs to no one cluster never accepts a cluster-scoped grant, and an account that signs in through LDAP or OIDC loses cluster-scoped and hand-assigned roles at its next sign-in ([see below](#how-ldap-login-works)).
 
+**What a role is offered.** The interface shows an action only to a role that holds the permission its route takes, at the scope the route checks: a button, menu item or tab a role cannot use is not shown, and a settings form it cannot change is shown read-only. Where the edit dialog is the only place an object's settings are shown (a store's configuration, a PBS server, an SDN zone, VNet, subnet, controller, IPAM or DNS, a network interface, a firewall template's rules), such a role gets **View** or **Configuration** in place of **Edit**, opening the same dialog with every field disabled and no Save. A grant on one cluster counts for an action on that kind of object anywhere in the interface, which is as close as the browser can tell; an action that belongs to no cluster, such as the admin pages, API keys, notification channels and the dead-letter queue, Add cluster, a standalone PBS server, or an alert, rule or Veeam job with no cluster, is offered only to a holder of the permission across the whole install. An instruction that asks for a step the role cannot take, such as an empty state saying to add a cluster, is shown only to a role that can.
+
 ---
 
 ## Proxmox Access Control

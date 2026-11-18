@@ -62,6 +62,8 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   }, [sources]);
 
   const canManageImport = canManage("vm_import");
+  // Enabling the import content type edits a store.
+  const canManageStorage = canManage("storage");
 
   function confirmDelete() {
     if (!deleteTarget) return;
@@ -115,8 +117,13 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
 
         {groups.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No import sources. Add an ESXi/vCenter host, or enable the
-            &quot;import&quot; content type on a directory/NFS storage.
+            {/* Each step is offered to a role that may take it. */}
+            No import sources.
+            {canManageImport && " Add an ESXi/vCenter host."}
+            {canManageStorage &&
+              (canManageImport
+                ? ' Or enable the "import" content type on a directory/NFS storage.'
+                : ' Enable the "import" content type on a directory/NFS storage.')}
           </p>
         ) : (
           <ul

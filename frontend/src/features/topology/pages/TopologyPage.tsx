@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Network } from "lucide-react";
-import { EmptyState } from "@/components/EmptyState";
 import { PageHeader } from "@/components/page/PageHeader";
-import { AddClusterDialog } from "@/features/dashboard/components/AddClusterDialog";
+import { NoClustersEmptyState } from "@/features/dashboard/components/NoClustersEmptyState";
 import { useDashboardMetrics } from "@/hooks/useMetrics";
 import { useRecentActivity } from "@/features/audit/api/audit-queries";
 import { parseDetails } from "@/components/layout/task-status";
@@ -106,11 +105,9 @@ export function TopologyPage() {
     return (
       <div className="space-y-5">
         <PageHeader title={t("topology")} summary={t("topologyPurpose")} />
-        <EmptyState
+        <NoClustersEmptyState
           icon={Network}
-          title={td("noClustersRegistered")}
           description={t("noClustersTopology")}
-          action={<AddClusterDialog />}
         />
       </div>
     );
