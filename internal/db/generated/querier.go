@@ -743,6 +743,10 @@ type Querier interface {
 	// without touching anything still in flight.
 	DeleteOldVirtioWinDownloads(ctx context.Context, finishedAt pgtype.Timestamptz) error
 	DeletePBSServer(ctx context.Context, id uuid.UUID) error
+	// A snapshot a delete just removed on the PBS, taken out of what the last sync
+	// stored too, so the lists stop offering it before the next sync prunes it (a
+	// second delete of it fails on the PBS).
+	DeletePBSSnapshot(ctx context.Context, arg DeletePBSSnapshotParams) error
 	// The row count is the spend: two requests that matched the same code both send this,
 	// and only the one that deletes the row has used it (consumeRecoveryCode).
 	DeleteRecoveryCode(ctx context.Context, id uuid.UUID) (int64, error)
@@ -1758,6 +1762,9 @@ type Querier interface {
 	// activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
 	// are the reserved setting keys whose details the caller may not read; their
 	// details do not count, as the SPA only ever sees them redacted.
+	// A row that names its guest by VMID only (a backup, a restore, a console
+	// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+	// unique, so this join adds no rows.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	// ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
 	// carries a UPID: its task row's status, or the archive's once the row has been
@@ -2461,6 +2468,9 @@ type Querier interface {
 	// DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
 	// for good. A task_history row goes with its cluster, so this arm needs the scope
 	// but not the check that the cluster exists.
+	// A row that names its guest by VMID only (a backup, a restore, a console
+	// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+	// unique, so this join adds no rows.
 	// A task row the retention sweep archived still says how the task ended
 	// (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
 	// no outcome at all.

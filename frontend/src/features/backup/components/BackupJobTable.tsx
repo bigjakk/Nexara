@@ -54,6 +54,19 @@ function formatGuests(job: BackupJob): string {
   return "All";
 }
 
+/**
+ * What the Job column calls a job: its comment, else whose guests it backs
+ * up. The id it showed (a UUID for a job made in Nexara) named nothing; it
+ * stays in the expanded row.
+ */
+function jobLabel(job: BackupJob): string {
+  if (job.comment) return job.comment;
+  if (job.exclude) return `All guests except ${job.exclude}`;
+  if (job.pool && !job.all) return `Pool ${job.pool}`;
+  if (job.vmid && !job.all) return `Guests ${job.vmid}`;
+  return "All guests";
+}
+
 interface BackupJobTableProps {
   jobs: BackupJob[];
   clusterId: string;
@@ -150,8 +163,8 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                       <ChevronRight className="h-4 w-4" />
                     )}
                   </TableCell>
-                  <TableCell className="font-mono font-medium">
-                    {job.id}
+                  <TableCell className="font-medium" title={job.id}>
+                    {jobLabel(job)}
                   </TableCell>
                   <TableCell>
                     {job.schedule ? (
@@ -240,6 +253,9 @@ export function BackupJobTable({ jobs, clusterId }: BackupJobTableProps) {
                 {isExpanded && (
                   <ExpandedDetailRow colSpan={8}>
                     <DefGrid>
+                      <DetailField label="Job ID">
+                        <span className="font-mono">{job.id}</span>
+                      </DetailField>
                       <DetailField label="Type">{job.type}</DetailField>
                       <DetailField label="Node">
                         {job.node ?? "All"}

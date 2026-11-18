@@ -4,6 +4,7 @@ import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { fill, setupUser } from "@/test/user";
 import { useAuthStore } from "@/stores/auth-store";
+import { makeCluster, makeNode } from "@/test/cluster.fixtures";
 import { RestoreDialog } from "./RestoreDialog";
 import type { PBSSnapshot } from "../types/backup";
 
@@ -137,5 +138,75 @@ describe("RestoreDialog — Overwrite existing VM", () => {
     } finally {
       useAuthStore.setState({ permissions: [] });
     }
+  });
+});
+
+describe("RestoreDialog — target cluster", () => {
+  const clusters = [
+    makeCluster({ id: "c1", name: "cluster01" }),
+    makeCluster({ id: "c2", name: "cluster02" }),
+  ];
+  const listClusters = (path: string) =>
+    Promise.resolve(path === "/api/v1/clusters" ? clusters : []);
+
+  // From a guest's Backups tab the first cluster was pre-selected, so a
+  // guest on the second cluster restored onto the first.
+  it("starts on the guest's own cluster", async () => {
+    vi.mocked(apiClient.list).mockImplementation(listClusters);
+    vi.mocked(apiClient.get).mockResolvedValue([]);
+    const user = setupUser();
+    renderWithProviders(
+      <RestoreDialog snapshot={SNAPSHOT} pbsId="p1" defaultClusterId="c2" />,
+    );
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    const select = await screen.findByLabelText("Target cluster");
+    await screen.findByRole("option", { name: "cluster02" });
+    expect((select as HTMLSelectElement).value).toBe("c2");
+  });
+
+  // The row is drawn before the guest's node is known, and closing cleared
+  // it: either way the dialog fell back to the first online node.
+  it("starts on the guest's own node once it is known, and again when reopened", async () => {
+    const nodes = [
+      makeNode({ id: "n1", cluster_id: "c2", name: "pve-01" }),
+      makeNode({ id: "n2", cluster_id: "c2", name: "pve-02" }),
+    ];
+    vi.mocked(apiClient.list).mockImplementation((path: string) =>
+      path === "/api/v1/clusters/c2/nodes"
+        ? Promise.resolve(nodes)
+        : listClusters(path),
+    );
+    vi.mocked(apiClient.get).mockResolvedValue([]);
+    const user = setupUser();
+    const dialog = (node: string) => (
+      <RestoreDialog
+        snapshot={SNAPSHOT}
+        pbsId="p1"
+        defaultClusterId="c2"
+        defaultNode={node}
+      />
+    );
+    const { rerender } = renderWithProviders(dialog(""));
+    rerender(dialog("pve-02"));
+
+    for (let open = 0; open < 2; open++) {
+      await user.click(screen.getByRole("button", { name: "Restore" }));
+      await screen.findByRole("option", { name: /pve-02/ });
+      expect(
+        screen.getByLabelText<HTMLSelectElement>("Target node").value,
+      ).toBe("pve-02");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    }
+  });
+
+  it("waits for a choice when there are several and no default", async () => {
+    vi.mocked(apiClient.list).mockImplementation(listClusters);
+    vi.mocked(apiClient.get).mockResolvedValue([]);
+    const user = setupUser();
+    renderWithProviders(<RestoreDialog snapshot={SNAPSHOT} pbsId="p1" />);
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+    const select = await screen.findByLabelText("Target cluster");
+    await screen.findByRole("option", { name: "cluster02" });
+    expect((select as HTMLSelectElement).value).toBe("");
   });
 });

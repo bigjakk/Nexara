@@ -244,6 +244,8 @@ export function BackupPanel({
                             <RestoreDialog
                               snapshot={snap}
                               pbsId={snap.pbs_server_id}
+                              defaultClusterId={clusterId}
+                              defaultNode={nodeName}
                             />
                             <Button
                               variant="ghost"

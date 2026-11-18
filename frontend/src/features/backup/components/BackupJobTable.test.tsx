@@ -137,10 +137,21 @@ it.each([
   renderTable([job({ enabled, "next-run": 1_900_000_000 })]);
   const headers = screen.getAllByRole("columnheader");
   const col = headers.findIndex((h) => h.textContent === "Next run");
-  const row = screen.getByText(JOB_ID).closest("tr");
+  const row = screen.getByTitle(JOB_ID).closest("tr");
   if (!row) throw new Error("no row");
   const cell = within(row).getAllByRole("cell")[col];
   expect(cell?.textContent === "-").toBe(none);
+});
+
+// The Job column showed the job's id, which for a job made in Nexara is a UUID.
+it.each([
+  [{ comment: "Nightly" }, "Nightly"],
+  [{}, "All guests"],
+  [{ pool: "pool01" }, "Pool pool01"],
+  [{ all: 1, exclude: "101" }, "All guests except 101"],
+])("names the job %j as %j", (over, want) => {
+  renderTable([job(over)]);
+  expect(screen.getByTitle(JOB_ID).textContent).toBe(want);
 });
 
 describe("BackupJobTable — Run now", () => {
@@ -458,7 +469,7 @@ describe("BackupJobTable — Delete", () => {
    *  the first row would show. */
   async function openDelete(user: ReturnType<typeof userEvent.setup>) {
     renderTable([job(), job({ id: OTHER_ID, storage: "store02" })]);
-    const row = screen.getByText(OTHER_ID).closest("tr");
+    const row = screen.getByTitle(OTHER_ID).closest("tr");
     if (!(row instanceof HTMLElement)) throw new Error("no row for the job");
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     return screen.findByRole("alertdialog");

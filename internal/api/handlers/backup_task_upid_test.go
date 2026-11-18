@@ -132,6 +132,9 @@ type pbsUPIDDBTX struct {
 	// owners is every SetPBSGroupOwner's arguments: a group's new owner,
 	// written onto the synced snapshots.
 	owners [][]any
+	// deleted is every DeletePBSSnapshot's arguments: a deleted snapshot,
+	// dropped from the synced ones.
+	deleted [][]any
 }
 
 func (d *pbsUPIDDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -144,6 +147,9 @@ func (d *pbsUPIDDBTX) Exec(_ context.Context, sql string, args ...any) (pgconn.C
 	case strings.Contains(sql, "-- name: SetPBSGroupOwner :exec"):
 		d.owners = append(d.owners, args)
 		return pgconn.NewCommandTag("UPDATE 2"), nil
+	case strings.Contains(sql, "-- name: DeletePBSSnapshot :exec"):
+		d.deleted = append(d.deleted, args)
+		return pgconn.NewCommandTag("DELETE 1"), nil
 	}
 	return pgconn.CommandTag{}, errPBSUPIDUnexpectedQuery
 }

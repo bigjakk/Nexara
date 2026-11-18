@@ -13,6 +13,37 @@ import (
 	"github.com/google/uuid"
 )
 
+const deletePBSSnapshot = `-- name: DeletePBSSnapshot :exec
+DELETE FROM pbs_snapshots
+WHERE pbs_server_id = $1
+  AND datastore = $2
+  AND backup_type = $3
+  AND backup_id = $4
+  AND backup_time = $5
+`
+
+type DeletePBSSnapshotParams struct {
+	PbsServerID uuid.UUID `json:"pbs_server_id"`
+	Datastore   string    `json:"datastore"`
+	BackupType  string    `json:"backup_type"`
+	BackupID    string    `json:"backup_id"`
+	BackupTime  int64     `json:"backup_time"`
+}
+
+// A snapshot a delete just removed on the PBS, taken out of what the last sync
+// stored too, so the lists stop offering it before the next sync prunes it (a
+// second delete of it fails on the PBS).
+func (q *Queries) DeletePBSSnapshot(ctx context.Context, arg DeletePBSSnapshotParams) error {
+	_, err := q.db.Exec(ctx, deletePBSSnapshot,
+		arg.PbsServerID,
+		arg.Datastore,
+		arg.BackupType,
+		arg.BackupID,
+		arg.BackupTime,
+	)
+	return err
+}
+
 const deleteStalePBSSnapshots = `-- name: DeleteStalePBSSnapshots :exec
 DELETE FROM pbs_snapshots s
 WHERE s.pbs_server_id = $1

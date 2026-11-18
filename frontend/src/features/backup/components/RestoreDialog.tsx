@@ -30,12 +30,25 @@ import type { PBSSnapshot } from "../types/backup";
 interface RestoreDialogProps {
   snapshot: PBSSnapshot;
   pbsId: string;
+  /**
+   * Where the restore goes unless the user picks elsewhere: the guest's own
+   * cluster and node, when the dialog opens from that guest's Backups tab.
+   */
+  defaultClusterId?: string;
+  defaultNode?: string;
 }
 
-export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
+export function RestoreDialog({
+  snapshot,
+  pbsId,
+  defaultClusterId,
+  defaultNode,
+}: RestoreDialogProps) {
   const [open, setOpen] = useState(false);
-  const [targetClusterId, setTargetClusterId] = useState("");
-  const [targetNode, setTargetNode] = useState("");
+  const [targetClusterId, setTargetClusterId] = useState(
+    defaultClusterId ?? "",
+  );
+  const [targetNode, setTargetNode] = useState(defaultNode ?? "");
   const [vmid, setVmid] = useState(snapshot.backup_id);
   const [storage, setStorage] = useState("");
   const [force, setForce] = useState(false);
@@ -101,9 +114,11 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
     return nodes.find((n) => n.id === existingVM.node_id);
   }, [existingVM, nodes]);
 
-  // Auto-select first cluster
+  // With one cluster there is nothing to choose. With several and no default,
+  // the dialog waits for a choice: taking the first put a Ceph guest's restore
+  // on the other cluster.
   useEffect(() => {
-    if (clusters.length > 0 && !targetClusterId) {
+    if (clusters.length === 1 && !targetClusterId) {
       setTargetClusterId(clusters[0]?.id ?? "");
     }
   }, [clusters, targetClusterId]);
@@ -167,7 +182,12 @@ export function RestoreDialog({ snapshot, pbsId }: RestoreDialogProps) {
 
   const handleOpenChange = (v: boolean) => {
     setOpen(v);
-    if (!v) {
+    if (v) {
+      // Seeded at each open, not at mount: the row is drawn before the guest's
+      // node is known, and closing clears the node.
+      if (defaultClusterId) setTargetClusterId(defaultClusterId);
+      setTargetNode(defaultNode ?? "");
+    } else {
       setError(null);
       setTargetNode("");
       setRestoreUpid(null);

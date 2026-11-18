@@ -151,6 +151,17 @@ INSERT INTO pbs_job_baselines (pbs_server_id, job_type, last_read_at)
 VALUES (sqlc.arg('pbs_server_id'), sqlc.arg('job_type'), now())
 ON CONFLICT (pbs_server_id, job_type) DO UPDATE SET last_read_at = now();
 
+-- name: DeletePBSSnapshot :exec
+-- A snapshot a delete just removed on the PBS, taken out of what the last sync
+-- stored too, so the lists stop offering it before the next sync prunes it (a
+-- second delete of it fails on the PBS).
+DELETE FROM pbs_snapshots
+WHERE pbs_server_id = sqlc.arg(pbs_server_id)
+  AND datastore = sqlc.arg(datastore)
+  AND backup_type = sqlc.arg(backup_type)
+  AND backup_id = sqlc.arg(backup_id)
+  AND backup_time = sqlc.arg(backup_time);
+
 -- name: SetPBSGroupOwner :exec
 -- A backup group's new owner, written onto the snapshots the last sync stored
 -- so the list shows it before the next sync does.

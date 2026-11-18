@@ -396,6 +396,19 @@ func (h *BackupHandler) DeleteSnapshot(c fiber.Ctx, p *apischema.Params) error {
 		return mapProxmoxError(err)
 	}
 
+	// The lists read what the last sync stored; drop the snapshot from it now,
+	// or it stays offered for minutes and a second delete fails on the PBS.
+	// A failure here is only that delay: the next sync prunes it anyway.
+	if err := h.queries.DeletePBSSnapshot(c.Context(), db.DeletePBSSnapshotParams{
+		PbsServerID: pbsID,
+		Datastore:   store,
+		BackupType:  req.BackupType,
+		BackupID:    req.BackupID,
+		BackupTime:  req.BackupTime,
+	}); err != nil {
+		slog.Warn("drop a deleted snapshot from the cache", "pbs_id", pbsID, "error", err)
+	}
+
 	h.auditPBS(c, cluster, pbsID, store, "snapshot_deleted", req.auditDetails(store))
 	h.eventPub.SystemEvent(c.Context(), events.KindPBSChange, "snapshot_deleted")
 
