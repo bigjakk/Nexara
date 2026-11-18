@@ -77,9 +77,10 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
   // Delete tasks being watched (one banner each), with the guest to resync
   // when each ends. An array, not a single slot: this page's whole point is
   // sequential cleanup, and a second delete must not orphan the first
-  // task's feedback or its post-completion resync.
+  // task's feedback or its post-completion resync. A failed one stays, with
+  // Proxmox's reason, until the next delete.
   const [tasks, setTasks] = useState<
-    { upid: string; clusterId: string; vmid: number }[]
+    { upid: string; clusterId: string; vmid: number; failed?: boolean }[]
   >([]);
 
   const nowMs = Date.now();
@@ -110,6 +111,7 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
 
   const handleDelete = (row: GuestSnapshotRow) => {
     if (!row.vm_id) return;
+    setTasks((prev) => prev.filter((task) => !task.failed));
     deleteMutation.mutate(
       {
         clusterId: row.cluster_id,
@@ -133,11 +135,18 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
     upid: string,
     clusterId: string,
     vmid: number,
+    success: boolean,
   ) => {
     // Success or failure, resync the guest so the row reflects Proxmox truth
     // (a failed delete keeps the row; a successful one drops it).
     resyncMutation.mutate({ clusterId, vmid });
-    setTasks((prev) => prev.filter((task) => task.upid !== upid));
+    setTasks((prev) =>
+      success
+        ? prev.filter((task) => task.upid !== upid)
+        : prev.map((task) =>
+            task.upid === upid ? { ...task, failed: true } : task,
+          ),
+    );
   };
 
   const handleResync = (row: GuestSnapshotRow) => {
@@ -162,8 +171,8 @@ export function GuestSnapshotTable({ rows }: GuestSnapshotTableProps) {
       key={task.upid}
       clusterId={task.clusterId}
       upid={task.upid}
-      onComplete={() => {
-        handleTaskComplete(task.upid, task.clusterId, task.vmid);
+      onComplete={(success) => {
+        handleTaskComplete(task.upid, task.clusterId, task.vmid, success);
       }}
       description={t("taskDescription")}
     />

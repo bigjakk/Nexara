@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { use, useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useTranslation, Trans } from "react-i18next";
 import {
   AlertTriangle,
@@ -55,6 +55,8 @@ import {
 import { useNodeBridges } from "@/features/clusters/api/cluster-queries";
 import { MoveDiskDialog } from "@/features/storage/components/DiskActions";
 import { AddDeviceMenu } from "./hardware/AddDeviceMenu";
+import { RowsReadOnlyContext } from "./hardware/read-only";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Check,
   Checks,
@@ -444,13 +446,27 @@ interface DiskEdit {
   newSize: string;
 }
 
-export function HardwarePanel({
+/**
+ * A role without manage:vm, which the config route takes, sees the tab
+ * read-only.
+ */
+export function HardwarePanel(props: HardwarePanelProps) {
+  const { hasPermission } = usePermissions();
+  return (
+    <RowsReadOnlyContext value={!hasPermission("manage", "vm")}>
+      <HardwarePanelBody {...props} />
+    </RowsReadOnlyContext>
+  );
+}
+
+function HardwarePanelBody({
   clusterId,
   vmId,
   vmStatus,
   nodeName,
 }: HardwarePanelProps) {
   const { t } = useTranslation("vms");
+  const readOnly = use(RowsReadOnlyContext);
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const resizeMutation = useResizeDisk();
@@ -1828,30 +1844,32 @@ export function HardwarePanel({
           )}
         </p>
         {/* Add device: the tab's one primary action. */}
-        <AddDeviceMenu
-          // Staged adds count as taken — devices, and CD/DVD drives, which are
-          // staged separately — so two added before a Save land in two slots
-          // rather than the second replacing the first. The machine type is the
-          // staged one too: it is saved in the same write as a device added
-          // now, and PCIe is offered by it.
-          config={{ ...config, ...pendingDeviceAdds, ...cdromEdits, machine }}
-          clusterId={clusterId}
-          nodeName={nodeName}
-          diskStorages={diskStorages.map((s) => ({
-            storage: s.storage,
-            type: s.type,
-            id: s.id,
-          }))}
-          usbDevices={usbDevices}
-          pciDevices={pciDevices}
-          bridges={bridgeNames}
-          isoFiles={isoFiles}
-          onAddDevice={handleAddDevice}
-          onAddCDROM={handleAddCDROM}
-          onAddDisk={() => {
-            setShowAddDisk(true);
-          }}
-        />
+        {!readOnly && (
+          <AddDeviceMenu
+            // Staged adds count as taken — devices, and CD/DVD drives, which are
+            // staged separately — so two added before a Save land in two slots
+            // rather than the second replacing the first. The machine type is the
+            // staged one too: it is saved in the same write as a device added
+            // now, and PCIe is offered by it.
+            config={{ ...config, ...pendingDeviceAdds, ...cdromEdits, machine }}
+            clusterId={clusterId}
+            nodeName={nodeName}
+            diskStorages={diskStorages.map((s) => ({
+              storage: s.storage,
+              type: s.type,
+              id: s.id,
+            }))}
+            usbDevices={usbDevices}
+            pciDevices={pciDevices}
+            bridges={bridgeNames}
+            isoFiles={isoFiles}
+            onAddDevice={handleAddDevice}
+            onAddCDROM={handleAddCDROM}
+            onAddDisk={() => {
+              setShowAddDisk(true);
+            }}
+          />
+        )}
       </div>
 
       {/* Two columns that fold into one: what the VM is made of on the left,
@@ -2042,6 +2060,7 @@ export function HardwarePanel({
                               // w-full, and only tailwind-merge lets w-24 win.
                               className={cn(fieldSelectClass, "w-24 shrink-0")}
                               value={state}
+                              disabled={readOnly}
                               aria-label={t("hardwarePanel.nameCPUFlag", {
                                 name: flag.name,
                               })}
@@ -2158,7 +2177,7 @@ export function HardwarePanel({
               drives: plural(cdromEntries.length, "cdDvdDrive"),
             })}
             actions={
-              showAddDisk ? undefined : (
+              showAddDisk || readOnly ? undefined : (
                 <Button
                   variant="outline"
                   size="sm"
@@ -2590,9 +2609,14 @@ export function HardwarePanel({
                           </PendingBadge>
                         ) : null
                       }
+                      // A read-only tab has no media picker to show it in.
                       summary={
-                        cloudInit ? (
-                          <span className="break-all font-mono">{isoVal}</span>
+                        cloudInit || readOnly ? (
+                          <span className="break-all font-mono">
+                            {isoVal === "none"
+                              ? t("hardwarePanel.noMediaEmptyDrive")
+                              : isoVal}
+                          </span>
                         ) : undefined
                       }
                       actions={
@@ -2652,24 +2676,26 @@ export function HardwarePanel({
                   );
                 })}
               </DeviceList>
-              {isoStorages.length > 1 && cdromEntries.length > 0 && (
-                <label className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-[18px] py-2.5 pl-[44px] text-[12.5px] text-muted-foreground">
-                  {t("hardwarePanel.listISOImagesFrom")}
-                  <select
-                    className={cn(fieldSelectClass, "w-48")}
-                    value={cdromStorageId}
-                    onChange={(e) => {
-                      setCdromStorageId(e.target.value);
-                    }}
-                  >
-                    {isoStorages.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.storage}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              {!readOnly &&
+                isoStorages.length > 1 &&
+                cdromEntries.length > 0 && (
+                  <label className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-[18px] py-2.5 pl-[44px] text-[12.5px] text-muted-foreground">
+                    {t("hardwarePanel.listISOImagesFrom")}
+                    <select
+                      className={cn(fieldSelectClass, "w-48")}
+                      value={cdromStorageId}
+                      onChange={(e) => {
+                        setCdromStorageId(e.target.value);
+                      }}
+                    >
+                      {isoStorages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.storage}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
             </div>
 
             <DeviceList>
@@ -4004,6 +4030,7 @@ export function HardwarePanel({
                       >
                         <Checkbox
                           id={`boot-${entry.device}`}
+                          disabled={readOnly}
                           checked={entry.enabled}
                           onCheckedChange={(v) => {
                             setBootOrder((prev) =>
@@ -4026,7 +4053,7 @@ export function HardwarePanel({
                           })}
                           icon={ArrowUp}
                           className="h-6 w-6"
-                          disabled={idx === 0}
+                          disabled={readOnly || idx === 0}
                           onClick={() => {
                             setBootOrder((prev) => {
                               const next = [...prev];
@@ -4046,7 +4073,7 @@ export function HardwarePanel({
                           })}
                           icon={ArrowDown}
                           className="h-6 w-6"
-                          disabled={idx === bootOrder.length - 1}
+                          disabled={readOnly || idx === bootOrder.length - 1}
                           onClick={() => {
                             setBootOrder((prev) => {
                               const next = [...prev];
@@ -4077,7 +4104,7 @@ export function HardwarePanel({
                     setDescription(e.target.value);
                   }}
                   rows={3}
-                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </Field>
               <Field label={t("hardwarePanel.tags")}>

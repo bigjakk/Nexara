@@ -140,7 +140,11 @@ function FolderBranch({
   const canOpen = hasPermission("view", "vm_folder");
 
   function handleDragOver(e: React.DragEvent) {
-    if (e.dataTransfer.types.includes("application/x-nexara-vm")) {
+    // Filing a guest takes manage:vm_folder; without it nothing is dropped.
+    if (
+      hasPermission("manage", "vm_folder") &&
+      e.dataTransfer.types.includes("application/x-nexara-vm")
+    ) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDropActive(true);
@@ -274,12 +278,14 @@ function DraggableVM({
   clusterId: string;
   depth: number;
 }) {
+  // The only drop target is a folder, which files it (manage:vm_folder).
+  const canFile = usePermissions().hasPermission("manage", "vm_folder");
   function handleDragStart(e: React.DragEvent) {
     e.dataTransfer.setData("application/x-nexara-vm", vm.id);
     e.dataTransfer.effectAllowed = "move";
   }
   return (
-    <div draggable onDragStart={handleDragStart}>
+    <div draggable={canFile} onDragStart={handleDragStart}>
       <VMLeaf vm={vm} clusterId={clusterId} depth={depth} />
     </div>
   );
@@ -306,7 +312,11 @@ function UnassignedBranch({ vms, clusterId, filter }: UnassignedBranchProps) {
   const canOpen = hasPermission("view", "vm_folder");
 
   function handleDragOver(e: React.DragEvent) {
-    if (e.dataTransfer.types.includes("application/x-nexara-vm")) {
+    // Filing a guest takes manage:vm_folder; without it nothing is dropped.
+    if (
+      hasPermission("manage", "vm_folder") &&
+      e.dataTransfer.types.includes("application/x-nexara-vm")
+    ) {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDropActive(true);

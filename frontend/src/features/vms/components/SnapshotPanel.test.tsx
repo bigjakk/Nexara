@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createTestQueryClient, renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { GUEST_ACTION_PERMISSIONS, grantPermissions } from "@/test/permissions";
 import { SnapshotPanel } from "./SnapshotPanel";
@@ -73,5 +74,50 @@ describe("SnapshotPanel", () => {
       expect(within(row).queryAllByRole("button")).toHaveLength(actions);
     }
     expect(screen.getByText("Current state")).toBeInTheDocument();
+  });
+
+  // A failed rollback's banner went as its task ended, and Proxmox's reason
+  // with it.
+  it("keeps a failed rollback on its banner", async () => {
+    mockedList.mockResolvedValue([
+      { name: "before-upgrade", snap_time: 1767225600, description: "clean" },
+    ]);
+    const upid = "UPID:pve-01:00000001:00000002:00000003:qmrollback:101:x:";
+    vi.mocked(apiClient.post).mockResolvedValue({ upid, status: "OK" });
+    vi.mocked(apiClient.get).mockImplementation((path: unknown) =>
+      Promise.resolve(
+        String(path).endsWith("/snapshot-capability")
+          ? { supported: true, blocking_volumes: [] }
+          : { upid, status: "stopped", exit_status: "snapshot is locked" },
+      ),
+    );
+    const user = userEvent.setup();
+    const client = createTestQueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    renderWithProviders(
+      <SnapshotPanel
+        clusterId={CLUSTER}
+        resourceId={VM}
+        kind="vm"
+        resourceName="linux01"
+      />,
+      { client },
+    );
+    await user.click(await screen.findByRole("button", { name: "Rollback" }));
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    // The banner refreshes recent activity as it reports the task's end.
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: ["recent-activity"],
+      });
+    });
+    expect(
+      screen.getByText("Task failed: snapshot is locked"),
+    ).toBeInTheDocument();
+    // Until the next operation: Take snapshot follows its own task.
+    await user.click(screen.getByRole("button", { name: "Take snapshot" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByText("Task failed: snapshot is locked")).toBeNull();
   });
 });

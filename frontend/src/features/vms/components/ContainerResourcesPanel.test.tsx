@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { useQuery } from "@tanstack/react-query";
 import { renderWithProviders } from "@/test/test-utils";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
+import { grantPermissions } from "@/test/permissions";
 
 interface PanelState {
   config: Record<string, unknown>;
@@ -58,6 +59,36 @@ const defaultProps = {
   ctStatus: "stopped",
   nodeName: "pve1",
 };
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:container", "execute:container");
+});
+
+// A Viewer got every field, Add network interface, Resize and Save, each
+// answering 403. The volume move takes execute:container, not manage.
+it.each([
+  [["view:container"], false],
+  [["view:container", "execute:container"], true],
+])("with %j shows the resources read-only, offering a move: %s", (permissions, move) => {
+  grantPermissions(...permissions);
+  state.config = {
+    hostname: "linux01",
+    cores: 2,
+    memory: 1024,
+    rootfs: "store01:vm-200-disk-0,size=8G",
+  };
+  renderWithProviders(<ContainerResourcesPanel {...defaultProps} />);
+
+  expect(screen.getByRole("spinbutton", { name: "Cores" })).toBeDisabled();
+  for (const name of ["Add network interface", "Resize rootfs", "Save changes"]) {
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  }
+  expect(
+    screen.queryByRole("button", { name: "Move rootfs to another storage" }) !==
+      null,
+  ).toBe(move);
+});
 
 describe("ContainerResourcesPanel unused volumes", () => {
   beforeEach(() => {

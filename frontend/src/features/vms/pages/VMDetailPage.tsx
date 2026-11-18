@@ -101,6 +101,8 @@ export function VMDetailPage() {
   // without both grants the tab would be a table of refusals.
   const canHistory =
     hasPermission("view", "audit") && hasPermission("view", "task");
+  // A rename goes through the config route.
+  const canRename = hasPermission("manage", kind === "ct" ? "container" : "vm");
   const validTabs = [
     ...(kind === "vm"
       ? [
@@ -296,7 +298,7 @@ export function VMDetailPage() {
         }
         titleAside={
           <>
-            {!renaming && (
+            {!renaming && canRename && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -1016,6 +1018,8 @@ function PoolFact({
 }) {
   const { data: pools } = useResourcePools(clusterId);
   const setPool = useSetVMPool(clusterId, vmId);
+  // The pool route takes manage:pool.
+  const canChange = usePermissions().hasPermission("manage", "pool");
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState(currentPool);
 
@@ -1034,17 +1038,19 @@ function PoolFact({
           >
             {currentPool || "none"}
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-5 w-5 shrink-0 p-0"
-            onClick={() => {
-              setEditing(true);
-            }}
-            title="Change pool"
-          >
-            <Pencil className="h-3 w-3" />
-          </Button>
+          {canChange && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 w-5 shrink-0 p-0"
+              onClick={() => {
+                setEditing(true);
+              }}
+              title="Change pool"
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
         </span>
       </Fact>
     );

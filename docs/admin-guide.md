@@ -205,15 +205,15 @@ A VM's tabs are **Overview**, **Hardware**, **Snapshots**, **Cloud-init**, **Gue
 | **Migrate** | `manage:migration` | See [Migration](#migration) |
 | **Destroy** | `delete:vm` / `delete:container` | Disabled while the guest runs. Irreversible, so you type the name. A failed destroy stays on its banner, which gives Proxmox's reason |
 
-Each action is offered only to a user who holds what it needs, on the guest's page, its Snapshots tab, its right-click menu, a table's row menu and the console (its **Power** and **Media** menus and the stopped guest's **Start**) alike; the inventory's bulk toolbar shows an action only when the role allows it for every kind of guest selected. A guest's **Backups** tab offers **Back up now** and **Restore** only with `manage:backup`, and **Delete backup** only with `delete:backup`. A failed power action, clone, template change, deploy or create stays on its banner, which gives Proxmox's reason, and the guest's state is left as Nexara last read it.
+Each action is offered only to a user who holds what it needs, on the guest's page, its Snapshots tab, its right-click menu, a table's row menu and the console (its **Power** and **Media** menus and the stopped guest's **Start**) alike; the inventory's bulk toolbar shows an action only when the role allows it for every kind of guest selected. A guest's **Backups** tab offers **Back up now** and **Restore** only with `manage:backup`, and **Delete backup** only with `delete:backup`. The guest's name on its page can be changed only with `manage:vm` (`manage:container` for a container) and its pool only with `manage:pool`, the **Schedules** tab adds and deletes only with `manage:schedule`, and **Move to folder…** and dragging a guest onto a folder need `manage:vm_folder`. A failed power action, clone, template change, deploy, create, snapshot rollback or snapshot delete stays on its banner, which gives Proxmox's reason, and the guest's state is left as Nexara last read it.
 
 **Halted VMs.** A VM whose QEMU process is up while the guest is halted still counts as running (in counts, the Running filter, DRS and rolling updates), but Inventory, the tree and the guest page show its state instead: **I/O error** (paused on a storage error), **Asleep** (S3 sleep), **Watchdog fired**, **Panicked**, **Shut down** (the guest shut down and QEMU is still up), **Internal error** or **In debugger**. The `status:` search finds it by that state (`status:io-error`, `status:asleep`) as well as by `status:running`. On the guest page, in the right-click menus and in the console toolbar such a VM offers **Stop** and **Reset**, and **Resume** where Proxmox can resume it: from I/O error once the storage is back (QEMU retries the failed I/O), from Asleep (Proxmox wakes it), Watchdog fired and In debugger. Start, Shutdown and Reboot are not offered for it or for a paused VM. Proxmox refuses Start for any running VM, and Shutdown and Reboot for a paused or sleeping one; for the other halted states it accepts them, but the request times out because the guest cannot answer.
 
 These are also on a guest's right-click menu, with **Console**: in the tree, the search results and Favorites, where it also has **Move to folder…**, and in tables. In those tables the menu is also on each guest row's **⋮** button, at the end of the row. The Inventory page lists templates under **Templates**.
 
-**Hardware** (`manage:vm`). Changes are staged until **Save changes**, and on a running VM stay pending until it restarts. **Add device** offers Hard disk, CD/DVD drive, Network device, USB device and PCI device ([Device Passthrough](#device-passthrough)), Serial port, Cloud-init drive, VirtIO RNG, VirtioFS share, EFI disk and TPM state. A disk row has move, **Resize to** (growing only) and **Remove**. A container's **Resources** tab is the equivalent for it.
+**Hardware** (`manage:vm`). Changes are staged until **Save changes**, and on a running VM stay pending until it restarts. **Add device** offers Hard disk, CD/DVD drive, Network device, USB device and PCI device ([Device Passthrough](#device-passthrough)), Serial port, Cloud-init drive, VirtIO RNG, VirtioFS share, EFI disk and TPM state. A disk row has move, **Resize to** (growing only) and **Remove**. A container's **Resources** tab is the equivalent for it, with `manage:container`. Without that permission either tab shows the settings read-only, though a container's volume move stays: it takes `execute:container`.
 
-**Cloud-init** needs a cloud-init drive. It sets User, Password, IP config, DNS server, Search domain and SSH public keys. An empty field is not sent, so a value cannot be cleared from this tab.
+**Cloud-init** needs a cloud-init drive. It sets User, Password, IP config, DNS server, Search domain and SSH public keys, with `manage:vm`; without it the tab is read-only. An empty field is not sent, so a value cannot be cleared from this tab.
 
 ### Bulk Actions
 
@@ -1012,6 +1012,8 @@ On a store's **Content** tab (`manage:storage` to add anything, `delete:storage`
 - **Pull OCI image** — a container image as a template: Proxmox VE 9.1 or later, with `skopeo` on
   the node. Proxmox calls this a technology preview
 - **Browse appliances** — Proxmox's own appliance list; reading it needs `view:storage`
+
+A failed upload, download or pull stays on its banner in the dialog, which gives Proxmox's reason, and the dialog can send it again or be closed.
 
 ### Pool Detail
 

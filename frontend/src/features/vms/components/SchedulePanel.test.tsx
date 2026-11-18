@@ -3,6 +3,7 @@ import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { SchedulePanel } from "./SchedulePanel";
+import { grantPermissions } from "@/test/permissions";
 
 /** The slice of a create-schedule call these tests assert on. */
 interface CapturedCreate {
@@ -42,6 +43,11 @@ async function openDialog(user: ReturnType<typeof userEvent.setup>) {
 function createButton() {
   return screen.getByRole("button", { name: "Create" });
 }
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:schedule");
+});
 
 // The field holds a PREFIX: every run names its snapshot
 // <prefix>-YYYYMMDD-HHMMSS ("auto" when empty), because a guest holds each

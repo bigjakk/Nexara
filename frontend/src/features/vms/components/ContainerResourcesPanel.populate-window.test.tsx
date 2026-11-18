@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // A stand-in for the React DevTools hook, which React calls on every commit,
 // after that commit's layout effects and before its passive ones: the only
@@ -30,6 +30,7 @@ import userEvent from "@testing-library/user-event";
 import { apiClient } from "@/lib/api-client";
 import { renderWithProviders } from "@/test/test-utils";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
+import { grantPermissions } from "@/test/permissions";
 
 vi.mock("@/lib/api-client", async () =>
   (await import("@/test/mocks")).apiClientMock({ patch: vi.fn() }),
@@ -72,6 +73,11 @@ interface SaveButtonProps {
   onClick?: () => void;
   disabled?: boolean;
 }
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:container", "execute:container");
+});
 
 // The render that first lays a successful Save's result over the config has
 // the fields and the staging it was built on still in place: the populate

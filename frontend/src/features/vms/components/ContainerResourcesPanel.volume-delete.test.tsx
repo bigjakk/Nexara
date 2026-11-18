@@ -15,6 +15,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { fill, setupUser } from "@/test/user";
 import { ContainerResourcesPanel } from "./ContainerResourcesPanel";
 import panelSource from "./ContainerResourcesPanel.tsx?raw";
+import { grantPermissions } from "@/test/permissions";
 
 // The transport is mocked rather than the hooks, so the real
 // useSetResourceConfig runs and each test can assert the exact request that
@@ -199,6 +200,11 @@ function expectNothingMutated() {
 function deleteAndSave(dialog: HTMLElement): HTMLElement {
   return within(dialog).getByRole("button", { name: "Delete and save" });
 }
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:container", "execute:container");
+});
 
 describe("ContainerResourcesPanel unused volume deletion", () => {
   beforeEach(() => {

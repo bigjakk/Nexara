@@ -591,6 +591,7 @@
   },
   "hardwareRows": {
     "editName": "Edit {{name}}",
+    "showName": "Show {{name}}",
     "changes": "Changes",
     "noUnsavedChanges": "No unsaved changes",
     "saveChanges": "Save changes",

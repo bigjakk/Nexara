@@ -64,6 +64,7 @@ export function URLDownloadDialog({
   >("");
   const [verifyCerts, setVerifyCerts] = useState(true);
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
   const downloadMutation = useDownloadURL();
   const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
@@ -91,6 +92,7 @@ export function URLDownloadDialog({
   function handleSubmit() {
     if (!urlValid || !filenameValid) return;
     setTaskUpid(null);
+    setFailedUpid(null);
     settle(
       downloadMutation.mutateAsync({
         clusterId,
@@ -128,6 +130,7 @@ export function URLDownloadDialog({
     setVerifyCerts(true);
     setShowAdvanced(false);
     setTaskUpid(null);
+    setFailedUpid(null);
     setContent(initialContent);
     downloadMutation.reset();
   }
@@ -331,12 +334,12 @@ export function URLDownloadDialog({
             </div>
           )}
 
-          {taskUpid && (
+          {(taskUpid ?? failedUpid) && (
             <TaskProgressBanner
               clusterId={clusterId}
-              upid={taskUpid}
+              upid={taskUpid ?? failedUpid}
               description={`Download ${filenameTrimmed}`}
-              onComplete={() => {
+              onComplete={(success) => {
                 void queryClient.invalidateQueries({
                   queryKey: [
                     "clusters",
@@ -347,6 +350,12 @@ export function URLDownloadDialog({
                   ],
                 });
                 setTaskUpid(null);
+                // A failed task keeps its banner, which gives Proxmox's
+                // reason, and the form is free to try again.
+                if (!success) {
+                  setFailedUpid((failed) => taskUpid ?? failed);
+                  return;
+                }
                 setOpen(false);
               }}
             />

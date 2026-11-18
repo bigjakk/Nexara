@@ -38,6 +38,7 @@ export function UploadDialog({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMutation = useUploadFile();
   // The dialog shows a failure itself (the hook opts out of the app's toast),
@@ -58,6 +59,7 @@ export function UploadDialog({
     if (!selectedFile) return;
     setProgress(0);
     setTaskUpid(null);
+    setFailedUpid(null);
     settle(
       uploadMutation.mutateAsync({
         clusterId,
@@ -83,11 +85,17 @@ export function UploadDialog({
     );
   }
 
-  function handleTaskComplete() {
+  function handleTaskComplete(success: boolean) {
     void queryClient.invalidateQueries({
       queryKey: ["clusters", clusterId, "storage", storageId, "content"],
     });
     setTaskUpid(null);
+    // A failed task keeps its banner, which gives Proxmox's reason, and the
+    // file stays chosen to try again.
+    if (!success) {
+      setFailedUpid((failed) => taskUpid ?? failed);
+      return;
+    }
     setOpen(false);
     setSelectedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -96,6 +104,7 @@ export function UploadDialog({
   function handleReset() {
     setProgress(null);
     setTaskUpid(null);
+    setFailedUpid(null);
     setSelectedFile(null);
     uploadMutation.reset();
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -189,10 +198,10 @@ export function UploadDialog({
           )}
 
           {/* Proxmox task progress (file import/copy on the node) */}
-          {taskUpid && (
+          {(taskUpid ?? failedUpid) && (
             <TaskProgressBanner
               clusterId={clusterId}
-              upid={taskUpid}
+              upid={taskUpid ?? failedUpid}
               description={`Upload: ${selectedFile?.name ?? "file"}`}
               onComplete={handleTaskComplete}
             />

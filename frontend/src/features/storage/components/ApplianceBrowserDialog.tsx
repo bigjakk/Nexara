@@ -56,6 +56,7 @@ export function ApplianceBrowserDialog({
   const [search, setSearch] = useState("");
   const [section, setSection] = useState<string>("all");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
   const [activeTemplate, setActiveTemplate] = useState<string>("");
 
   const appliancesQuery = useAppliances(clusterId, open);
@@ -93,6 +94,7 @@ export function ApplianceBrowserDialog({
   function handleDownload(t: ApplianceTemplate) {
     setActiveTemplate(t.template);
     setTaskUpid(null);
+    setFailedUpid(null);
     settle(
       downloadMutation.mutateAsync({
         clusterId,
@@ -117,6 +119,7 @@ export function ApplianceBrowserDialog({
       setSearch("");
       setSection("all");
       setTaskUpid(null);
+      setFailedUpid(null);
       setActiveTemplate("");
       downloadMutation.reset();
     }
@@ -194,12 +197,12 @@ export function ApplianceBrowserDialog({
             </div>
           )}
 
-          {taskUpid && (
+          {(taskUpid ?? failedUpid) && (
             <TaskProgressBanner
               clusterId={clusterId}
-              upid={taskUpid}
+              upid={taskUpid ?? failedUpid}
               description={`Download ${activeTemplate}`}
-              onComplete={() => {
+              onComplete={(success) => {
                 void queryClient.invalidateQueries({
                   queryKey: [
                     "clusters",
@@ -209,6 +212,9 @@ export function ApplianceBrowserDialog({
                     "content",
                   ],
                 });
+                // A failed download keeps its banner, which gives Proxmox's reason,
+                // and the rows are free for the next one.
+                if (!success) setFailedUpid((failed) => taskUpid ?? failed);
                 setTaskUpid(null);
                 setActiveTemplate("");
               }}

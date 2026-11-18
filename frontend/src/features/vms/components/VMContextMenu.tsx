@@ -66,7 +66,7 @@ export function VMContextMenu({
   const setPanelOpen = useTaskLogStore((s) => s.setPanelOpen);
   const setFocusedTask = useTaskLogStore((s) => s.setFocusedTask);
   const actionMutation = useVMAction();
-  const { canConsole } = usePermissions();
+  const { canConsole, hasPermission } = usePermissions();
 
   const normalizedStatus = target.status.toLowerCase();
   const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
@@ -196,18 +196,23 @@ export function VMContextMenu({
     EVERYDAY.map(managementItem),
     [
       ...RARER.map(managementItem),
-      <ContextMenuItem
-        key="move-to-folder"
-        onClick={() => {
-          onAction?.();
-          openMoveToFolder(target);
-        }}
-      >
-        <span className="mr-2">
-          <FolderInput className="h-4 w-4" />
-        </span>
-        Move to folder…
-      </ContextMenuItem>,
+      // Filing a guest takes manage:vm_folder.
+      ...(hasPermission("manage", "vm_folder")
+        ? [
+            <ContextMenuItem
+              key="move-to-folder"
+              onClick={() => {
+                onAction?.();
+                openMoveToFolder(target);
+              }}
+            >
+              <span className="mr-2">
+                <FolderInput className="h-4 w-4" />
+              </span>
+              Move to folder…
+            </ContextMenuItem>,
+          ]
+        : []),
       <FavoriteContextItem
         key="favorite"
         target={{

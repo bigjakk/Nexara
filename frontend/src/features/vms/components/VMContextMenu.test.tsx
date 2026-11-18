@@ -7,7 +7,7 @@ import { VMContextMenu } from "./VMContextMenu";
 // The tree's right-click menu offered every guest action whatever the role.
 describe("VMContextMenu", () => {
   it.each([
-    [GUEST_ACTION_PERMISSIONS, true],
+    [[...GUEST_ACTION_PERMISSIONS, "manage:vm_folder"], true],
     [["view:vm"], false],
   ])("with %j offers the guest actions: %s", (permissions, offered) => {
     grantPermissions(...permissions);
@@ -28,7 +28,7 @@ describe("VMContextMenu", () => {
     );
     fireEvent.contextMenu(screen.getByText("linux01"));
     const items = screen.queryAllByRole("menuitem").map((i) => i.textContent);
-    for (const name of ["Shutdown", "Clone", "Migrate"]) {
+    for (const name of ["Shutdown", "Clone", "Migrate", "Move to folder"]) {
       expect(items.some((t) => t.includes(name))).toBe(offered);
     }
   });

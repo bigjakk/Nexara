@@ -49,6 +49,7 @@ export function OCIPullDialog({
   const [reference, setReference] = useState("");
   const [filename, setFilename] = useState("");
   const [taskUpid, setTaskUpid] = useState<string | null>(null);
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
   const pullMutation = usePullOCIImage();
   const settle = useSaveOutcome(open);
   const queryClient = useQueryClient();
@@ -66,6 +67,7 @@ export function OCIPullDialog({
   function handleSubmit() {
     if (!referenceValid || !filenameValid) return;
     setTaskUpid(null);
+    setFailedUpid(null);
     settle(
       pullMutation.mutateAsync({
         clusterId,
@@ -93,6 +95,7 @@ export function OCIPullDialog({
     setReference("");
     setFilename("");
     setTaskUpid(null);
+    setFailedUpid(null);
     pullMutation.reset();
   }
 
@@ -190,12 +193,12 @@ export function OCIPullDialog({
             )}
           </div>
 
-          {taskUpid && (
+          {(taskUpid ?? failedUpid) && (
             <TaskProgressBanner
               clusterId={clusterId}
-              upid={taskUpid}
+              upid={taskUpid ?? failedUpid}
               description={`Pull ${referenceTrimmed}`}
-              onComplete={() => {
+              onComplete={(success) => {
                 void queryClient.invalidateQueries({
                   queryKey: [
                     "clusters",
@@ -206,6 +209,12 @@ export function OCIPullDialog({
                   ],
                 });
                 setTaskUpid(null);
+                // A failed task keeps its banner, which gives Proxmox's
+                // reason, and the form is free to try again.
+                if (!success) {
+                  setFailedUpid((failed) => taskUpid ?? failed);
+                  return;
+                }
                 setOpen(false);
               }}
             />

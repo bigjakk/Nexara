@@ -310,6 +310,19 @@ describe("VMDetailPage", () => {
     ).toBeInTheDocument();
   });
 
+  // The header's pencils answered 403 for a role without what their routes
+  // take: the pool route manage:pool, a rename the config route's manage:vm.
+  it.each([
+    ["Change pool", ["manage:pool"], true],
+    ["Change pool", [], false],
+    ["Rename", ["manage:vm"], true],
+    ["Rename", [], false],
+  ])("offers %s with %j: %s", (title, granted, offered) => {
+    grantPermissions("view:vm", ...granted);
+    renderPage();
+    expect(screen.queryByTitle(title) !== null).toBe(offered);
+  });
+
   // History reads the audit log and opens Proxmox task logs; with either
   // grant missing it would be a tab of refusals, so it is not offered.
   it.each([

@@ -9,6 +9,7 @@ import type { GuestSnapshotRow } from "../types/snapshots";
 const deleteMutate = vi.hoisted(() => vi.fn());
 const resyncMutate = vi.hoisted(() => vi.fn());
 const permissionState = vi.hoisted(() => ({ canDelete: true }));
+const taskOutcome = vi.hoisted(() => ({ ok: true }));
 
 vi.mock("@/features/vms/api/vm-queries", () => ({
   useDeleteSnapshot: () => ({
@@ -30,20 +31,23 @@ vi.mock("@/hooks/usePermissions", () => ({
   }),
 }));
 
-// Render a stand-in banner whose button reports task completion, so the
-// post-delete resync hand-off can be exercised without task polling.
+// Render a stand-in banner, named by its task, whose button reports the task
+// ending (as taskOutcome says), so the post-delete resync hand-off can be
+// exercised without task polling.
 vi.mock("@/features/vms/components/TaskProgressBanner", () => ({
   TaskProgressBanner: ({
+    upid,
     onComplete,
   }: {
+    upid: string | null;
     onComplete?: (ok: boolean) => void;
   }) => (
     <button
       type="button"
       data-testid="task-banner"
-      onClick={() => onComplete?.(true)}
+      onClick={() => onComplete?.(taskOutcome.ok)}
     >
-      task
+      {upid}
     </button>
   ),
 }));
@@ -75,6 +79,7 @@ beforeEach(() => {
   deleteMutate.mockReset();
   resyncMutate.mockReset();
   permissionState.canDelete = true;
+  taskOutcome.ok = true;
 });
 
 describe("age helpers", () => {
@@ -167,6 +172,32 @@ describe("GuestSnapshotTable", () => {
     expect(resyncMutate).toHaveBeenCalledWith(
       expect.objectContaining({ clusterId: "c1", vmid: 100 }),
     );
+  });
+
+  // A failed delete's banner went with its task, and Proxmox's reason with it.
+  it("keeps a failed delete's banner until the next delete", async () => {
+    const user = userEvent.setup();
+    taskOutcome.ok = false;
+    for (const upid of ["UPID:failed", "UPID:next"]) {
+      deleteMutate.mockImplementationOnce(
+        (
+          _vars: unknown,
+          opts?: { onSuccess?: (data: { upid: string }) => void },
+        ) => {
+          opts?.onSuccess?.({ upid });
+        },
+      );
+    }
+    renderWithProviders(<GuestSnapshotTable rows={[makeRow({})]} />);
+    await user.click(screen.getByTitle("Delete snapshot"));
+    await user.click(screen.getByText("Confirm"));
+    await user.click(screen.getByTestId("task-banner"));
+    expect(resyncMutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("task-banner")).toHaveTextContent("UPID:failed");
+
+    await user.click(screen.getByTitle("Delete snapshot"));
+    await user.click(screen.getByText("Confirm"));
+    expect(screen.getByTestId("task-banner")).toHaveTextContent("UPID:next");
   });
 
   it("routes container rows through the ct delete endpoint", async () => {

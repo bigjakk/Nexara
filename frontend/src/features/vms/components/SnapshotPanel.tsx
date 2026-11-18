@@ -49,21 +49,28 @@ export function SnapshotPanel({
     "snapshots",
   ];
 
-  function handleTaskComplete() {
+  function handleTaskComplete(success: boolean) {
     void queryClient.invalidateQueries({ queryKey: snapshotQueryKey });
+    // A failed rollback or delete keeps its banner, which gives Proxmox's
+    // reason, until the next one.
+    if (!success) setFailedUpid((failed) => upid ?? failed);
     setUpid(null);
   }
 
   const [createOpen, setCreateOpen] = useState(false);
   const [upid, setUpid] = useState<string | null>(null);
+  const [failedUpid, setFailedUpid] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmRollback, setConfirmRollback] = useState<string | null>(null);
 
   function handleDelete(name: string) {
+    setFailedUpid(null);
     deleteMutation.mutate(
       { clusterId, resourceId, kind, snapName: name },
       {
         onSuccess: (data) => {
+          // Again on success: an older task may have failed meanwhile.
+          setFailedUpid(null);
           setUpid(data.upid);
           setConfirmDelete(null);
         },
@@ -72,10 +79,12 @@ export function SnapshotPanel({
   }
 
   function handleRollback(name: string) {
+    setFailedUpid(null);
     rollbackMutation.mutate(
       { clusterId, resourceId, kind, snapName: name },
       {
         onSuccess: (data) => {
+          setFailedUpid(null);
           setUpid(data.upid);
           setConfirmRollback(null);
         },
@@ -128,10 +137,10 @@ export function SnapshotPanel({
 
   return (
     <div className="space-y-4">
-      {upid && (
+      {(upid ?? failedUpid) && (
         <TaskProgressBanner
           clusterId={clusterId}
-          upid={upid}
+          upid={upid ?? failedUpid}
           onComplete={handleTaskComplete}
           description={t("snapshotPanel.snapshotOperation")}
         />
@@ -158,6 +167,7 @@ export function SnapshotPanel({
               size="sm"
               className="gap-1.5"
               onClick={() => {
+                setFailedUpid(null);
                 setCreateOpen(true);
               }}
             >

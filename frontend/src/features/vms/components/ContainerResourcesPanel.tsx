@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
+import {
+  use,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useMemo,
+  useRef,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Loader2,
@@ -67,6 +74,8 @@ import {
   PendingBadge,
   SaveBar,
 } from "./hardware/HardwareRows";
+import { RowsReadOnlyContext } from "./hardware/read-only";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   clearSaveBarClass,
   fieldInputClass,
@@ -410,6 +419,14 @@ function useVolumeResize(clusterId: string, ctId: string, disk: string) {
 
 type VolumeResize = ReturnType<typeof useVolumeResize>;
 
+/**
+ * The volume move takes execute:container where the tab's edits take manage,
+ * so it is offered on a read-only tab too.
+ */
+function useCanMoveVolume(): boolean {
+  return usePermissions().hasPermission("execute", "container");
+}
+
 /** How the last resize went, on the row itself: it shows with the fields shut. */
 function ResizeResult({ resize }: { resize: VolumeResize }) {
   const { t } = useTranslation("vms");
@@ -485,6 +502,7 @@ function RootFSRow({
   const currentSize = kv.get("size") ?? "";
   const [open, setOpen] = useState(false);
   const resize = useVolumeResize(clusterId, ctId, "rootfs");
+  const canMove = useCanMoveVolume();
 
   return (
     <DeviceRow
@@ -510,14 +528,16 @@ function RootFSRow({
         setOpen((was) => !was);
       }}
       editLabel={t("containerResourcesPanel.resizeRootfs")}
-      actions={
-        <MoveVolumeDialog
-          clusterId={clusterId}
-          ctId={ctId}
-          volumeKey="rootfs"
-          currentStorage={currentStorage}
-          storageOptions={storageOptions}
-        />
+      ownActions={
+        canMove ? (
+          <MoveVolumeDialog
+            clusterId={clusterId}
+            ctId={ctId}
+            volumeKey="rootfs"
+            currentStorage={currentStorage}
+            storageOptions={storageOptions}
+          />
+        ) : undefined
       }
       editor={<ResizeEditor resize={resize} placeholder="e.g. 32G" />}
     />
@@ -543,6 +563,7 @@ function MountPointRow({
   // Only a volume with a size can be resized: a bind or device mount has none.
   const resizable = mp.size !== "";
   const resize = useVolumeResize(clusterId, ctId, deviceKey);
+  const canMove = useCanMoveVolume();
 
   return (
     <DeviceRow
@@ -569,14 +590,16 @@ function MountPointRow({
           : undefined
       }
       editLabel={t("containerResourcesPanel.resizeDeviceKey", { deviceKey })}
-      actions={
-        <MoveVolumeDialog
-          clusterId={clusterId}
-          ctId={ctId}
-          volumeKey={deviceKey}
-          currentStorage={currentStorage}
-          storageOptions={storageOptions}
-        />
+      ownActions={
+        canMove ? (
+          <MoveVolumeDialog
+            clusterId={clusterId}
+            ctId={ctId}
+            volumeKey={deviceKey}
+            currentStorage={currentStorage}
+            storageOptions={storageOptions}
+          />
+        ) : undefined
       }
       editor={
         resizable ? (
@@ -862,13 +885,27 @@ function keysBesidesVolumes(fields: Record<string, string>): string[] {
   ];
 }
 
-export function ContainerResourcesPanel({
+/**
+ * A role without manage:container, which the config route takes, sees the tab
+ * read-only.
+ */
+export function ContainerResourcesPanel(props: ContainerResourcesPanelProps) {
+  const { hasPermission } = usePermissions();
+  return (
+    <RowsReadOnlyContext value={!hasPermission("manage", "container")}>
+      <ContainerResourcesPanelBody {...props} />
+    </RowsReadOnlyContext>
+  );
+}
+
+function ContainerResourcesPanelBody({
   clusterId,
   ctId,
   ctStatus,
   nodeName,
 }: ContainerResourcesPanelProps) {
   const { t } = useTranslation("vms");
+  const readOnly = use(RowsReadOnlyContext);
   const {
     data: fetchedConfig,
     dataUpdatedAt,
@@ -1783,30 +1820,32 @@ export function ContainerResourcesPanel({
             title={t("containerResourcesPanel.network")}
             aside={plural(nicCount, "interface")}
             actions={
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() => {
-                  const key = nextNicKey();
-                  setPendingNics((prev) => {
-                    const next = new Map(prev);
-                    next.set(
-                      key,
-                      emptyCTNet({
-                        name: `eth${key.replace("net", "")}`,
-                        bridge: bridgeList[0] ?? "vmbr0",
-                        ip: "dhcp",
-                        firewall: true,
-                      }),
-                    );
-                    return next;
-                  });
-                }}
-              >
-                <Plus className="h-3.5 w-3.5" />{" "}
-                {t("containerResourcesPanel.addNetworkInterface")}
-              </Button>
+              readOnly ? undefined : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    const key = nextNicKey();
+                    setPendingNics((prev) => {
+                      const next = new Map(prev);
+                      next.set(
+                        key,
+                        emptyCTNet({
+                          name: `eth${key.replace("net", "")}`,
+                          bridge: bridgeList[0] ?? "vmbr0",
+                          ip: "dhcp",
+                          firewall: true,
+                        }),
+                      );
+                      return next;
+                    });
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />{" "}
+                  {t("containerResourcesPanel.addNetworkInterface")}
+                </Button>
+              )
             }
           >
             {nicCount === 0 && (
@@ -2169,7 +2208,7 @@ export function ContainerResourcesPanel({
                     setDescription(e.target.value);
                   }}
                   rows={3}
-                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                  className="flex w-full rounded-md border border-input bg-transparent px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </Field>
               <Field label={t("containerResourcesPanel.tags")}>

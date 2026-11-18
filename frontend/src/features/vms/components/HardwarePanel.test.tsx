@@ -12,6 +12,7 @@ import { deferred } from "@/test/fake-server";
 import { fill, setupUser } from "@/test/user";
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import { HardwarePanel } from "./HardwarePanel";
+import { grantPermissions } from "@/test/permissions";
 
 // The transport is mocked rather than the hooks, so the real useDetachDisk and
 // useSetVMConfig run and each test can assert the exact request that leaves
@@ -184,6 +185,33 @@ beforeEach(() => {
   vi.resetAllMocks();
   serverConfig = vmConfig();
   serveConfig();
+});
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:vm");
+});
+
+// A Viewer got Add device, Add disk, every field and Save, each answering 403.
+// The CD/DVD drive's media shows in its summary, as there is no picker.
+it("shows a role without manage:vm the hardware read-only", async () => {
+  grantPermissions("view:vm");
+  serverConfig = {
+    ...vmConfig(),
+    ide2: "store01:iso/installer.iso,media=cdrom",
+  };
+  renderWithProviders(<HardwarePanel {...props} />);
+  await screen.findByText("unused0");
+
+  expect(screen.getByRole("spinbutton", { name: "Cores" })).toBeDisabled();
+  expect(screen.getByText("store01:iso/installer.iso")).toBeInTheDocument();
+  for (const name of [/add device/i, "Add disk", "Save changes"]) {
+    expect(screen.queryByRole("button", { name })).toBeNull();
+  }
+  // The disk and the drive: the disk's "later" would move it.
+  const moves = screen.getAllByRole("button", { name: /in the boot order$/ });
+  expect(moves).toHaveLength(4);
+  for (const move of moves) expect(move).toBeDisabled();
 });
 
 // IDE takes no iothread; a disk added with it was refused at Save ("property

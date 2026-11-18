@@ -1,4 +1,10 @@
-import { useId, type ComponentProps, type ReactNode, type Ref } from "react";
+import {
+  use,
+  useId,
+  type ComponentProps,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { ChevronDown, Loader2, Pencil, Save } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -7,11 +13,13 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { RowsReadOnlyContext } from "./read-only";
 
 /**
  * The layout pieces of a guest's Hardware and Resources tabs: groups of
  * fields, device rows and the save bar. Presentation only. The panels own
- * every value, every staged change and what a Save sends.
+ * every value, every staged change and what a Save sends. Under
+ * RowsReadOnlyContext the pieces draw themselves read-only.
  */
 
 /** The groups of one panel, divided by hairlines. */
@@ -93,8 +101,9 @@ export function Field({
   className?: string;
   children: ReactNode;
 }) {
-  return (
-    <div className={cn("min-w-0", className)}>
+  const readOnly = use(RowsReadOnlyContext);
+  const content = (
+    <>
       <label className="block space-y-1">
         <span className="block truncate text-[12.5px] text-muted-foreground">
           {label}
@@ -102,7 +111,15 @@ export function Field({
         {children}
       </label>
       {note}
-    </div>
+    </>
+  );
+  // A disabled fieldset disables the control, whichever kind it is.
+  return readOnly ? (
+    <fieldset disabled className={cn("min-w-0", className)}>
+      {content}
+    </fieldset>
+  ) : (
+    <div className={cn("min-w-0", className)}>{content}</div>
   );
 }
 
@@ -114,13 +131,15 @@ export function Checks({ children }: { children: ReactNode }) {
 export function Check({
   label,
   id: givenId,
+  disabled,
   ...props
 }: Omit<ComponentProps<typeof Checkbox>, "children"> & { label: ReactNode }) {
+  const readOnly = use(RowsReadOnlyContext);
   const ownId = useId();
   const id = givenId ?? ownId;
   return (
     <div className="flex items-center gap-2">
-      <Checkbox id={id} {...props} />
+      <Checkbox id={id} disabled={readOnly || disabled} {...props} />
       <Label htmlFor={id} className="cursor-pointer font-normal">
         {label}
       </Label>
@@ -196,6 +215,7 @@ export function DeviceRow({
   marker,
   struck = false,
   actions,
+  ownActions,
   editor,
   open = false,
   onToggle,
@@ -213,6 +233,8 @@ export function DeviceRow({
   /** Drawn struck through: the row is leaving on the next Save. */
   struck?: boolean;
   actions?: ReactNode;
+  /** Controls that take a permission of their own, kept on a read-only tab. */
+  ownActions?: ReactNode;
   /**
    * The device's own fields, under the row while it is open. Without
    * onToggle they are always there: a device just added has to be filled in.
@@ -225,8 +247,15 @@ export function DeviceRow({
 }) {
   const { t } = useTranslation("vms");
   const editorId = useId();
-  const hasEditor = editor !== undefined && onToggle !== undefined;
-  const showEditor = editor !== undefined && (onToggle === undefined || open);
+  const readOnly = use(RowsReadOnlyContext);
+  const rowActions = readOnly ? undefined : actions;
+  // Read-only, a device's own fields still open, to be read; an editor that
+  // does one thing (editLabel: "Resize rootfs") is not offered.
+  const rowEditor = readOnly && editLabel !== undefined ? undefined : editor;
+  const hasEditor = rowEditor !== undefined && onToggle !== undefined;
+  const showEditor =
+    rowEditor !== undefined && (onToggle === undefined || open);
+  const editorClass = "space-y-3 px-[18px] pb-4 pl-[44px] pt-1";
   return (
     <li>
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-[18px] py-2.5 text-sm">
@@ -251,19 +280,26 @@ export function DeviceRow({
           {name}
         </span>
         {marker}
-        {(hasEditor || actions !== undefined) && (
+        {(hasEditor ||
+          rowActions !== undefined ||
+          ownActions !== undefined) && (
           <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
             {hasEditor && (
               <IconAction
-                label={editLabel ?? t("hardwareRows.editName", { name })}
-                icon={Pencil}
+                label={
+                  readOnly
+                    ? t("hardwareRows.showName", { name })
+                    : (editLabel ?? t("hardwareRows.editName", { name }))
+                }
+                icon={readOnly ? ChevronDown : Pencil}
                 aria-expanded={open}
                 aria-controls={open ? editorId : undefined}
                 onClick={onToggle}
                 className={cn(open && "bg-accent text-foreground")}
               />
             )}
-            {actions}
+            {rowActions}
+            {ownActions}
           </div>
         )}
         {summary !== undefined && (
@@ -272,11 +308,20 @@ export function DeviceRow({
           </div>
         )}
       </div>
-      {showEditor && (
-        <div id={editorId} className="space-y-3 px-[18px] pb-4 pl-[44px] pt-1">
-          {editor}
-        </div>
-      )}
+      {showEditor &&
+        (readOnly ? (
+          <fieldset
+            disabled
+            id={editorId}
+            className={cn("min-w-0", editorClass)}
+          >
+            {rowEditor}
+          </fieldset>
+        ) : (
+          <div id={editorId} className={editorClass}>
+            {rowEditor}
+          </div>
+        ))}
     </li>
   );
 }
@@ -336,6 +381,7 @@ export function SaveBar({
   children?: ReactNode;
 }) {
   const { t } = useTranslation("vms");
+  if (use(RowsReadOnlyContext)) return null;
   return (
     <div
       ref={ref}

@@ -5,6 +5,7 @@ import { renderWithProviders } from "@/test/test-utils";
 import { listOf, stubApi } from "@/test/fetch-stub";
 import type { ScheduledTask } from "../api/vm-queries";
 import { SchedulePanel } from "./SchedulePanel";
+import { grantPermissions } from "@/test/permissions";
 
 // A file of its own: SchedulePanel.test.tsx mocks the vm-queries hooks, and
 // these assert on the request that actually leaves.
@@ -59,6 +60,19 @@ async function clickDelete(user: ReturnType<typeof userEvent.setup>) {
     }),
   );
 }
+
+// The tab's edits take this; without it the tab is read-only.
+beforeEach(() => {
+  grantPermissions("manage:schedule");
+});
+
+// A Viewer got Add schedule and each row's delete, both answering 403.
+it("offers a role without manage:schedule neither add nor delete", async () => {
+  grantPermissions("view:schedule");
+  renderPanel();
+  expect(await screen.findByText("0 4 * * 0")).toBeInTheDocument();
+  expect(screen.queryByRole("button")).toBeNull();
+});
 
 describe("SchedulePanel — delete", () => {
   it("asks first, naming the schedule, and sends nothing yet", async () => {

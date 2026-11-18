@@ -11,6 +11,7 @@ import {
 } from "@/components/page/Settings";
 import { useVMConfig, useSetVMConfig } from "../api/vm-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "react-i18next";
 
 interface CloudInitPanelProps {
@@ -23,6 +24,8 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
   const { data: config, isLoading } = useVMConfig(clusterId, vmId);
   const setConfigMutation = useSetVMConfig();
   const settle = useSaveOutcome();
+  // The config route takes manage:vm; without it the fields only show.
+  const readOnly = !usePermissions().hasPermission("manage", "vm");
 
   const [ciuser, setCiuser] = useState("");
   const [cipassword, setCipassword] = useState("");
@@ -111,6 +114,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <Input
           id="ci-user"
+          disabled={readOnly}
           value={ciuser}
           onChange={(e) => {
             setCiuser(e.target.value);
@@ -125,6 +129,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <Input
           id="ci-password"
+          disabled={readOnly}
           type="password"
           value={cipassword}
           onChange={(e) => {
@@ -140,6 +145,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <Input
           id="ci-ipconfig"
+          disabled={readOnly}
           value={ipconfig0}
           onChange={(e) => {
             setIpconfig0(e.target.value);
@@ -155,6 +161,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <Input
           id="ci-nameserver"
+          disabled={readOnly}
           value={nameserver}
           onChange={(e) => {
             setNameserver(e.target.value);
@@ -169,6 +176,7 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <Input
           id="ci-searchdomain"
+          disabled={readOnly}
           value={searchdomain}
           onChange={(e) => {
             setSearchdomain(e.target.value);
@@ -184,38 +192,41 @@ export function CloudInitPanel({ clusterId, vmId }: CloudInitPanelProps) {
       >
         <textarea
           id="ci-sshkeys"
+          disabled={readOnly}
           value={sshkeys}
           onChange={(e) => {
             setSshkeys(e.target.value);
           }}
           placeholder="ssh-rsa AAAA... user@host"
           rows={4}
-          className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[12.5px] placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-[12.5px] placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         />
       </SettingRow>
 
-      <SettingsFooter>
-        {setConfigMutation.isError && (
-          <p className="mr-auto text-sm text-destructive">
-            {setConfigMutation.error.message}
-          </p>
-        )}
-        {setConfigMutation.isSuccess && (
-          <p className="mr-auto text-sm text-muted-foreground">
-            {t("cloudInitPanel.cloudInitConfigurationSaved")}
-          </p>
-        )}
-        <Button
-          className="gap-2"
-          onClick={handleSave}
-          disabled={setConfigMutation.isPending}
-        >
-          <Save className="h-4 w-4" />
-          {setConfigMutation.isPending
-            ? t("cloudInitPanel.saving")
-            : t("cloudInitPanel.save")}
-        </Button>
-      </SettingsFooter>
+      {!readOnly && (
+        <SettingsFooter>
+          {setConfigMutation.isError && (
+            <p className="mr-auto text-sm text-destructive">
+              {setConfigMutation.error.message}
+            </p>
+          )}
+          {setConfigMutation.isSuccess && (
+            <p className="mr-auto text-sm text-muted-foreground">
+              {t("cloudInitPanel.cloudInitConfigurationSaved")}
+            </p>
+          )}
+          <Button
+            className="gap-2"
+            onClick={handleSave}
+            disabled={setConfigMutation.isPending}
+          >
+            <Save className="h-4 w-4" />
+            {setConfigMutation.isPending
+              ? t("cloudInitPanel.saving")
+              : t("cloudInitPanel.save")}
+          </Button>
+        </SettingsFooter>
+      )}
     </SettingsSection>
   );
 }

@@ -27,6 +27,7 @@ import {
   type ScheduledTask,
 } from "../api/vm-queries";
 import { ConfirmDeleteDialog } from "@/components/ConfirmDeleteDialog";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   scheduledSnapshotNamePattern,
   snapshotPrefixError,
@@ -65,6 +66,8 @@ export function SchedulePanel({
   const { data: schedules, isLoading } = useScheduledTasks(clusterId, shown);
   const createSchedule = useCreateSchedule();
   const deleteSchedule = useDeleteSchedule();
+  // Adding and deleting take manage:schedule; the list only view.
+  const canManage = usePermissions().hasPermission("manage", "schedule");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [action, setAction] = useState("snapshot");
@@ -131,16 +134,18 @@ export function SchedulePanel({
               : `${String(count)} for this ${guestWord}${paused > 0 ? `, ${String(paused)} disabled` : ""}`
         }
         actions={
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => {
-              setDialogOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            Add schedule
-          </Button>
+          canManage ? (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Add schedule
+            </Button>
+          ) : undefined
         }
       >
         {isLoading ? (
@@ -161,9 +166,11 @@ export function SchedulePanel({
                 <TableHead>Status</TableHead>
                 <TableHead>Next run</TableHead>
                 <TableHead>Last run</TableHead>
-                <TableHead className="w-12">
-                  <span className="sr-only">Actions</span>
-                </TableHead>
+                {canManage && (
+                  <TableHead className="w-12">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -202,19 +209,21 @@ export function SchedulePanel({
                   <TableCell className="whitespace-nowrap text-[12.5px] tabular-nums text-muted-foreground">
                     <DateTime value={s.last_run_at} fallback="--" />
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      aria-label={`Delete ${s.action} schedule ${s.schedule}`}
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => {
-                        setPendingDelete(s);
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
+                  {canManage && (
+                    <TableCell className="text-right">
+                      <Button
+                        aria-label={`Delete ${s.action} schedule ${s.schedule}`}
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          setPendingDelete(s);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
