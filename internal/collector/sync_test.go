@@ -55,6 +55,7 @@ type mockQueries struct {
 	activeAlerts                  []db.AlertHistory   // ListActiveAlertsForNodes answers those on the nodes asked about
 	enabledNodeRules              map[uuid.UUID]int64 // DetachNodeAlertRules turns these off
 	detachedNodes                 []string            // the nodes DetachNodeAlertRules was asked about
+	detachErr                     error               // DetachNodeAlertRules' answer, when set
 	reattachCalls                 int
 	corosync                      map[uuid.UUID]db.GetClusterCorosyncNameRow // clusters.corosync_name{,_reported}
 	autoResolved                  []uuid.UUID
@@ -423,6 +424,9 @@ func (m *mockQueries) ListActiveAlertsForNodes(_ context.Context, nodeIDs []uuid
 
 func (m *mockQueries) DetachNodeAlertRules(_ context.Context, arg db.DetachNodeAlertRulesParams) (int64, error) {
 	m.detachedNodes = append(m.detachedNodes, arg.NodeName)
+	if m.detachErr != nil {
+		return 0, m.detachErr
+	}
 	n := m.enabledNodeRules[uuid.UUID(arg.NodeID.Bytes)]
 	delete(m.enabledNodeRules, uuid.UUID(arg.NodeID.Bytes))
 	return n, nil

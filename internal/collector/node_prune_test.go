@@ -171,6 +171,37 @@ func (r *recordingNotifier) NotifyResolved(_ context.Context, a db.AlertHistory)
 	r.got = append(r.got, a.ID)
 }
 
+// A node whose rules and windows could not be set aside keeps its row for a
+// later pass: deleted, it would take them with it.
+func TestSyncCluster_KeepsANodeWhoseRulesCouldNotBeSetAside(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeMembership{}
+	fake.set("cluster01", "pve-01")
+	srv := fake.server(t)
+	defer srv.Close()
+
+	mq := newMockQueries()
+	syncer := newTestSyncer(mq)
+	cluster := makeCluster(t, srv.URL)
+	seedNodes(mq, cluster.ID, "pve-01", "pve-02")
+	goneID := mq.nodes[cluster.ID.String()+":pve-02"].ID
+	mq.enabledNodeRules = map[uuid.UUID]int64{goneID: 2}
+	mq.detachErr = errors.New("connection reset")
+
+	for pass := 1; pass <= 2; pass++ {
+		if _, err := syncer.SyncCluster(context.Background(), cluster); err != nil {
+			t.Fatalf("pass %d: SyncCluster: %v", pass, err)
+		}
+	}
+	if _, kept := mq.nodes[cluster.ID.String()+":pve-02"]; !kept || len(mq.detachedNodes) == 0 {
+		t.Errorf("pve-02 kept = %v after detaches %v, want kept after a detach was tried", kept, mq.detachedNodes)
+	}
+	if len(mq.auditLogs) != 0 || mq.enabledNodeRules[goneID] != 2 {
+		t.Errorf("audited %+v, rules on %d; want nothing audited and both rules on", mq.auditLogs, mq.enabledNodeRules[goneID])
+	}
+}
+
 // TestSyncCluster_RemovesANodeTheClusterStopsListing wires the plan into the
 // pass: the second pass without pve-02 deletes its row, turns off its node
 // rules, resolves its active alerts (and only its), audits it as a system
