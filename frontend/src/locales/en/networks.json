@@ -66,6 +66,7 @@
     "reusableRuleSetsSharedBy": "Reusable rule sets, shared by every cluster",
     "noFirewallTemplatesCreateOne": "No firewall templates. Create one to define reusable rule sets.",
     "noFirewallTemplates": "No firewall templates.",
+    "couldNotRead": "Could not read the firewall templates.",
     "name": "Name",
     "description": "Description",
     "rules": "Rules",

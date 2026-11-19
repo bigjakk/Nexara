@@ -59,8 +59,12 @@ export function stubApi(
           }),
         );
       }
+      const answer = reads[url];
+      if (typeof answer === "function") {
+        return Promise.resolve((answer as () => Response)());
+      }
       return Promise.resolve(
-        new Response(JSON.stringify(reads[url]), {
+        new Response(JSON.stringify(answer), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),

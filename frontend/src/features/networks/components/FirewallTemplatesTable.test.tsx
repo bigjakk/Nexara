@@ -113,6 +113,24 @@ describe("FirewallTemplatesTable — what a role is offered", () => {
     const empty = await screen.findByText(/^No firewall templates\./);
     expect(empty.textContent).toBe(says);
   });
+
+  // A role whose view:network covers only some clusters is refused the list, an
+  // install-wide read, and it read as an empty list.
+  it("says why the list was refused rather than that there is none", async () => {
+    grantPermissions();
+    const message = "Requires view:network install-wide";
+    stubApi({
+      [TEMPLATES_PATH]: () =>
+        new Response(JSON.stringify({ error: "forbidden", message }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }),
+    });
+    renderWithProviders(<FirewallTemplatesTable clusterId="c1" />);
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/^No firewall templates\./)).toBeNull();
+  });
 });
 
 async function openDeleteFor(name: string) {

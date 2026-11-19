@@ -23,6 +23,7 @@ import { ClusterHistoryButton } from "@/features/history/components/ClusterHisto
 import { clusterHistories } from "@/features/history/lib/cluster-histories";
 import { DateTime } from "@/components/DateTime";
 import { usePermissions } from "@/hooks/usePermissions";
+import { describeError } from "@/lib/api-error";
 import { useTranslation } from "react-i18next";
 
 interface FirewallTemplatesTableProps {
@@ -33,7 +34,7 @@ export function FirewallTemplatesTable({
   clusterId,
 }: FirewallTemplatesTableProps) {
   const { t } = useTranslation("networks");
-  const { data: templates, isLoading } = useFirewallTemplates();
+  const { data: templates, isLoading, error } = useFirewallTemplates();
   const deleteTemplate = useDeleteFirewallTemplate();
   const [pendingDelete, setPendingDelete] = useState<FirewallTemplate | null>(
     null,
@@ -66,6 +67,12 @@ export function FirewallTemplatesTable({
           <div className="px-[18px] pb-1">
             <Skeleton className="h-20 w-full" />
           </div>
+        ) : error ? (
+          // Refused for a role whose view:network covers only some clusters (the
+          // list is an install-wide read): it read as an empty list.
+          <p className="px-[18px] pb-1 text-sm text-destructive">
+            {describeError(error) || t("firewallTemplatesTable.couldNotRead")}
+          </p>
         ) : !templates || templates.length === 0 ? (
           <p className="px-[18px] pb-1 text-sm text-muted-foreground">
             {canCreate
