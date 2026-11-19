@@ -124,7 +124,6 @@ func TestSlowBodyIsCutAtTheBodyDeadlineAndItsConnectionClosed(t *testing.T) {
 				return ans
 			}
 
-			// Both servers first, then in parallel: New writes a package-level cookie mode.
 			twin := newProbedServer(t, true, rewrapped(readTimeout, withoutTheCloseOnExpiry(bodyTimeout)))
 			guarded := newProbedServer(t, true, rewrapped(readTimeout, withBodyTimeout(bodyTimeout)))
 			t.Parallel()
@@ -154,7 +153,7 @@ func TestBodyReadBeforeTheBodyDeadlineKeepsTheConnection(t *testing.T) {
 	const bodyTimeout = 2 * time.Second
 	const rest = bodyTimeout * 3 / 5
 	srv := newProbedServer(t, true, rewrapped(0, withBodyTimeout(bodyTimeout)))
-	t.Parallel() // after New, which writes a package-level cookie mode
+	t.Parallel()
 	body := `{"refresh_token":""}` + strings.Repeat(" ", 12<<10)
 	head := requestHead(fiber.MethodPost, "/api/v1/auth/logout", "Content-Type: application/json") +
 		fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))

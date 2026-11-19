@@ -323,9 +323,6 @@ type unreadBodyCase struct {
 // (checkBare, the precondition), and then to the server as New builds it,
 // where the answer has to close the connection with the hidden request
 // unserved.
-//
-// Both servers are built before t.Parallel: New writes the handlers package's
-// cookie mode, which a handler in another test may be reading.
 func (tc unreadBodyCase) run(t *testing.T) {
 	check := func(t *testing.T, ans wireAnswer) {
 		t.Helper()

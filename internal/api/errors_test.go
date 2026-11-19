@@ -326,7 +326,7 @@ func TestFiberSentErrorStatusesCarryTheirSlug(t *testing.T) {
 	s := newAssembledServer(t)
 	s.app.Server().ReadTimeout = time.Second
 	addr := serveOnLoopback(t, s)
-	t.Parallel() // after New, which writes a package-level cookie mode
+	t.Parallel()
 
 	for _, tt := range []struct {
 		name string

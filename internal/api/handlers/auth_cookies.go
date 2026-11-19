@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -41,18 +42,27 @@ const RefreshCookieName = "nexara_refresh_token"
 // cycle. See authCookieScopePrefix in internal/api/middleware.go.
 const RefreshCookiePath = "/api/v1/auth/"
 
-// cookieSecureMode is the SECURE_COOKIES policy, set once at startup via
-// SetCookieSecureMode. See refreshCookieSecure.
-var cookieSecureMode = "auto"
+// cookieSecureMode is the SECURE_COOKIES policy, set at startup via
+// SetCookieSecureMode; see refreshCookieSecure. Atomic because every server a
+// test builds sets it, while another test's server may be reading it.
+var cookieSecureMode atomic.Value // string
+
+// secureCookieMode is the policy now: "always", "never" or "auto".
+func secureCookieMode() string {
+	if mode, ok := cookieSecureMode.Load().(string); ok {
+		return mode
+	}
+	return "auto"
+}
 
 // SetCookieSecureMode configures the refresh-cookie Secure policy from the
-// SECURE_COOKIES setting. Called once during server setup, before serving.
+// SECURE_COOKIES setting. Called during server setup, before serving.
 func SetCookieSecureMode(mode string) {
 	switch mode {
 	case "always", "never", "auto":
-		cookieSecureMode = mode
+		cookieSecureMode.Store(mode)
 	default:
-		cookieSecureMode = "auto"
+		cookieSecureMode.Store("auto")
 	}
 }
 
@@ -67,7 +77,7 @@ func SetCookieSecureMode(mode string) {
 //     ("Set-Cookie disappears" is a worse failure mode). Not c.Protocol(): in
 //     Fiber v3 that is the HTTP version ("HTTP/1.1"), which left auto never Secure.
 func refreshCookieSecure(c fiber.Ctx) bool {
-	switch cookieSecureMode {
+	switch secureCookieMode() {
 	case "always":
 		return true
 	case "never":
@@ -177,7 +187,7 @@ const hostCookiePrefix = "__Host-"
 // cookie for the host — a sibling subdomain, a man in the middle of a plain-http
 // request — could otherwise plant an unprefixed binding of their own and have it read.
 func oidcBindingSecure(redirectURI string) bool {
-	switch cookieSecureMode {
+	switch secureCookieMode() {
 	case "always":
 		return true
 	case "never":

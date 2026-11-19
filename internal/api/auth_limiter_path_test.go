@@ -80,7 +80,7 @@ func TestAuthLimiterCannotBeSpelledAround(t *testing.T) {
 // and the owner's still reaches the handler.
 func TestLogout_HasNoPerAddressLimit(t *testing.T) {
 	s := newTestServer(t)
-	t.Parallel() // after New, which writes a package-level cookie mode
+	t.Parallel()
 	s.app.Post("/api/v1/auth/logout", func(c fiber.Ctx) error {
 		if c.Cookies("nexara_refresh") != "the-owners-cookie" {
 			return c.SendStatus(fiber.StatusUnauthorized)
@@ -110,7 +110,7 @@ func TestLogout_HasNoPerAddressLimit(t *testing.T) {
 // other spellings of its path spend the same budget: 61 mints, the last two in
 // upper case and escaped, and only the last is refused.
 func TestConsoleTokenMintsAreCapped(t *testing.T) {
-	// Not parallel: newTestServer writes the process-global SetCookieSecureMode.
+	t.Parallel()
 	s := newTestServer(t)
 	var got []int
 	for i := 0; i < 61; i++ {

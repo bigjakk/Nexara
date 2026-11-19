@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -62,5 +63,29 @@ func TestRefreshCookie_PathIsTheExportedScope(t *testing.T) {
 				t.Errorf("%s: refresh cookie is not HttpOnly", route)
 			}
 		})
+	}
+}
+
+// Every server a test builds sets the mode while another test's server may be
+// reading it; a plain variable failed a gate under -race (2026-11-17). Not
+// parallel: it sets a process-wide value, to the default every test uses.
+func TestCookieSecureMode_SetWhileRead(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			SetCookieSecureMode("auto")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			_ = oidcBindingSecure("https://nexara.example.com/cb")
+		}
+	}()
+	wg.Wait()
+	if !oidcBindingSecure("https://nexara.example.com/cb") {
+		t.Error(`"auto" with an https redirect URI is not Secure`)
 	}
 }
