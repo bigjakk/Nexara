@@ -93,9 +93,11 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
     history.target.clusterId === null,
   );
   const shown = view === "history" && !canHistory ? "rules" : view;
-  // Every alias, IP set and security group write, the deletes included,
-  // takes manage:network on the cluster.
-  const canManage = usePermissions().canManage("network");
+  // Adding an alias, IP set, entry or security group takes manage:network on
+  // the cluster, and deleting one delete:network.
+  const permissions = usePermissions();
+  const canManage = permissions.canManage("network");
+  const canRemove = permissions.canDelete("network");
 
   return (
     <div className="space-y-4">
@@ -132,14 +134,22 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
           aria-label="Aliases"
           aria-labelledby={undefined}
         >
-          <FirewallAliasesSection clusterId={clusterId} canManage={canManage} />
+          <FirewallAliasesSection
+            clusterId={clusterId}
+            canManage={canManage}
+            canRemove={canRemove}
+          />
         </TabsContent>
         <TabsContent
           value="ipsets"
           aria-label="IP sets"
           aria-labelledby={undefined}
         >
-          <FirewallIPSetsSection clusterId={clusterId} canManage={canManage} />
+          <FirewallIPSetsSection
+            clusterId={clusterId}
+            canManage={canManage}
+            canRemove={canRemove}
+          />
         </TabsContent>
         <TabsContent
           value="groups"
@@ -149,6 +159,7 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
           <FirewallSecurityGroupsSection
             clusterId={clusterId}
             canManage={canManage}
+            canRemove={canRemove}
           />
         </TabsContent>
         <TabsContent value="log" aria-label="Log" aria-labelledby={undefined}>
@@ -170,9 +181,11 @@ export function ClusterFirewallTab({ clusterId }: ClusterFirewallTabProps) {
 function FirewallAliasesSection({
   clusterId,
   canManage,
+  canRemove,
 }: {
   clusterId: string;
   canManage: boolean;
+  canRemove: boolean;
 }) {
   const aliasesQuery = useFirewallAliases(clusterId);
   const createAlias = useCreateFirewallAlias(clusterId);
@@ -302,7 +315,7 @@ function FirewallAliasesSection({
                     {a.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    {canManage && (
+                    {canRemove && (
                       <Button
                         aria-label={`Delete alias ${a.name}`}
                         variant="ghost"
@@ -351,9 +364,11 @@ function FirewallAliasesSection({
 function FirewallIPSetsSection({
   clusterId,
   canManage,
+  canRemove,
 }: {
   clusterId: string;
   canManage: boolean;
+  canRemove: boolean;
 }) {
   const setsQuery = useFirewallIPSets(clusterId);
   const createSet = useCreateFirewallIPSet(clusterId);
@@ -476,7 +491,7 @@ function FirewallIPSetsSection({
                       {s.comment}
                     </TableCell>
                     <TableCell className="py-1 text-right">
-                      {canManage && (
+                      {canRemove && (
                         <Button
                           aria-label={`Delete IPSet ${s.name}`}
                           variant="ghost"
@@ -527,6 +542,7 @@ function FirewallIPSetsSection({
           clusterId={clusterId}
           setName={selectedSet}
           canManage={canManage}
+          canRemove={canRemove}
         />
       )}
     </div>
@@ -537,10 +553,12 @@ function IPSetEntriesCard({
   clusterId,
   setName,
   canManage,
+  canRemove,
 }: {
   clusterId: string;
   setName: string;
   canManage: boolean;
+  canRemove: boolean;
 }) {
   const entriesQuery = useFirewallIPSetEntries(clusterId, setName);
   const addEntry = useAddFirewallIPSetEntry(clusterId, setName);
@@ -622,7 +640,7 @@ function IPSetEntriesCard({
                     {e.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    {canManage && (
+                    {canRemove && (
                       <Button
                         aria-label={`Delete entry ${e.cidr}`}
                         variant="ghost"
@@ -679,9 +697,11 @@ function IPSetEntriesCard({
 function FirewallSecurityGroupsSection({
   clusterId,
   canManage,
+  canRemove,
 }: {
   clusterId: string;
   canManage: boolean;
+  canRemove: boolean;
 }) {
   const groupsQuery = useFirewallSecurityGroups(clusterId);
   const createGroup = useCreateFirewallSecurityGroup(clusterId);
@@ -790,7 +810,7 @@ function FirewallSecurityGroupsSection({
                     {g.comment}
                   </TableCell>
                   <TableCell className="py-1 text-right">
-                    {canManage && (
+                    {canRemove && (
                       <Button
                         aria-label={`Delete security group ${g.group}`}
                         variant="ghost"

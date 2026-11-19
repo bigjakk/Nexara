@@ -124,8 +124,8 @@ var nodeIntendedPermissionChanges = map[string]struct {
 		"the :firewall resource is not in the permission catalogue",
 	},
 	"DELETE /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/rules/:pos": {
-		"manage:network",
-		"the :firewall resource is not in the permission catalogue",
+		"delete:network",
+		"the :firewall resource is not in the permission catalogue, and a firewall delete is delete:network",
 	},
 	"GET /api/v1/clusters/:cluster_id/nodes/:node_name/firewall/log": {
 		"view:network",
@@ -275,7 +275,7 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	// counting the legacy value would compare one hand-written map against hand-written
 	// constants, true by construction and unable to notice a declaration drift. The legacy
 	// shape (be1379f) was view:node 16, manage:node 17, view:firewall 2, manage:firewall 3;
-	// the last two moved to :network.
+	// the last two moved to :network, and the rule delete to delete:network (2026-11-19).
 	for _, tt := range []struct {
 		permission string
 		calls      int
@@ -283,7 +283,8 @@ func TestNodeRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 		{"view:node", 16},
 		{"manage:node", 17},
 		{"view:network", 2},
-		{"manage:network", 3},
+		{"manage:network", 2},
+		{"delete:network", 1},
 	} {
 		if byPermission[tt.permission] != tt.calls {
 			t.Errorf("%d routes declare %s, want %d", byPermission[tt.permission], tt.permission, tt.calls)

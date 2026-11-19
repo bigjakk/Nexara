@@ -32,9 +32,11 @@ export function FirewallTab({
   nodeName: string;
 }) {
   const [showLog, setShowLog] = useState(false);
-  // Adding and deleting a node's rule both take manage:network (not
-  // manage:node); without it the rules and the log are read-only.
-  const canEdit = usePermissions().hasPermission("manage", "network");
+  // Adding a node's rule takes manage:network and deleting one delete:network
+  // (not :node); without them the rules and the log are read-only.
+  const { hasPermission } = usePermissions();
+  const canEdit = hasPermission("manage", "network");
+  const canRemove = hasPermission("delete", "network");
   const rulesQuery = useNodeFirewallRules(clusterId, nodeName);
   const rules = rulesQuery.data;
   const deleteRule = useDeleteNodeFirewallRule(clusterId, nodeName);
@@ -136,7 +138,7 @@ export function FirewallTab({
                 <TableHead>Port</TableHead>
                 <TableHead>Enabled</TableHead>
                 <TableHead>Comment</TableHead>
-                {canEdit && <TableHead className="w-12" />}
+                {canRemove && <TableHead className="w-12" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -165,7 +167,7 @@ export function FirewallTab({
                   <TableCell className="min-w-[10rem] whitespace-normal text-muted-foreground">
                     {rule.comment || <NoValue />}
                   </TableCell>
-                  {canEdit && (
+                  {canRemove && (
                     <TableCell className="text-right">
                       <Button
                         aria-label={`Delete firewall rule ${String(rule.pos)}`}

@@ -21,9 +21,10 @@ const firewallRouteCount = 28
 // transcribed from `git show HEAD:internal/api/handlers/networks.go` at eb888b6: one requireClusterPerm per
 // handler. Two shapes are why it is written out in full: the resource is :network on all twenty-eight even
 // though the node firewall routes next door use :firewall for the same verbs on the same kind of object
-// (preserved, not resolved); and only TWO of the twenty-eight are delete:network (removing a cluster rule
-// and a guest rule), while deleting an alias, IP set, IP set entry, security group or group rule is
-// manage:network, with no rule behind it, so the table is the record.
+// (preserved, not resolved); and only TWO of the twenty-eight were delete:network (removing a cluster rule
+// and a guest rule), while deleting an alias, IP set, IP set entry, security group or group rule was
+// manage:network, with no rule behind it. Since 2026-11-19 every firewall delete is delete:network, as the
+// catalogue describes it ("Delete networks, firewall rules, SDN resources"); the five entries say so.
 var firewallLegacyPermissions = map[string]string{
 	// Cluster rules and options.
 	"GET /api/v1/clusters/:cluster_id/firewall/rules":         "view:network",
@@ -43,24 +44,24 @@ var firewallLegacyPermissions = map[string]string{
 	"GET /api/v1/clusters/:cluster_id/firewall/aliases":          "view:network",
 	"POST /api/v1/clusters/:cluster_id/firewall/aliases":         "manage:network",
 	"PUT /api/v1/clusters/:cluster_id/firewall/aliases/:name":    "manage:network",
-	"DELETE /api/v1/clusters/:cluster_id/firewall/aliases/:name": "manage:network",
+	"DELETE /api/v1/clusters/:cluster_id/firewall/aliases/:name": "delete:network",
 
 	// IP sets.
 	"GET /api/v1/clusters/:cluster_id/firewall/ipset":                        "view:network",
 	"POST /api/v1/clusters/:cluster_id/firewall/ipset":                       "manage:network",
-	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name":               "manage:network",
+	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name":               "delete:network",
 	"GET /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries":          "view:network",
 	"POST /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries":         "manage:network",
-	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries/:cidr": "manage:network",
+	"DELETE /api/v1/clusters/:cluster_id/firewall/ipset/:name/entries/:cidr": "delete:network",
 
 	// Security groups.
 	"GET /api/v1/clusters/:cluster_id/firewall/groups":                      "view:network",
 	"POST /api/v1/clusters/:cluster_id/firewall/groups":                     "manage:network",
-	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group":            "manage:network",
+	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group":            "delete:network",
 	"GET /api/v1/clusters/:cluster_id/firewall/groups/:group/rules":         "view:network",
 	"POST /api/v1/clusters/:cluster_id/firewall/groups/:group/rules":        "manage:network",
 	"PUT /api/v1/clusters/:cluster_id/firewall/groups/:group/rules/:pos":    "manage:network",
-	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group/rules/:pos": "manage:network",
+	"DELETE /api/v1/clusters/:cluster_id/firewall/groups/:group/rules/:pos": "delete:network",
 
 	// Log.
 	"GET /api/v1/clusters/:cluster_id/firewall/log": "view:network",
@@ -69,8 +70,8 @@ var firewallLegacyPermissions = map[string]string{
 func TestFirewallRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	assertNetworkTally(t, firewallLegacyPermissions, firewallRouteCount, ScopeCluster, map[string]int{
 		"view:network":   9,
-		"manage:network": 17,
-		"delete:network": 2,
+		"manage:network": 12,
+		"delete:network": 7,
 	})
 }
 

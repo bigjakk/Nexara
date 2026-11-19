@@ -1119,10 +1119,11 @@ A cluster's **Configure** → **Firewall** has **Rules**, **Templates**, **Alias
 - **Add rule** inserts at the top, live within about 10 seconds. Rules cannot be edited or reordered here; deleting one needs `delete:network`
 - **Options** — **Disable firewall** asks first, since it stops every cluster, node and guest rule being enforced at once. **Enable firewall**, **Inbound policy** and **Outbound policy** take effect immediately, without asking
 - **IP sets** must be empty to delete. **Security groups** can be created and deleted, but a group's rules have no page
+- Adding an alias, IP set, entry or security group needs `manage:network`, and deleting one `delete:network`, as every firewall delete does
 
 ### Node Firewall
 
-A node's **Firewall** tab has **Add accept rule** and **Add drop rule**, the log (**Show log**), and delete (`manage:network`). Each button asks first, then adds an enabled, match-everything inbound rule at the top of the node's list, with no form.
+A node's **Firewall** tab has **Add accept rule** and **Add drop rule** (`manage:network`), the log (**Show log**), and delete (`delete:network`). Each button asks first, then adds an enabled, match-everything inbound rule at the top of the node's list, with no form.
 
 > **Both rules match everything.** On a node whose firewall is on, **Add drop rule** can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it. **Add accept rule** lets every inbound connection through, whatever the rules below it say.
 

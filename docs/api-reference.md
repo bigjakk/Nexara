@@ -1625,6 +1625,8 @@ request set the comment (`""` clears it) — never the comment's text.
 | GET | `/clusters/:id/firewall/aliases` | List firewall aliases |
 | POST | `/clusters/:id/firewall/aliases` | Create alias |
 | PUT | `/clusters/:id/firewall/aliases/:name` | Update alias |
+Reads take `view:network`, adds and edits `manage:network`, and every delete `delete:network`, on the cluster.
+
 | DELETE | `/clusters/:id/firewall/aliases/:name` | Delete alias |
 | GET | `/clusters/:id/firewall/ipset` | List IP sets |
 | POST | `/clusters/:id/firewall/ipset` | Create IP set |

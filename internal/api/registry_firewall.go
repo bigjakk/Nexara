@@ -275,11 +275,11 @@ var firewallIPSetEntryCIDRParam = apischema.Property{
 //     what the catalogue entry describes ("View networks, firewall, SDN").
 //     The tally below still records each route's permission so a future
 //     divergence is a decision rather than a drift.
-//   - delete:network is used by exactly two of the twenty-eight — removing a
-//     cluster rule and removing a guest rule. Deleting an ALIAS, an IP SET,
-//     an IP set ENTRY, a SECURITY GROUP or a security-group RULE is
-//     manage:network. That is not a pattern, it is the shape the handlers
-//     had, and the tally freezes it.
+//   - every delete is delete:network, as the catalogue describes it ("Delete
+//     networks, firewall rules, SDN resources"). Until 2026-11-19 only removing
+//     a cluster rule and a guest rule were; deleting an alias, an IP set, an
+//     entry, a security group or a group rule took manage:network, the shape
+//     the handlers had.
 func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	// ── Cluster firewall rules ────────────────────────────────────────
 	reg.Register(Endpoint{
@@ -464,12 +464,11 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 		Handler: h.UpdateFirewallAlias,
 	})
 	reg.Register(Endpoint{
-		Method: fiber.MethodDelete,
-		Path:   firewallScope + "/aliases/:name",
-		Description: "Delete a firewall alias. manage:network rather than delete:network — that is what " +
-			"the handler enforced.",
+		Method:      fiber.MethodDelete,
+		Path:        firewallScope + "/aliases/:name",
+		Description: "Delete a firewall alias. Requires delete:network, as every firewall delete does.",
 		Group:       "Firewall",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters:  clusterParams(apischema.Properties{"name": pveObjectNameParam("Alias to delete.")}),
 		Handler:     h.DeleteFirewallAlias,
 	})
@@ -499,9 +498,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        firewallScope + "/ipset/:name",
-		Description: "Delete a firewall IP set and every entry in it. manage:network, not delete:network.",
+		Description: "Delete a firewall IP set and every entry in it. Requires delete:network.",
 		Group:       "Firewall",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters:  clusterParams(apischema.Properties{"name": pveObjectNameParam("IP set to delete.")}),
 		Handler:     h.DeleteFirewallIPSet,
 	})
@@ -551,9 +550,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        firewallScope + "/ipset/:name/entries/:cidr",
-		Description: "Remove one address from a firewall IP set. manage:network, not delete:network.",
+		Description: "Remove one address from a firewall IP set. Requires delete:network.",
 		Group:       "Firewall",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters: clusterParams(apischema.Properties{
 			"name": pveObjectNameParam("IP set to remove from."),
 			"cidr": firewallIPSetEntryCIDRParam,
@@ -586,9 +585,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        firewallScope + "/groups/:group",
-		Description: "Delete a security group and every rule in it. manage:network, not delete:network.",
+		Description: "Delete a security group and every rule in it. Requires delete:network.",
 		Group:       "Firewall",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters:  clusterParams(apischema.Properties{"group": pveObjectNameParam("Security group to delete.")}),
 		Handler:     h.DeleteSecurityGroup,
 	})
@@ -631,9 +630,9 @@ func registerFirewallEndpoints(reg *Registry, h *handlers.NetworkHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        firewallScope + "/groups/:group/rules/:pos",
-		Description: "Delete one rule from a security group. manage:network, not delete:network.",
+		Description: "Delete one rule from a security group. Requires delete:network, as deleting a cluster or guest rule does.",
 		Group:       "Firewall",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters: clusterParams(apischema.Properties{
 			"group":  pveObjectNameParam("Security group the rule lives in."),
 			"pos":    firewallRulePosParam,

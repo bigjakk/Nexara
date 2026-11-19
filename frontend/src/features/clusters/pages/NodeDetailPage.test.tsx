@@ -221,7 +221,7 @@ describe("NodeDetailPage Firewall tab — deleting a rule", () => {
   let qc: QueryClient;
 
   beforeEach(() => {
-    grantPermissions("manage:network");
+    grantPermissions("delete:network");
   });
 
   async function openDeleteFor(pos: number) {
@@ -581,7 +581,8 @@ describe("NodeDetailPage Services tab — Stop and Restart", () => {
 
 // Each tab offers its writes only to a role holding what their routes take:
 // the disk and local-storage writes, and a service's Start, Restart and Stop,
-// take manage:node; a node's firewall rules take manage:network.
+// take manage:node; adding a node's firewall rule takes manage:network and
+// deleting one delete:network.
 describe("NodeDetailPage tabs — writes offered only with their permission", () => {
   const NODE_PATH = `/api/v1/clusters/${CLUSTER}/nodes/${NODE}`;
   const TABS = [
@@ -644,9 +645,12 @@ describe("NodeDetailPage tabs — writes offered only with their permission", ()
       shown: ["cron", "chrony"],
       writes: ["Restart", "Stop", "Start"],
     },
-    {
-      tab: "Firewall",
-      permission: "manage:network",
+    ...[
+      { permission: "manage:network", writes: ["Add accept rule", "Add drop rule"] },
+      { permission: "delete:network", writes: ["Delete firewall rule 0"] },
+    ].map(({ permission, writes }) => ({
+      tab: `Firewall, ${permission}`,
+      permission,
       reads: {
         [`${NODE_PATH}/firewall/rules`]: listOf([
           { pos: 0, type: "in", action: "ACCEPT", enable: 1, comment: "ssh" },
@@ -654,8 +658,8 @@ describe("NodeDetailPage tabs — writes offered only with their permission", ()
       },
       ui: <FirewallTab clusterId={CLUSTER} nodeName={NODE} />,
       shown: ["ssh"],
-      writes: ["Add accept rule", "Add drop rule", "Delete firewall rule 0"],
-    },
+      writes,
+    })),
   ];
 
   describe.each(TABS)("$tab", ({ permission, reads, ui, shown, writes }) => {

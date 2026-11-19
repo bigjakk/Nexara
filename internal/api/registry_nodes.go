@@ -150,7 +150,7 @@ func syslogTimeParam(description string) apischema.Property {
 //     disclosure of the host — storage backing paths, network layout, the
 //     package inventory and every guest's config — so it sits with the
 //     operator actions rather than with the telemetry. See GetNodeReport.
-//   - the five firewall routes are view/manage:NETWORK, not :node. The
+//   - the five firewall routes are view/manage/delete:NETWORK, not :node. The
 //     node's ruleset is a firewall object, and every other firewall route
 //     in the API — all 28 of them in registry_firewall.go — gates on
 //     :network, as does the catalogue entry itself
@@ -830,9 +830,9 @@ func registerNodeEndpoints(reg *Registry, h *handlers.NodeHandler) {
 	reg.Register(Endpoint{
 		Method:      fiber.MethodDelete,
 		Path:        nodeScope + "/:node_name/firewall/rules/:pos",
-		Description: "Delete one of a node's firewall rules by position. Requires manage:network, not manage:node — see the resource note above.",
+		Description: "Delete one of a node's firewall rules by position. Requires delete:network, as every firewall delete does, not manage:node — see the resource note above.",
 		Group:       "Nodes",
-		Permissions: clusterCheck("manage", "network"),
+		Permissions: clusterCheck("delete", "network"),
 		Parameters: nodeParams(apischema.Properties{
 			"pos":    firewallRulePosParam,
 			"digest": firewallRuleDigestParam,

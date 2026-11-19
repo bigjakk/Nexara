@@ -33,23 +33,24 @@ const LISTS = {
 let api: ReturnType<typeof stubApi>;
 
 beforeEach(() => {
-  grantPermissions("manage:network");
+  grantPermissions("manage:network", "delete:network");
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Every alias, IP set, entry and security group write takes manage:network,
-// the deletes included (not delete:network). A Viewer was offered them all.
+// Adding an alias, IP set, entry or security group takes manage:network, and
+// deleting one delete:network, as every firewall delete does. A Viewer was
+// offered them all.
 describe("ClusterFirewallTab — what a role is offered", () => {
   it.each([
-    { permissions: [], offered: false },
-    { permissions: ["delete:network"], offered: false },
-    { permissions: ["manage:network"], offered: true },
+    { permissions: [], adds: false, deletes: false },
+    { permissions: ["delete:network"], adds: false, deletes: true },
+    { permissions: ["manage:network"], adds: true, deletes: false },
   ])(
-    "with $permissions offers the adds and deletes: $offered",
-    async ({ permissions, offered }) => {
+    "with $permissions offers the adds: $adds, the deletes: $deletes",
+    async ({ permissions, adds, deletes }) => {
       grantPermissions(...permissions);
       const user = await renderOnTab("Aliases");
       const seen: Record<string, boolean> = {};
@@ -77,7 +78,12 @@ describe("ClusterFirewallTab — what a role is offered", () => {
       look("Add group", "Delete security group grp01");
 
       expect(seen).toEqual(
-        Object.fromEntries(Object.keys(seen).map((name) => [name, offered])),
+        Object.fromEntries(
+          Object.keys(seen).map((name) => [
+            name,
+            name.startsWith("Delete") ? deletes : adds,
+          ]),
+        ),
       );
     },
   );
