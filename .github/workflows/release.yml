@@ -221,11 +221,15 @@ jobs:
           chmod +x scripts/generate-release-notes.sh
           scripts/generate-release-notes.sh "${{ steps.version.outputs.tag }}" > /tmp/release-notes.md
 
+      # A draft: the maintainer puts the curated notes in and publishes it. Until then
+      # the in-app What's new popup cannot see it (internal/changelog skips drafts), so
+      # nobody reads the generated commit list there, and a browser already on the new
+      # version waits for the release instead of marking the version seen (AppShell).
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Nexara ${{ steps.version.outputs.tag }}
           body_path: /tmp/release-notes.md
-          draft: false
+          draft: true
           prerelease: false

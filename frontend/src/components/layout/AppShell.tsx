@@ -174,26 +174,25 @@ export function AppShell() {
       lastSeenVersion,
       changelogQuery.data,
     );
-    if (entries.length === 0) {
-      // If GitHub returned no data at all (fetch failed or no releases yet),
-      // don't advance — try again on the next page load when the cache
-      // refreshes.
-      if (changelogQuery.data.length === 0) return;
-      // Otherwise the current version genuinely has nothing parseable (or is
-      // outside the fetched window). Advance silently so we don't re-evaluate
-      // on every render.
-      setLastSeenVersion(base);
-      return;
-    }
+    // None: the running version has no release in the list (or the list could
+    // not be read). Mark nothing: its release is created after the image is
+    // pushed and the list is cached for an hour, so marking it seen now would
+    // skip its popup for good. Closing the dialog marks it.
+    if (entries.length === 0) return;
     setChangelogEntries(entries);
     setChangelogOpen(true);
-  }, [versionInfo, lastSeenVersion, setLastSeenVersion, changelogQuery.data]);
+  }, [versionInfo, lastSeenVersion, changelogQuery.data]);
 
   const handleChangelogOpenChange = (open: boolean) => {
     setChangelogOpen(open);
     if (!open) {
       const base = extractBaseVersion(versionInfo?.version);
-      if (base) setLastSeenVersion(base);
+      // Only once its notes were shown: opened from the menu before the running
+      // version has a release, the dialog shows an older one, and marking the
+      // version seen then would skip its popup for good.
+      if (base && changelogEntries.some((e) => e.version === base)) {
+        setLastSeenVersion(base);
+      }
     }
   };
 
