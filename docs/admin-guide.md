@@ -1248,7 +1248,7 @@ The bin icon on a source in **Import sources** removes it. An ESXi source, or a 
 3. Review the guest in the customize step — settings are grouped into **OS & System**, **CPU & Memory**, **Network**, and **Identity & options**
 4. Start the import and follow progress in the history table
 
-Proxmox-side defaults that trip up manual imports are handled automatically: UEFI (OVMF) guests get an EFI vars disk created, imported disks attach on SATA so the firmware can boot them, and the CPU type defaults to `x86-64-v2-AES` (required for Windows 11 guests). SATA has six slots: from the seventh disk on, each keeps its own slot, or goes on the first free SCSI slot when its own was a SATA one.
+Proxmox-side defaults that trip up manual imports are handled automatically: UEFI (OVMF) guests get an EFI vars disk created, imported disks attach on SATA so the firmware can boot them, and the CPU type defaults to `x86-64-v2-AES` (required for Windows 11 guests). SATA has six slots: from the seventh disk on, each keeps its own slot, or goes on the first free SCSI slot when its own was a SATA one. A VMware guest's pvscsi controller stays when disks remain on it, since its VMware Tools driver is what lets the guest see them.
 
 ### Import History
 

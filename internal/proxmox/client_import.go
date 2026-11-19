@@ -271,14 +271,17 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 	sort.Slice(dataSlots, func(i, j int) bool { return diskSlotLess(dataSlots[i], dataSlots[j]) })
 	targets := importDiskTargets(dataSlots)
 	bootOrder := make([]string, 0, len(dataSlots))
-	movedOffScsi, movedOntoScsi := false, false
+	movedOffScsi, movedOntoScsi, onScsi := false, false, false
 	for i, slot := range dataSlots {
 		target := targets[i]
 		if strings.HasPrefix(slot, "scsi") && target != slot {
 			movedOffScsi = true
 		}
-		if strings.HasPrefix(target, "scsi") && !strings.HasPrefix(slot, "scsi") {
-			movedOntoScsi = true
+		if strings.HasPrefix(target, "scsi") {
+			onScsi = true
+			if !strings.HasPrefix(slot, "scsi") {
+				movedOntoScsi = true
+			}
 		}
 		p.setDisk(target, importFromSpec(opts, parsed[slot].Volid))
 		bootOrder = append(bootOrder, target)
@@ -288,10 +291,15 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 		// the actual disks so the firmware finds the bootloader.
 		p.Boot = "order=" + strings.Join(bootOrder, ";")
 	}
-	// A leftover pvscsi controller with no SCSI disks is useless and is the exact thing OVMF
-	// can't drive; default it to virtio-scsi-single (matching Proxmox's importer). A disk put
-	// on SCSI for want of a slot gets the same default when the source named no controller.
-	if (movedOffScsi && (p.ScsiHW == "" || p.ScsiHW == "pvscsi")) || (movedOntoScsi && p.ScsiHW == "") {
+	// A pvscsi controller left with no SCSI disk is useless and is the exact thing OVMF can't
+	// drive; default it to virtio-scsi-single (matching Proxmox's importer). One that still holds
+	// disks past the six SATA slots stays: the guest's pvscsi driver (VMware Tools) is what lets it
+	// see them, where VirtIO SCSI needs drivers a Windows guest has yet to get, and OVMF boots from
+	// SATA. With no controller named, a disk moved off or onto SCSI gets virtio-scsi-single.
+	switch {
+	case p.ScsiHW == "pvscsi" && movedOffScsi && !onScsi:
+		p.ScsiHW = "virtio-scsi-single"
+	case p.ScsiHW == "" && (movedOffScsi || movedOntoScsi):
 		p.ScsiHW = "virtio-scsi-single"
 	}
 
@@ -326,10 +334,10 @@ func BuildImportCreateParams(meta *ImportMetadata, opts ImportCreateOptions) Cre
 
 // importDiskTargets places the data disks, given in slot order: the first six on sata0–sata5
 // (SATA has six), the rest on their own slots. A disk whose own slot one of the first six
-// now holds (a SATA one, once there are more than six) goes on the first free SCSI slot,
-// where the other disks past the six keep theirs. Two disks on one slot would create the
-// VM without one of them, and Proxmox would not say so: it checks a boot entry's name,
-// not a repeat (qemu-server verify_bootdev).
+// now holds (a SATA one, once there are more than six), or that Proxmox does not have,
+// goes on the first free SCSI slot, where the other disks past the six keep theirs. Two
+// disks on one slot would create the VM without one of them, and Proxmox would not say so:
+// it checks a boot entry's name, not a repeat (qemu-server verify_bootdev).
 func importDiskTargets(slots []string) []string {
 	targets := make([]string, len(slots))
 	used := make(map[string]bool, len(slots))
@@ -337,7 +345,7 @@ func importDiskTargets(slots []string) []string {
 		switch {
 		case i < 6:
 			targets[i] = "sata" + strconv.Itoa(i)
-		case !used[slot]:
+		case !used[slot] && fitsBus(slot):
 			targets[i] = slot
 		default:
 			continue
@@ -354,6 +362,14 @@ func importDiskTargets(slots []string) []string {
 		}
 	}
 	return targets
+}
+
+// fitsBus reports whether Proxmox has the slot: ESXi numbers a bus's disks past
+// what Proxmox offers (a seventh SATA disk is sata6, and Proxmox stops at sata5).
+func fitsBus(slot string) bool {
+	bus, index := splitSlot(slot)
+	limit, ok := MaxDiskIndex(bus)
+	return ok && index <= limit
 }
 
 // setDisk puts a disk on its slot: the typed field for a slot CreateVM owns,

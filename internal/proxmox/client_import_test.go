@@ -331,6 +331,13 @@ func TestBuildImportCreateParams_GivesEveryDiskItsOwnSlot(t *testing.T) {
 	}
 	withScsi0 := ideAndSixSata()
 	withScsi0["scsi0"] = json.RawMessage(`"` + vol(7) + `"`)
+	eightScsi, sevenSata := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	for n := range 8 {
+		eightScsi["scsi"+strconv.Itoa(n)] = json.RawMessage(`"` + vol(n) + `"`)
+		if n < 7 {
+			sevenSata["sata"+strconv.Itoa(n)] = json.RawMessage(`"` + vol(n) + `"`)
+		}
+	}
 	onSata := map[string]string{"sata0": spec(0), "sata1": spec(1), "sata2": spec(2),
 		"sata3": spec(3), "sata4": spec(4), "sata5": spec(5)}
 
@@ -345,6 +352,11 @@ func TestBuildImportCreateParams_GivesEveryDiskItsOwnSlot(t *testing.T) {
 			map[string]string{"scsi0": spec(6)}, "virtio-scsi-single", "scsi0"},
 		{"and a SCSI disk that keeps scsi0", withScsi0, "pvscsi",
 			map[string]string{"scsi1": spec(6), "scsi0": spec(7)}, "pvscsi", "scsi1;scsi0"},
+		// The two past the six stay on pvscsi, which a guest with VMware Tools can see.
+		{"eight pvscsi disks", eightScsi, "pvscsi",
+			map[string]string{"scsi6": spec(6), "scsi7": spec(7)}, "pvscsi", "scsi6;scsi7"},
+		// ESXi numbers a seventh SATA disk sata6, a slot Proxmox does not have.
+		{"seven SATA disks", sevenSata, "", map[string]string{"scsi0": spec(6)}, "virtio-scsi-single", "scsi0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
