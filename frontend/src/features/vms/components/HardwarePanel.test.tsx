@@ -217,6 +217,26 @@ it("shows a role without manage:vm the hardware read-only", async () => {
 // IDE takes no iothread; a disk added with it was refused at Save ("property
 // is not defined in schema").
 describe("HardwarePanel add disk", () => {
+  // A thick LVM store picks the format itself (qcow2 with a volume chain on
+  // Proxmox VE 9), which Add disk showed as raw.
+  it("shows a thick LVM store's format as the store's own", async () => {
+    mockedList.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === STORAGE_URL
+          ? [{ ...imageStorage, storage: "store03", type: "lvm" }]
+          : [],
+      ),
+    );
+    renderWithProviders(<HardwarePanel {...props} />);
+    await screen.findByText("unused0");
+    await user.click(screen.getByRole("button", { name: "Add disk" }));
+    const form = screen.getByText("New hard disk").parentElement;
+    if (!form) throw new Error("Add Disk form not found");
+    fill(within(form).getByDisplayValue("Select..."), "store03");
+
+    expect(within(form).getByDisplayValue(/^The store's own/)).toBeDisabled();
+  });
+
   it("sends a disk added on IDE without the IO thread it cannot take", async () => {
     mockedPut.mockResolvedValue({ status: "ok" });
     renderWithProviders(<HardwarePanel {...props} />);

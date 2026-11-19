@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   busTakes,
   diskFormatFor,
+  diskFormatOptions,
+  diskFormatSummary,
   diskFormatToSend,
   diskFormatsForStorageType,
 } from "./vm-config-constants";
@@ -31,6 +33,32 @@ describe("diskFormatFor and diskFormatToSend", () => {
     (type, chosen, shown, sent) => {
       expect(diskFormatFor(type, chosen)).toBe(shown);
       expect(diskFormatToSend(type, chosen)).toBe(sent);
+    },
+  );
+});
+
+// A thick LVM store picks the format itself, qcow2 on Proxmox VE 9 when it keeps
+// snapshots as a volume chain, which Nexara cannot see: the dialogs said "raw".
+describe("diskFormatOptions and diskFormatSummary", () => {
+  it.each([
+    [
+      "lvm",
+      [
+        "The store's own: raw, or qcow2 if it keeps snapshots as a volume chain",
+      ],
+      "the store's format",
+    ],
+    ["lvmthin", ["Raw disk image (raw)"], "raw"],
+    [
+      "nfs",
+      ["QEMU image (qcow2)", "Raw disk image (raw)", "VMware image (vmdk)"],
+      "qcow2",
+    ],
+  ])(
+    "a %s store offers %j and sums a qcow2 choice up as %s",
+    (type, offered, summary) => {
+      expect(diskFormatOptions(type).map((o) => o.label)).toEqual(offered);
+      expect(diskFormatSummary(type, "qcow2")).toBe(summary);
     },
   );
 });

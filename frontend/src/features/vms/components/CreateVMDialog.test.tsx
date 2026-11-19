@@ -374,6 +374,26 @@ describe("CreateVMDialog, disk formats", () => {
       "store01:1,efitype=4m,pre-enrolled-keys=1",
     );
   });
+
+  // A thick LVM store picks the format itself (qcow2 with a volume chain on
+  // Proxmox VE 9), which the dialog showed as raw.
+  it("shows a thick LVM store's format as the store's own and sends none", async () => {
+    const sent = captureCreate();
+    server.routes[STORAGE] = () =>
+      json({ items: [{ ...THIN, storage: "store03", type: "lvm" }], total: 1 });
+    const { user, next } = await openFilledIn();
+    for (let step = 0; step < 3; step++) await next(); // OS, System, Disks
+    expect(await screen.findByDisplayValue(/^The store's own/)).toBeDisabled();
+    for (let step = 0; step < 5; step++) await next();
+    expect(screen.getByText(/\(the store's format\)/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create VM" }));
+
+    await waitFor(() => {
+      expect(sent.body).toBeDefined();
+    });
+    expect(sent.body?.scsi0).toMatch(/^store03:32(,|$)/);
+    expect(sent.body?.scsi0).not.toContain("format=");
+  });
 });
 
 // A disk or EFI disk left on "Default" was not sent at all, so the VM was made

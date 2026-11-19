@@ -48,10 +48,10 @@ import {
   cpuTypes as fallbackCpuTypes,
   scsiControllers,
   netModels,
-  diskFormats,
   diskFormatFor,
+  diskFormatOptions,
+  diskFormatSummary,
   diskFormatToSend,
-  diskFormatsForStorageType,
   busTakes,
   cacheModes,
   diskBusTypes,
@@ -1443,24 +1443,17 @@ export function CreateVMDialog({
                           id={`vm-disk-format-${String(disk.id)}`}
                           value={effectiveFormat(disk)}
                           disabled={
-                            diskFormatsForStorageType(diskStoreType(disk))
-                              .length === 1
+                            diskFormatOptions(diskStoreType(disk)).length === 1
                           }
                           onChange={(e) => {
                             updateDisk(disk.id, { format: e.target.value });
                           }}
                         >
-                          {diskFormats
-                            .filter((f) =>
-                              diskFormatsForStorageType(
-                                diskStoreType(disk),
-                              ).includes(f.value),
-                            )
-                            .map((f) => (
-                              <option key={f.value} value={f.value}>
-                                {f.label}
-                              </option>
-                            ))}
+                          {diskFormatOptions(diskStoreType(disk)).map((f) => (
+                            <option key={f.value} value={f.value}>
+                              {f.label}
+                            </option>
+                          ))}
                         </NativeSelect>
                       </Field>
                       <Field
@@ -1918,7 +1911,8 @@ export function CreateVMDialog({
                       >
                         {disk.size} GiB
                         {` on ${storeOf(disk.storage)}`} (
-                        {effectiveFormat(disk)}){disk.discard ? ", TRIM" : ""}
+                        {diskFormatSummary(diskStoreType(disk), disk.format)})
+                        {disk.discard ? ", TRIM" : ""}
                         {disk.ssd && busTakes(disk.bus, "ssd") ? ", SSD" : ""}
                         {disk.iothread && busTakes(disk.bus, "iothread")
                           ? ", IO thread"

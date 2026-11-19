@@ -456,6 +456,37 @@ export function diskFormatsForStorageType(type: string | undefined): string[] {
   return ["raw"];
 }
 
+// A thick LVM store picks a new disk's format itself, in a way Nexara cannot
+// see: raw, or on Proxmox VE 9 qcow2 when it keeps snapshots as a volume chain
+// (snapshot-as-volume-chain, which Nexara's storage rows do not carry). The
+// dialogs said "raw" for both.
+const STORE_PICKS_FORMAT_TYPES = new Set(["lvm"]);
+
+/** The format choices a new disk is offered on a store of this type. */
+export function diskFormatOptions(
+  type: string | undefined,
+): { value: string; label: string }[] {
+  if (type !== undefined && STORE_PICKS_FORMAT_TYPES.has(type)) {
+    return [
+      { value: "raw", label: i18n.t("vms:vmConfigConstants.storePicksFormat") },
+    ];
+  }
+  const allowed = diskFormatsForStorageType(type);
+  return diskFormats
+    .filter((f) => allowed.includes(f.value))
+    .map((f) => ({ value: f.value, label: f.label }));
+}
+
+/** A new disk's format in a summary line: diskFormatFor's, or the store's. */
+export function diskFormatSummary(
+  type: string | undefined,
+  chosen: string,
+): string {
+  return type !== undefined && STORE_PICKS_FORMAT_TYPES.has(type)
+    ? i18n.t("vms:vmConfigConstants.storePicksFormatShort")
+    : diskFormatFor(type, chosen);
+}
+
 /**
  * The format a new disk is shown in on a store of this type: `chosen` where
  * the store takes it, else the store's own.

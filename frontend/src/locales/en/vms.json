@@ -450,6 +450,8 @@
     "realtekRTL8139": "Realtek RTL8139",
     "qemuImageQcow2": "QEMU image (qcow2)",
     "rawDiskImageRaw": "Raw disk image (raw)",
+    "storePicksFormat": "The store's own: raw, or qcow2 if it keeps snapshots as a volume chain",
+    "storePicksFormatShort": "the store's format",
     "vMwareImageVmdk": "VMware image (vmdk)",
     "noCacheNone": "No cache (none)",
     "directSync": "Direct sync",

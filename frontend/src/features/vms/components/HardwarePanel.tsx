@@ -90,8 +90,8 @@ import {
   busTakes,
   cacheModes,
   diskFormatFor,
+  diskFormatOptions,
   diskFormatToSend,
-  diskFormats,
   diskFormatsForStorageType,
   osTypes,
   audioDevices,
@@ -2478,13 +2478,11 @@ function HardwarePanelBody({
                         setAddDiskFormat(e.target.value);
                       }}
                     >
-                      {diskFormats
-                        .filter((f) => addDiskFormats.includes(f.value))
-                        .map((f) => (
-                          <option key={f.value} value={f.value}>
-                            {f.label}
-                          </option>
-                        ))}
+                      {diskFormatOptions(addDiskType).map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                   <Field label={t("hardwarePanel.cache")}>
