@@ -3,7 +3,9 @@ package proxmox
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"strconv"
 	"testing"
 )
 
@@ -311,6 +313,64 @@ func TestBuildImportCreateParams_RemapsPvscsiDisksToSata(t *testing.T) {
 	}
 	if p.EFIDisk0 != "ceph:1,efitype=4m" {
 		t.Errorf("efidisk0 = %q, want a synthesised EFI disk", p.EFIDisk0)
+	}
+}
+
+// Past the six SATA slots a disk keeps its own slot unless one moved to SATA holds it, and
+// then takes the first free SCSI slot. Two disks on one slot created the VM without one.
+func TestBuildImportCreateParams_GivesEveryDiskItsOwnSlot(t *testing.T) {
+	t.Parallel()
+	vol := func(n int) string { return "store01:import/linux01.ova/disk" + strconv.Itoa(n) + ".vmdk" }
+	spec := func(n int) string { return "store02:0,import-from=" + vol(n) }
+	ideAndSixSata := func() map[string]json.RawMessage {
+		disks := map[string]json.RawMessage{"ide0": json.RawMessage(`"` + vol(0) + `"`)}
+		for n := range 6 {
+			disks["sata"+strconv.Itoa(n)] = json.RawMessage(`"` + vol(n+1) + `"`)
+		}
+		return disks
+	}
+	withScsi0 := ideAndSixSata()
+	withScsi0["scsi0"] = json.RawMessage(`"` + vol(7) + `"`)
+	onSata := map[string]string{"sata0": spec(0), "sata1": spec(1), "sata2": spec(2),
+		"sata3": spec(3), "sata4": spec(4), "sata5": spec(5)}
+
+	for _, tt := range []struct {
+		name                   string
+		disks                  map[string]json.RawMessage
+		scsihw                 string
+		past                   map[string]string // the disks past the six SATA slots
+		wantHW, wantBootSuffix string
+	}{
+		{"an IDE disk and six SATA disks", ideAndSixSata(), "",
+			map[string]string{"scsi0": spec(6)}, "virtio-scsi-single", "scsi0"},
+		{"and a SCSI disk that keeps scsi0", withScsi0, "pvscsi",
+			map[string]string{"scsi1": spec(6), "scsi0": spec(7)}, "pvscsi", "scsi1;scsi0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			args := map[string]json.RawMessage{"name": json.RawMessage(`"linux01"`)}
+			if tt.scsihw != "" {
+				args["scsihw"] = json.RawMessage(`"` + tt.scsihw + `"`)
+			}
+			p := BuildImportCreateParams(&ImportMetadata{Type: "vm", CreateArgs: args, Disks: tt.disks},
+				ImportCreateOptions{VMID: 101, TargetStorage: "store02"})
+			got := map[string]string{}
+			for k, v := range p.Extra {
+				if isGuestSlotKey(k) {
+					got[k] = v
+				}
+			}
+			if p.SCSI0 != "" {
+				got["scsi0"] = p.SCSI0
+			}
+			want := maps.Clone(onSata)
+			maps.Copy(want, tt.past)
+			wantBoot := "order=sata0;sata1;sata2;sata3;sata4;sata5;" + tt.wantBootSuffix
+			if !maps.Equal(got, want) || p.ScsiHW != tt.wantHW || p.Boot != wantBoot {
+				t.Errorf("disks %v, scsihw %q, boot %q; want %v, %q, %q",
+					got, p.ScsiHW, p.Boot, want, tt.wantHW, wantBoot)
+			}
+		})
 	}
 }
 
