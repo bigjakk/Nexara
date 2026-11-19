@@ -34,6 +34,27 @@ func (q *Queries) CompleteVMImportJob(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const countActiveVMImportJobsReadingStorage = `-- name: CountActiveVMImportJobsReadingStorage :one
+SELECT count(*) FROM vm_import_jobs
+WHERE cluster_id = $1
+  AND status IN ('pending', 'running')
+  AND split_part(source_ref, ':', 1) = $2::text
+`
+
+type CountActiveVMImportJobsReadingStorageParams struct {
+	ClusterID uuid.UUID `json:"cluster_id"`
+	Storage   string    `json:"storage"`
+}
+
+// The pending or running imports in a cluster that read from a storage. source_ref is the
+// source volume id, <storage>:<path>, so its storage is the part before the first colon.
+func (q *Queries) CountActiveVMImportJobsReadingStorage(ctx context.Context, arg CountActiveVMImportJobsReadingStorageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveVMImportJobsReadingStorage, arg.ClusterID, arg.Storage)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const failStalePendingVMImportJobs = `-- name: FailStalePendingVMImportJobs :exec
 UPDATE vm_import_jobs
 SET status = 'failed',

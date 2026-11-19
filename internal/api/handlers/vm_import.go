@@ -566,11 +566,14 @@ func (h *VMImportHandler) StartVMImport(c fiber.Ctx, p *apischema.Params) error 
 		"live_import":     req.LiveImport,
 	})
 
+	// The source volume with its storage, also when the caller named it relative to the
+	// storage as Proxmox's own API does: removing a source finds the imports reading it by this.
+	sourceRef := req.Storage + ":" + strings.TrimPrefix(req.Volume, req.Storage+":")
 	job, err := h.queries.InsertVMImportJob(c.Context(), db.InsertVMImportJobParams{
 		ClusterID:         clusterID,
 		SourceAcquisition: acquisition,
 		SourceFormat:      req.SourceFormat,
-		SourceRef:         req.Volume,
+		SourceRef:         sourceRef,
 		TargetNode:        req.TargetNode,
 		TargetStorage:     req.TargetStorage,
 		TargetVmid:        safeconv.Int32(vmid),
@@ -835,6 +838,22 @@ func (h *VMImportHandler) DeleteImportSource(c fiber.Ctx, p *apischema.Params) e
 	}
 	if cfg.Type != "esxi" && !storageHasContent(cfg.Content, "import") {
 		return fiber.NewError(fiber.StatusBadRequest, "storage is not an import source; use the storage management endpoint")
+	}
+	// An import still reading from the source would fail with it, and a live import's VM
+	// stop: an ESXi source is unmounted with its definition. A count that could not be
+	// read removes nothing.
+	reading, err := h.queries.CountActiveVMImportJobsReadingStorage(c.Context(),
+		db.CountActiveVMImportJobsReadingStorageParams{ClusterID: clusterID, Storage: storageName})
+	if err != nil {
+		return fiber.NewError(fiber.StatusInternalServerError, "Failed to check the imports reading this source")
+	}
+	switch {
+	case reading == 1:
+		return fiber.NewError(fiber.StatusConflict,
+			"An import in progress reads from this source: let it finish, or cancel it, first")
+	case reading > 1:
+		return fiber.NewError(fiber.StatusConflict, strconv.FormatInt(reading, 10)+
+			" imports in progress read from this source: let them finish, or cancel them, first")
 	}
 	if rest := withoutContent(cfg.Content, "import"); cfg.Type != "esxi" && rest != "" {
 		if err := requireGuestActionPerm(c, "manage", "storage", clusterID,

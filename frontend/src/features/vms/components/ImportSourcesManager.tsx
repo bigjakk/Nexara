@@ -12,7 +12,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePermissions } from "@/hooks/usePermissions";
-import { useDeleteImportSource, useImportSources } from "../api/import-queries";
+import {
+  useDeleteImportSource,
+  useImportJobs,
+  useImportSources,
+} from "../api/import-queries";
 import { useSaveOutcome } from "@/hooks/useSaveOutcome";
 import { EsxiSourceForm } from "./EsxiSourceForm";
 import type { ImportSource } from "@/types/api";
@@ -48,6 +52,7 @@ function removesStore(source: ImportSource): boolean {
 export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   const { t } = useTranslation("vms");
   const { data: sources } = useImportSources(clusterId);
+  const { data: jobs } = useImportJobs(clusterId);
   const { canManage } = usePermissions();
   const deleteMutation = useDeleteImportSource();
   const [showEsxiForm, setShowEsxiForm] = useState(false);
@@ -83,6 +88,18 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
   // from a store that holds other content.
   const canManageStorage = canManage("storage");
   const target = groups.find((g) => g.storage === deleteTarget);
+  // The sources an import in progress reads from, by the storage of its source
+  // volume (<storage>:<path>). The server refuses to remove one of them.
+  const readNow = useMemo(
+    () =>
+      new Set(
+        (jobs ?? [])
+          .filter((j) => j.status === "pending" || j.status === "running")
+          .map((j) => j.source_ref.split(":")[0]),
+      ),
+    [jobs],
+  );
+  const targetInUse = deleteTarget !== null && readNow.has(deleteTarget);
 
   function confirmDelete() {
     if (!deleteTarget) return;
@@ -219,6 +236,12 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
                 </>
               )}
             </DialogDescription>
+            {targetInUse && (
+              <p className="text-sm text-amber-700 dark:text-amber-400">
+                An import in progress reads from it: let it finish, or cancel
+                it, first.
+              </p>
+            )}
           </DialogHeader>
           {deleteMutation.isError && (
             <p className="text-sm text-destructive">
@@ -240,7 +263,7 @@ export function ImportSourcesManager({ clusterId }: ImportSourcesManagerProps) {
             <Button
               type="button"
               variant="destructive"
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isPending || targetInUse}
               onClick={confirmDelete}
             >
               {deleteMutation.isPending ? "Removing…" : "Remove source"}

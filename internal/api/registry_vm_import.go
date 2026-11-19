@@ -208,7 +208,8 @@ func registerVMImportEndpoints(reg *Registry, h *handlers.VMImportHandler) {
 			"deleted; a store that holds other content too keeps its definition and loses only the import " +
 			"content type, which requires manage:storage as well. Refused for a storage that is not an " +
 			"import source. Both checks run against Proxmox's live config, so a role holding only " +
-			"manage:vm_import cannot delete or change production storage through this route.",
+			"manage:vm_import cannot delete or change production storage through this route. Refused with " +
+			"409 while a pending or running import that Nexara started reads from the source: it would fail with it.",
 		Group:       "VM Import",
 		Permissions: clusterCheck("manage", "vm_import"),
 		Parameters:  clusterParams(apischema.Properties{"storage": importSourceStorageParam}),

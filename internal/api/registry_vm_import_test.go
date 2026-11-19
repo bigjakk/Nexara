@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -198,9 +199,11 @@ func TestImportSourceDeleteAnchorsItsStorageSegment(t *testing.T) {
 // Removing an import source deletes only a store that holds nothing but imports.
 // One that holds other content too (enable-content adds import to an ordinary
 // store) loses only the import content type, which takes manage:storage:
-// deleting its definition would cut off every guest with a disk on it.
+// deleting its definition would cut off every guest with a disk on it. Neither
+// happens while an import reads from the source, nor when that cannot be told.
 func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
 	t.Parallel()
+	reading := func(n int64) any { return struct{ N int64 }{n} }
 	tests := []struct {
 		name, content string
 		grants        map[string]bool
@@ -209,14 +212,20 @@ func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
 		deleted       bool
 		sent          string // the content an update sent; empty when none was sent
 		audits        []string
+		reading       any // the count of imports reading the source, or the error reading it
 	}{
 		{"a store holding only imports is deleted", "import", grantsOf("manage:vm_import"),
-			200, `"deleted"`, true, "", []string{"delete_import_source"}},
+			200, `"deleted"`, true, "", []string{"delete_import_source"}, reading(0)},
 		{"a store holding other content loses only import", "images,import,iso",
 			grantsOf("manage:vm_import", "manage:storage"), 200, `"updated"`, false, "images,iso",
-			[]string{"remove_import_content"}},
+			[]string{"remove_import_content"}, reading(0)},
 		{"without manage:storage that is refused, and nothing is sent", "images,import",
-			grantsOf("manage:vm_import"), 403, "requires manage:storage", false, "", nil},
+			grantsOf("manage:vm_import"), 403, "requires manage:storage", false, "", nil, reading(0)},
+		{"a source an import still reads from is refused, and nothing is sent", "import",
+			grantsOf("manage:vm_import"), 409, "An import in progress reads from this source", false, "", nil,
+			reading(1)},
+		{"a count that could not be read removes nothing", "import", grantsOf("manage:vm_import"),
+			500, "Failed to check the imports", false, "", nil, errors.New("the database refused the read")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -248,10 +257,15 @@ func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
 				func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 					return handlers.NewVMImportHandler(q, backupRunEncKey, nil).DeleteImportSource
 				})
-			dbtx.lookups = map[string]any{"GetCluster": db.Cluster{ID: uuid.MustParse(testClusterID)}}
+			dbtx.lookups = map[string]any{"GetCluster": db.Cluster{ID: uuid.MustParse(testClusterID)},
+				"CountActiveVMImportJobsReadingStorage": tt.reading}
 			req := httptest.NewRequest(http.MethodDelete, vmImportRoute(path), nil)
 			req.Header.Set("X-Test-User", "yes")
 			status, body := sendBody(t, app, req)
+			if got := dbtx.askedWith["CountActiveVMImportJobsReadingStorage"]; !slices.Equal(got,
+				[]any{uuid.MustParse(testClusterID), "store01"}) {
+				t.Errorf("counted the imports reading %v, want this cluster's store01", got)
+			}
 			var audits []string
 			for _, a := range dbtx.decodedAudits(t) {
 				audits = append(audits, a.action)
@@ -263,6 +277,46 @@ func TestRemovingAnImportSourceKeepsAStoreThatHoldsOtherContent(t *testing.T) {
 				t.Errorf("answered %d %s, deleted %t, sent content %q, audited %v; want %d naming %s, deleted %t, "+
 					"sent %q, audited %v", status, body, deleted, sent, audits, tt.status, tt.need, tt.deleted,
 					tt.sent, tt.audits)
+			}
+		})
+	}
+}
+
+// A job records its source volume with its storage, also when the caller named
+// the volume relative to it (as Proxmox's own API does): removing a source finds
+// the imports still reading it by that storage.
+func TestStartingAnImportRecordsItsSourceWithItsStorage(t *testing.T) {
+	t.Parallel()
+	for _, volume := range []string{"import/linux01.ova", "store01:import/linux01.ova"} {
+		t.Run(volume, func(t *testing.T) {
+			t.Parallel()
+			pve := &backupRunPVE{handle: func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path != "/api2/json/nodes/pve-01/storage/store01/import-metadata" {
+					return false
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"type":"vm","source":"ova","create-args":{},"disks":{},"net":{}}}`))
+				return true
+			}}
+			app, dbtx := newPVEAppAs(t, pve, grantsOf("manage:vm_import"), fiber.MethodPost, importScope,
+				func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
+					return handlers.NewVMImportHandler(q, backupRunEncKey, nil).StartVMImport
+				})
+			dbtx.lookups = map[string]any{
+				"GetNodeByClusterAndName": db.Node{ClusterID: uuid.MustParse(testClusterID), Name: "pve-01"},
+				"GetCluster":              db.Cluster{ID: uuid.MustParse(testClusterID)},
+				// Refused, so the start stops at the row it asked to write.
+				"InsertVMImportJob": errors.New("the database refused the write"),
+			}
+			body := `{"node":"pve-01","storage":"store01","volume":"` + volume +
+				`","target_node":"pve-01","target_storage":"store02","vmid":101}`
+			req := httptest.NewRequest(http.MethodPost, vmImportRoute(importScope), strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Test-User", "yes")
+			sendBody(t, app, req)
+			// InsertVMImportJob's arguments: cluster_id, source_acquisition, source_format, source_ref, …
+			if args := dbtx.askedWith["InsertVMImportJob"]; len(args) < 4 || args[3] != "store01:import/linux01.ova" {
+				t.Errorf("recorded the source as %v, want store01:import/linux01.ova", args)
 			}
 		})
 	}

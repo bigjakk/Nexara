@@ -56,3 +56,11 @@ SET status = 'failed',
     completed_at = now(),
     updated_at = now()
 WHERE status = 'pending' AND upid = '' AND created_at < now() - interval '30 minutes';
+
+-- name: CountActiveVMImportJobsReadingStorage :one
+-- The pending or running imports in a cluster that read from a storage. source_ref is the
+-- source volume id, <storage>:<path>, so its storage is the part before the first colon.
+SELECT count(*) FROM vm_import_jobs
+WHERE cluster_id = sqlc.arg(cluster_id)
+  AND status IN ('pending', 'running')
+  AND split_part(source_ref, ':', 1) = sqlc.arg(storage)::text;

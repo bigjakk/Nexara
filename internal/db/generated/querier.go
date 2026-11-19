@@ -446,6 +446,9 @@ type Querier interface {
 	CountActiveAPIKeysByUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountActiveAlertsByCluster(ctx context.Context, clusterID pgtype.UUID) (CountActiveAlertsByClusterRow, error)
 	CountActiveNodes(ctx context.Context, jobID uuid.UUID) (int64, error)
+	// The pending or running imports in a cluster that read from a storage. source_ref is the
+	// source volume id, <storage>:<path>, so its storage is the part before the first colon.
+	CountActiveVMImportJobsReadingStorage(ctx context.Context, arg CountActiveVMImportJobsReadingStorageParams) (int64, error)
 	// ---------------------------------------------------------------------------
 	// Reports.
 	// ---------------------------------------------------------------------------

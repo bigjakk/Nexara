@@ -1235,7 +1235,7 @@ Open **Imports** in the navigation rail to see imports and register sources for 
 
 The source is registered as a special storage on the cluster, and the VMs it exposes become selectable when importing.
 
-The bin icon on a source in **Import sources** removes it. An ESXi source, or a store that holds nothing but imports, has its storage definition removed from Proxmox. A store that holds other content as well (an ordinary directory or NFS store that the import content type was enabled on) keeps its definition and everything on it, and loses only the import content type; that also needs `manage:storage`, so a role without it is not offered the icon on such a store.
+The bin icon on a source in **Import sources** removes it. An ESXi source, or a store that holds nothing but imports, has its storage definition removed from Proxmox. A store that holds other content as well (an ordinary directory or NFS store that the import content type was enabled on) keeps its definition and everything on it, and loses only the import content type; that also needs `manage:storage`, so a role without it is not offered the icon on such a store. A source that an import started from Nexara is still reading cannot be removed until the import finishes or is cancelled: the dialog says so, and the server refuses it. (An import started in Proxmox itself is not seen.)
 
 ### Importing a VM
 
