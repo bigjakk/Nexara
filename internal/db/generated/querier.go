@@ -1778,8 +1778,13 @@ type Querier interface {
 	// activity-columns.ts) transcribed: keep the two in step. hidden_setting_keys
 	// are the reserved setting keys whose details the caller may not read; their
 	// details do not count, as the SPA only ever sees them redacted.
-	// A row that names its guest by VMID only (a backup, a restore, a console
-	// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+	// A row that names its guest by VMID only (a backup, a restore over an existing
+	// guest, a console token, a guest-tools policy): the cluster's guest with that
+	// VMID now, if Nexara already knew it when the row was written. A guest first
+	// seen later may have taken the VMID afterwards (Proxmox reuses them), so a row
+	// written before its guest was stored, a create or a restore to a new VMID,
+	// shows only a name it recorded. Not a guest's own row that recorded its vms.id:
+	// once that id is gone the guest may be too (000084). (cluster_id, vmid) is
 	// unique, so this join adds no rows.
 	ListAuditLogAdvanced(ctx context.Context, arg ListAuditLogAdvancedParams) ([]ListAuditLogAdvancedRow, error)
 	// ListAuditTaskOutcomes is the task outcome of each entry on an audit page that
@@ -2484,8 +2489,13 @@ type Querier interface {
 	// DeleteCompletedTasks never prunes it, so it would otherwise stay in the feed
 	// for good. A task_history row goes with its cluster, so this arm needs the scope
 	// but not the check that the cluster exists.
-	// A row that names its guest by VMID only (a backup, a restore, a console
-	// token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+	// A row that names its guest by VMID only (a backup, a restore over an existing
+	// guest, a console token, a guest-tools policy): the cluster's guest with that
+	// VMID now, if Nexara already knew it when the row was written. A guest first
+	// seen later may have taken the VMID afterwards (Proxmox reuses them), so a row
+	// written before its guest was stored, a create or a restore to a new VMID,
+	// shows only a name it recorded. Not a guest's own row that recorded its vms.id:
+	// once that id is gone the guest may be too (000084). (cluster_id, vmid) is
 	// unique, so this join adds no rows.
 	// A task row the retention sweep archived still says how the task ended
 	// (ListAuditTaskOutcomes reads it the same way): without it, an old entry has

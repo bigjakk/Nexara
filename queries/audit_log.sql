@@ -120,10 +120,18 @@ LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
--- A row that names its guest by VMID only (a backup, a restore, a console
--- token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+-- A row that names its guest by VMID only (a backup, a restore over an existing
+-- guest, a console token, a guest-tools policy): the cluster's guest with that
+-- VMID now, if Nexara already knew it when the row was written. A guest first
+-- seen later may have taken the VMID afterwards (Proxmox reuses them), so a row
+-- written before its guest was stored, a create or a restore to a new VMID,
+-- shows only a name it recorded. Not a guest's own row that recorded its vms.id:
+-- once that id is gone the guest may be too (000084). (cluster_id, vmid) is
 -- unique, so this join adds no rows.
-LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
+LEFT JOIN vms gv ON v.id IS NULL
+  AND NOT (a.resource_type IN ('vm', 'container', 'vm_folder_membership') AND a.resource_id !~ '^[0-9]{1,9}$')
+  AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
+  AND gv.created_at <= a.created_at
 LEFT JOIN task_history th ON th.upid = (a.details->>'upid') AND th.cluster_id = a.cluster_id
 -- A task row the retention sweep archived still says how the task ended
 -- (ListAuditTaskOutcomes reads it the same way): without it, an old entry has
@@ -193,10 +201,18 @@ LEFT JOIN users u ON u.id = a.user_id
 LEFT JOIN clusters c ON c.id = a.cluster_id
 LEFT JOIN removed_clusters rc ON rc.id = a.cluster_id
 LEFT JOIN vms v ON v.id::text = a.resource_id
--- A row that names its guest by VMID only (a backup, a restore, a console
--- token): the cluster's guest with that VMID now. (cluster_id, vmid) is
+-- A row that names its guest by VMID only (a backup, a restore over an existing
+-- guest, a console token, a guest-tools policy): the cluster's guest with that
+-- VMID now, if Nexara already knew it when the row was written. A guest first
+-- seen later may have taken the VMID afterwards (Proxmox reuses them), so a row
+-- written before its guest was stored, a create or a restore to a new VMID,
+-- shows only a name it recorded. Not a guest's own row that recorded its vms.id:
+-- once that id is gone the guest may be too (000084). (cluster_id, vmid) is
 -- unique, so this join adds no rows.
-LEFT JOIN vms gv ON v.id IS NULL AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
+LEFT JOIN vms gv ON v.id IS NULL
+  AND NOT (a.resource_type IN ('vm', 'container', 'vm_folder_membership') AND a.resource_id !~ '^[0-9]{1,9}$')
+  AND gv.cluster_id = a.cluster_id AND gv.vmid = a.vmid
+  AND gv.created_at <= a.created_at
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR a.cluster_id = sqlc.narg('cluster_id'))
   AND (sqlc.narg('resource_type')::text IS NULL OR a.resource_type = sqlc.narg('resource_type'))
   AND (sqlc.narg('user_id')::uuid IS NULL OR a.user_id = sqlc.narg('user_id'))

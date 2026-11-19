@@ -101,10 +101,11 @@ var (
 	nameByVMIDVM      = uuid.MustParse("118f0000-0000-4000-8000-000000000013")
 )
 
-// A row that names its guest by VMID only — a backup ("9101"), a restore, a
-// console token (a user's id) — read back with the guest's name. Both readers
-// matched a name only on the vms.id a guest's own rows carry, so the Activity
-// panel and the audit log showed "9101", "9101/vm" or a raw UUID instead.
+// A row that names its guest by VMID only (a backup, a console token, a
+// guest-tools policy) reads back with the guest's name; the readers showed
+// "9101" or a raw UUID. A guest's own row whose vms.id is gone stays unnamed
+// (000084), and so does a row older than the guest now holding its VMID:
+// either may name another guest.
 func TestAuditReadsNameAGuestRecordedByVMIDOnly(t *testing.T) {
 	env := setupMigration(t)
 	defer env.Cleanup()
@@ -135,11 +136,28 @@ func TestAuditReadsNameAGuestRecordedByVMIDOnly(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	if err := q.InsertAuditLog(ctx, gen.InsertAuditLogParams{
-		ClusterID: pgtype.UUID{Bytes: nameByVMIDCluster, Valid: true}, UserID: pgtype.UUID{Bytes: systemUserID, Valid: true},
-		ResourceType: "backup", ResourceID: "9101", Action: "backup_triggered", Details: []byte(`{"vmid":"9101"}`),
-	}); err != nil {
-		t.Fatalf("insert: %v", err)
+	rows := []struct {
+		action, resourceType, resourceID, want string
+		older                                  bool // written before Nexara first saw the guest
+	}{
+		{"backup_triggered", "backup", "9101", "linux01", false},
+		{"guest_tools_policy_update", "vm", "9101", "linux01", false},
+		{"migrate", "vm", uuid.NewString(), "", false}, // a vms.id that churned or was destroyed
+		{"console_token_mint", "auth", uuid.NewString(), "", true},
+	}
+	for _, r := range rows {
+		if err := q.InsertAuditLog(ctx, gen.InsertAuditLogParams{
+			ClusterID: pgtype.UUID{Bytes: nameByVMIDCluster, Valid: true}, UserID: pgtype.UUID{Bytes: systemUserID, Valid: true},
+			ResourceType: r.resourceType, ResourceID: r.resourceID, Action: r.action, Details: []byte(`{"vmid":"9101"}`),
+		}); err != nil {
+			t.Fatalf("insert %s: %v", r.action, err)
+		}
+		if r.older {
+			if _, err := pool.Exec(ctx, `UPDATE audit_log SET created_at = now() - interval '1 hour'
+				WHERE cluster_id = $1 AND action = $2`, nameByVMIDCluster, r.action); err != nil {
+				t.Fatalf("age %s: %v", r.action, err)
+			}
+		}
 	}
 
 	scope := []uuid.UUID{nameByVMIDCluster}
@@ -153,22 +171,22 @@ func TestAuditReadsNameAGuestRecordedByVMIDOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAuditLogAdvanced: %v", err)
 	}
-	type read struct {
-		reader string
-		n      int
-		name   string
-		vmid   int32
+	read := map[string]map[string]string{"the Activity feed": {}, "the audit log": {}}
+	for _, e := range recent {
+		if e.ResourceVmid == 9101 {
+			read["the Activity feed"][e.Action] = e.ResourceName
+		}
 	}
-	reads := []read{{reader: "the Activity feed", n: len(recent)}, {reader: "the audit log", n: len(advanced)}}
-	if len(recent) > 0 {
-		reads[0].name, reads[0].vmid = recent[0].ResourceName, recent[0].ResourceVmid
+	for _, e := range advanced {
+		if e.ResourceVmid == 9101 {
+			read["the audit log"][e.Action] = e.ResourceName
+		}
 	}
-	if len(advanced) > 0 {
-		reads[1].name, reads[1].vmid = advanced[0].ResourceName, advanced[0].ResourceVmid
-	}
-	for _, got := range reads {
-		if got.n != 1 || got.name != "linux01" || got.vmid != 9101 {
-			t.Errorf("%s: %d rows, name %q, vmid %d; want 1 row named linux01, vmid 9101", got.reader, got.n, got.name, got.vmid)
+	for reader, names := range read {
+		for _, r := range rows {
+			if got, ok := names[r.action]; !ok || got != r.want {
+				t.Errorf("%s, %s row: name %q (listed %v); want %q with vmid 9101", reader, r.action, got, ok, r.want)
+			}
 		}
 	}
 }
