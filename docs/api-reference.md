@@ -2090,7 +2090,7 @@ after the node is back).
 | GET | `/migrations` | List migrations the caller can view on either endpoint cluster |
 | GET | `/migrations/:id` | Get migration details |
 | POST | `/migrations/:id/check` | Run the pre-flight checks of a job not yet started; `409` for one that has started, failed, completed or been cancelled, and for one started, or checked by another request, while the check ran (that report is not saved) |
-| POST | `/migrations/:id/execute` | Execute migration; `409` unless the job is pending or checking, a start by another request included |
+| POST | `/migrations/:id/execute` | Execute migration; `409` unless the job is pending or checking, a start by another request included. The instance running it keeps a heartbeat on the job; one whose heartbeat stops for ten minutes ends as `failed`, its `error_message` saying Nexara stopped following it |
 | POST | `/migrations/:id/cancel` | Cancel a pending job, one not yet started; `409` for any other, a job being checked included |
 | GET | `/clusters/:id/migrations` | List migrations for a cluster |
 

@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bigjakk/nexara/internal/audit"
+	"github.com/bigjakk/nexara/internal/auth"
 	"github.com/bigjakk/nexara/internal/crypto"
 	db "github.com/bigjakk/nexara/internal/db/generated"
 	"github.com/bigjakk/nexara/internal/events"
@@ -33,6 +35,26 @@ func cleanupCtxFor(ctx context.Context) (context.Context, context.CancelFunc) {
 	}
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
+
+// The heartbeat a running job keeps (keepBeating) and the sweep that ends a job
+// whose heartbeat stopped (ReconcileLapsed). Migrations run in the instance
+// that took the request, and more than one instance may serve one database, so
+// only a stopped heartbeat says nothing follows a job. heartbeatLapse allows
+// twenty missed stamps, so a database slow for a while does not end a live run.
+const (
+	heartbeatInterval = 30 * time.Second
+	heartbeatLapse    = 10 * time.Minute
+	// A job claimed by a release without heartbeats: nothing follows one that no
+	// update has touched for a day.
+	unbeatenLapse = 24 * time.Hour
+	// A check is one request, its Proxmox calls bounded by the client's timeout:
+	// one begun an hour ago ended without saving.
+	checkLapse = time.Hour
+	// A lapsed job is ended only when it is seen lapsed again this long after
+	// the first look: a database outage stops every stamp at once, and the first
+	// sweep after it can come before a live instance's next stamp.
+	lapseConfirm = 2 * heartbeatInterval
+)
 
 // defaultPollInterval and defaultPollStaleGrace are pollTaskStatus's timings.
 //
@@ -69,12 +91,20 @@ type Orchestrator struct {
 	logger        *slog.Logger
 	eventPub      *events.Publisher
 
-	// pollTaskStatus's timings. Fields rather than constants only so a test
-	// can drive the loop without waiting out a 5s tick or a 24h grace;
-	// production never sets them and NewOrchestrator supplies the defaults.
+	// pollTaskStatus's timings, and the heartbeat's. Fields rather than
+	// constants only so a test can drive the loop without waiting out a 5s
+	// tick or a 24h grace; production never sets them and NewOrchestrator
+	// supplies the defaults.
 	pollInterval   time.Duration
 	pollStaleGrace time.Duration
 	haStartGrace   time.Duration
+	beatEvery      time.Duration
+
+	// ReconcileLapsed's memory: when each lapsed job was first seen so, and the
+	// clock it is read by (time.Now unless SetSweepClockForTesting).
+	lapsedMu    sync.Mutex
+	lapsedSince map[uuid.UUID]time.Time
+	sweepNow    func() time.Time
 }
 
 // NewOrchestrator creates a new migration orchestrator.
@@ -90,7 +120,14 @@ func NewOrchestrator(queries *db.Queries, encryptionKey string, logger *slog.Log
 		pollInterval:   defaultPollInterval,
 		pollStaleGrace: defaultPollStaleGrace,
 		haStartGrace:   defaultHAStartGrace,
+		beatEvery:      heartbeatInterval,
 	}
+}
+
+// SetSweepClockForTesting sets the clock ReconcileLapsed spaces its two looks
+// at a lapsed job by, so a test need not wait out lapseConfirm.
+func (o *Orchestrator) SetSweepClockForTesting(now func() time.Time) {
+	o.sweepNow = now
 }
 
 // SetProxmoxCache attaches the shared per-server cache. Nil-safe.
@@ -351,6 +388,11 @@ func (o *Orchestrator) saveCheckResults(ctx context.Context, jobID uuid.UUID, re
 
 // Execute runs the migration for a job. This is intended to be called in a goroutine.
 func (o *Orchestrator) Execute(ctx context.Context, jobID uuid.UUID, userID uuid.UUID) {
+	// The claim stamped the job's heartbeat. It is kept fresh while this runs,
+	// so no instance's sweep takes the job for abandoned (ReconcileLapsed).
+	stop := o.keepBeating(ctx, jobID)
+	defer stop()
+
 	job, err := o.queries.GetMigrationJob(ctx, jobID)
 	if err != nil {
 		o.failJob(ctx, jobID, fmt.Sprintf("get migration job: %v", err), nil)
@@ -1313,7 +1355,8 @@ func (o *Orchestrator) pollTaskStatus(ctx context.Context, client *proxmox.Clien
 			//  7. executeBothMigration's SUCCESS write, 12 lines below its
 			//     failure sibling in 4 — a literal "OK".
 			//  8. abandonTaskRow, added by the same change as this comment —
-			//     literals "interrupted" and "vanished".
+			//     literals "interrupted" and "vanished"; ReconcileLapsed calls
+			//     it with "interrupted" for a cross-cluster job it ends.
 			//
 			// 7 and 8 are constants, so they carry nothing to scrub. They are
 			// listed because the rule this comment follows is that a PARTIAL
@@ -1395,19 +1438,24 @@ func (o *Orchestrator) failJob(ctx context.Context, jobID uuid.UUID, errMsg stri
 		ErrorMessage: errMsg,
 	})
 	if mc != nil {
-		job := mc.job
-		typeLabel := "VM"
-		if job.VmType == VMTypeLXC {
-			typeLabel = "CT"
-		}
-		actionPrefix := "migrate"
-		if job.MigrationType == TypeCrossCluster {
-			actionPrefix = "cross_cluster_migrate"
-		}
-		o.auditLog(dbCtx, mc, actionPrefix+"_failed",
-			fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
-				job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, errMsg))
+		o.auditFailed(dbCtx, mc, errMsg)
 	}
+}
+
+// auditFailed writes a job's <migrate|cross_cluster_migrate>_failed entry.
+func (o *Orchestrator) auditFailed(ctx context.Context, mc *migrationContext, errMsg string) {
+	job := mc.job
+	typeLabel := "VM"
+	if job.VmType == VMTypeLXC {
+		typeLabel = "CT"
+	}
+	actionPrefix := "migrate"
+	if job.MigrationType == TypeCrossCluster {
+		actionPrefix = "cross_cluster_migrate"
+	}
+	o.auditLog(ctx, mc, actionPrefix+"_failed",
+		fmt.Sprintf(`{"vmid":%d,"vm_type":%q,"source_node":%q,"target_node":%q,"migration_type":%q,"error":%q}`,
+			job.Vmid, typeLabel, job.SourceNode, job.TargetNode, job.MigrationType, errMsg))
 }
 
 // auditLog inserts an audit log entry using the VM's DB ID as resource_id
@@ -1471,6 +1519,123 @@ func (o *Orchestrator) Cancel(ctx context.Context, jobID uuid.UUID) (bool, error
 		return false, fmt.Errorf("cancel migration job: %w", err)
 	}
 	return n > 0, nil
+}
+
+// keepBeating stamps jobID's heartbeat every beatEvery until the returned stop
+// is called; stop returns once the stamping has.
+func (o *Orchestrator) keepBeating(ctx context.Context, jobID uuid.UUID) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tick := time.NewTicker(o.beatEvery)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if err := o.queries.BeatMigrationJob(ctx, jobID); err != nil && ctx.Err() == nil {
+					o.logger.Warn("migration: could not stamp the job's heartbeat", "job_id", jobID, "error", err)
+				}
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+// ReconcileLapsed ends the jobs no instance follows any more. A job still
+// "migrating" whose heartbeat stopped lost its run to a stop, a crash or a
+// panic: once it is seen lapsed twice, lapseConfirm apart, it fails, audited as
+// the system user, saying what may have happened all the same. A cross-cluster
+// one's task row, which the collector leaves to this package, is closed as
+// interrupted. A check cut off the same way is pending again. Each write
+// repeats the test, so a job stamped meanwhile is left alone. The two looks
+// come from consecutive passes that succeeded: a failed pass forgets the first
+// looks, and the scheduler builds a fresh Orchestrator for each term it holds
+// its lease, so a database that came and went cannot stand in for the second.
+func (o *Orchestrator) ReconcileLapsed(ctx context.Context) error {
+	o.lapsedMu.Lock()
+	defer o.lapsedMu.Unlock()
+	reset, err := o.queries.ResetLapsedMigrationChecks(ctx, checkLapse.Seconds())
+	if err != nil {
+		o.lapsedSince = nil
+		return fmt.Errorf("reset lapsed pre-flight checks: %w", err)
+	}
+	if reset > 0 {
+		o.logger.Warn("migration: pre-flight checks were cut off; their jobs are pending again", "jobs", reset)
+	}
+	bounds := db.ListLapsedMigrationJobsParams{LapseSecs: heartbeatLapse.Seconds(), UnbeatenSecs: unbeatenLapse.Seconds()}
+	jobs, err := o.queries.ListLapsedMigrationJobs(ctx, bounds)
+	if err != nil {
+		o.lapsedSince = nil
+		return fmt.Errorf("list lapsed migration jobs: %w", err)
+	}
+	if o.lapsedSince == nil {
+		o.lapsedSince = map[uuid.UUID]time.Time{}
+	}
+	now := time.Now()
+	if o.sweepNow != nil {
+		now = o.sweepNow()
+	}
+	listed := make(map[uuid.UUID]bool, len(jobs))
+	for _, job := range jobs {
+		listed[job.ID] = true
+		first, seen := o.lapsedSince[job.ID]
+		if !seen {
+			o.lapsedSince[job.ID] = now
+		}
+		if !seen || now.Sub(first) < lapseConfirm {
+			continue // looked at again before it is ended
+		}
+		delete(o.lapsedSince, job.ID)
+		msg := lapsedMessage(job)
+		ended, err := o.queries.FailLapsedMigrationJob(ctx, db.FailLapsedMigrationJobParams{
+			ErrorMessage: msg, ID: job.ID, LapseSecs: bounds.LapseSecs, UnbeatenSecs: bounds.UnbeatenSecs,
+		})
+		if err != nil {
+			o.logger.Warn("migration: could not end a job no instance follows", "job_id", job.ID, "error", err)
+			continue
+		}
+		if ended == 0 {
+			continue // stamped since it was listed
+		}
+		o.logger.Warn("migration: ended a job no instance follows any more", "job_id", job.ID, "upid", job.Upid)
+		if job.MigrationType == TypeCrossCluster && job.Upid != "" {
+			o.abandonTaskRow(ctx, job.Upid, "interrupted")
+		}
+		mc := o.resolveMigrationContext(ctx, job, auth.SystemUserID)
+		o.auditFailed(ctx, &mc, msg)
+	}
+	for id := range o.lapsedSince {
+		if !listed[id] {
+			delete(o.lapsedSince, id) // stamped again, or ended
+		}
+	}
+	return nil
+}
+
+// lapsedMessage is a job's error once ReconcileLapsed ended it. What Proxmox
+// did after Nexara stopped following it is not known, so it says what may
+// have happened, by the kind of move.
+func lapsedMessage(job db.MigrationJob) string {
+	const lead = "The Nexara instance running this migration stopped, so the job no longer follows it."
+	switch {
+	case job.Upid == "":
+		return lead + " No Proxmox task was recorded for it: check the guest's tasks on its source node, " +
+			"as the migration may have started."
+	case job.MigrationMode == ModeStorage:
+		return lead + " The disk move of its last Proxmox task may have finished, and the disks after it were " +
+			"not moved: migrate again to move the rest. Last task: " + job.Upid
+	case job.MigrationMode == ModeBoth:
+		return lead + " The guest may have moved, and some of its disks: migrate again to move the rest. " +
+			"Last task: " + job.Upid
+	default:
+		return lead + " The guest may have moved all the same. Last task: " + job.Upid
+	}
 }
 
 // formatMapping converts a map to Proxmox's "src:tgt,src2:tgt2" format.

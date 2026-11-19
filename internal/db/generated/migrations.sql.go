@@ -25,6 +25,19 @@ func (q *Queries) AbandonMigrationJobCheck(ctx context.Context, id uuid.UUID) er
 	return err
 }
 
+const beatMigrationJob = `-- name: BeatMigrationJob :exec
+UPDATE migration_jobs
+SET heartbeat_at = now()
+WHERE id = $1 AND status = 'migrating'
+`
+
+// A running job's heartbeat, stamped by the instance that follows it; see
+// migration.(*Orchestrator).ReconcileLapsed.
+func (q *Queries) BeatMigrationJob(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, beatMigrationJob, id)
+	return err
+}
+
 const beginMigrationJobCheck = `-- name: BeginMigrationJobCheck :execrows
 UPDATE migration_jobs
 SET status = 'checking'
@@ -61,13 +74,13 @@ func (q *Queries) CancelMigrationJob(ctx context.Context, id uuid.UUID) (int64, 
 
 const claimMigrationJob = `-- name: ClaimMigrationJob :execrows
 UPDATE migration_jobs
-SET status = 'migrating'
+SET status = 'migrating', heartbeat_at = now()
 WHERE id = $1 AND status IN ('pending', 'checking')
 `
 
 // Execute's claim: only one request starts a job, and from here a cancel finds
 // it started, although the orchestrator records the task only once Proxmox
-// has answered.
+// has answered. Its heartbeat starts here (BeatMigrationJob).
 func (q *Queries) ClaimMigrationJob(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, claimMigrationJob, id)
 	if err != nil {
@@ -107,7 +120,7 @@ INSERT INTO migration_jobs (
     online, bwlimit_kib, delete_source, target_vmid,
     created_by, migration_mode, target_storage, disk_format
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-RETURNING id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format
+RETURNING id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format, heartbeat_at
 `
 
 type CreateMigrationJobParams struct {
@@ -179,12 +192,43 @@ func (q *Queries) CreateMigrationJob(ctx context.Context, arg CreateMigrationJob
 		&i.MigrationMode,
 		&i.TargetStorage,
 		&i.DiskFormat,
+		&i.HeartbeatAt,
 	)
 	return i, err
 }
 
+const failLapsedMigrationJob = `-- name: FailLapsedMigrationJob :execrows
+UPDATE migration_jobs
+SET status = 'failed', completed_at = now(), error_message = $1
+WHERE id = $2 AND status = 'migrating'
+  AND ((heartbeat_at IS NOT NULL AND heartbeat_at < now() - make_interval(secs => $3::float8))
+    OR (heartbeat_at IS NULL AND updated_at < now() - make_interval(secs => $4::float8)))
+`
+
+type FailLapsedMigrationJobParams struct {
+	ErrorMessage string    `json:"error_message"`
+	ID           uuid.UUID `json:"id"`
+	LapseSecs    float64   `json:"lapse_secs"`
+	UnbeatenSecs float64   `json:"unbeaten_secs"`
+}
+
+// ListLapsedMigrationJobs' test again, at the write: a job whose instance has
+// stamped it since it was listed is left running.
+func (q *Queries) FailLapsedMigrationJob(ctx context.Context, arg FailLapsedMigrationJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failLapsedMigrationJob,
+		arg.ErrorMessage,
+		arg.ID,
+		arg.LapseSecs,
+		arg.UnbeatenSecs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getMigrationJob = `-- name: GetMigrationJob :one
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs WHERE id = $1
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format, heartbeat_at FROM migration_jobs WHERE id = $1
 `
 
 func (q *Queries) GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJob, error) {
@@ -218,12 +262,78 @@ func (q *Queries) GetMigrationJob(ctx context.Context, id uuid.UUID) (MigrationJ
 		&i.MigrationMode,
 		&i.TargetStorage,
 		&i.DiskFormat,
+		&i.HeartbeatAt,
 	)
 	return i, err
 }
 
+const listLapsedMigrationJobs = `-- name: ListLapsedMigrationJobs :many
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format, heartbeat_at FROM migration_jobs
+WHERE status = 'migrating'
+  AND ((heartbeat_at IS NOT NULL AND heartbeat_at < now() - make_interval(secs => $1::float8))
+    OR (heartbeat_at IS NULL AND updated_at < now() - make_interval(secs => $2::float8)))
+ORDER BY created_at
+`
+
+type ListLapsedMigrationJobsParams struct {
+	LapseSecs    float64 `json:"lapse_secs"`
+	UnbeatenSecs float64 `json:"unbeaten_secs"`
+}
+
+// Jobs still "migrating" that no instance follows: their heartbeat stopped, or
+// one claimed by a release without heartbeats has gone untouched far longer
+// than any run takes. Database time throughout, as the heartbeat is.
+func (q *Queries) ListLapsedMigrationJobs(ctx context.Context, arg ListLapsedMigrationJobsParams) ([]MigrationJob, error) {
+	rows, err := q.db.Query(ctx, listLapsedMigrationJobs, arg.LapseSecs, arg.UnbeatenSecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MigrationJob{}
+	for rows.Next() {
+		var i MigrationJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceClusterID,
+			&i.TargetClusterID,
+			&i.SourceNode,
+			&i.TargetNode,
+			&i.Vmid,
+			&i.VmType,
+			&i.MigrationType,
+			&i.StorageMap,
+			&i.NetworkMap,
+			&i.Online,
+			&i.BwlimitKib,
+			&i.DeleteSource,
+			&i.TargetVmid,
+			&i.Status,
+			&i.Upid,
+			&i.Progress,
+			&i.CheckResults,
+			&i.ErrorMessage,
+			&i.CreatedBy,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MigrationMode,
+			&i.TargetStorage,
+			&i.DiskFormat,
+			&i.HeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMigrationJobs = `-- name: ListMigrationJobs :many
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format, heartbeat_at FROM migration_jobs
 WHERE ($3::uuid[] IS NULL
        OR source_cluster_id = ANY($3::uuid[])
        OR target_cluster_id = ANY($3::uuid[]))
@@ -287,6 +397,7 @@ func (q *Queries) ListMigrationJobs(ctx context.Context, arg ListMigrationJobsPa
 			&i.MigrationMode,
 			&i.TargetStorage,
 			&i.DiskFormat,
+			&i.HeartbeatAt,
 		); err != nil {
 			return nil, err
 		}
@@ -299,7 +410,7 @@ func (q *Queries) ListMigrationJobs(ctx context.Context, arg ListMigrationJobsPa
 }
 
 const listMigrationJobsByCluster = `-- name: ListMigrationJobsByCluster :many
-SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format FROM migration_jobs
+SELECT id, source_cluster_id, target_cluster_id, source_node, target_node, vmid, vm_type, migration_type, storage_map, network_map, online, bwlimit_kib, delete_source, target_vmid, status, upid, progress, check_results, error_message, created_by, started_at, completed_at, created_at, updated_at, migration_mode, target_storage, disk_format, heartbeat_at FROM migration_jobs
 WHERE source_cluster_id = $1 OR target_cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -348,6 +459,7 @@ func (q *Queries) ListMigrationJobsByCluster(ctx context.Context, arg ListMigrat
 			&i.MigrationMode,
 			&i.TargetStorage,
 			&i.DiskFormat,
+			&i.HeartbeatAt,
 		); err != nil {
 			return nil, err
 		}
@@ -357,6 +469,23 @@ func (q *Queries) ListMigrationJobsByCluster(ctx context.Context, arg ListMigrat
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetLapsedMigrationChecks = `-- name: ResetLapsedMigrationChecks :execrows
+UPDATE migration_jobs
+SET status = 'pending'
+WHERE status = 'checking' AND updated_at < now() - make_interval(secs => $1::float8)
+`
+
+// Checks cut off with their instance: a check is one request, so one begun
+// this long ago ended without saving. Pending again, as a check that could not
+// run is (AbandonMigrationJobCheck).
+func (q *Queries) ResetLapsedMigrationChecks(ctx context.Context, lapseSecs float64) (int64, error) {
+	result, err := q.db.Exec(ctx, resetLapsedMigrationChecks, lapseSecs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const saveMigrationJobChecks = `-- name: SaveMigrationJobChecks :execrows

@@ -24,19 +24,22 @@ import (
 // jobDB is a db.DBTX for the node-membership tests: it holds one migration
 // job and the nodes of each cluster, records every statement by its sqlc name,
 // and answers GetCluster — the read behind clientForCluster, which is the first
-// step towards Proxmox — by failing the test, unless clusterErr is set. Every
-// write matches a row except those named in unmatched.
+// step towards Proxmox — by failing the test, unless clusterErr is set (after
+// holdCluster closes, when there is one). Every write matches a row except
+// those named in unmatched; beat is signalled at each heartbeat stamp.
 type jobDB struct {
-	t          *testing.T
-	job        db.MigrationJob
-	members    map[uuid.UUID][]string
-	lookErr    error
-	clusterErr error
-	unmatched  map[string]bool
-	mu         sync.Mutex
-	names      []string
-	lookedAt   []string // "cluster/node" for each membership question
-	execs      map[string][]any
+	t           *testing.T
+	job         db.MigrationJob
+	members     map[uuid.UUID][]string
+	lookErr     error
+	clusterErr  error
+	holdCluster chan struct{}
+	beat        chan struct{}
+	unmatched   map[string]bool
+	mu          sync.Mutex
+	names       []string
+	lookedAt    []string // "cluster/node" for each membership question
+	execs       map[string][]any
 }
 
 var sqlcName = regexp.MustCompile(`-- name: (\w+)`)
@@ -60,6 +63,12 @@ func (d *jobDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Command
 		d.execs = map[string][]any{}
 	}
 	d.execs[name] = args
+	if name == "BeatMigrationJob" && d.beat != nil {
+		select {
+		case d.beat <- struct{}{}:
+		default:
+		}
+	}
 	if d.unmatched[name] {
 		return pgconn.NewCommandTag("UPDATE 0"), nil
 	}
@@ -92,6 +101,9 @@ func (d *jobDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 		return structRow{err: pgx.ErrNoRows}
 	default:
 		if name == "GetCluster" && d.clusterErr != nil {
+			if d.holdCluster != nil {
+				<-d.holdCluster
+			}
 			return structRow{err: d.clusterErr}
 		}
 		d.t.Errorf("%s was asked: the job reached for a Proxmox client (or read something else) "+

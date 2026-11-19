@@ -26,6 +26,7 @@ import (
 	"github.com/bigjakk/nexara/internal/config"
 	"github.com/bigjakk/nexara/internal/db"
 	"github.com/bigjakk/nexara/internal/debug"
+	"github.com/bigjakk/nexara/internal/migration"
 	"github.com/bigjakk/nexara/internal/scheduler"
 	"github.com/bigjakk/nexara/internal/ws"
 	"github.com/bigjakk/nexara/pkg/redisutil"
@@ -895,6 +896,10 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 	})
 
 	runWithLeaderRetry(ctx, application.Pool, "scheduler", logger, func(ctx context.Context) {
+		// Ends the migration jobs no instance follows any more (their heartbeat
+		// stopped). Built afresh each term: its first looks must not outlive one.
+		migrationSweep := migration.NewOrchestrator(queries, cfg.EncryptionKey, logger, application.EventPub)
+
 		// One row per engine: the name its in-flight guard logs, how often it
 		// ticks, and what it runs. This replaced four lists that had to be
 		// edited together — a constructor, an initial-pass call, a ticker and a
@@ -931,6 +936,11 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			{name: "cve_scan_retention", every: 1 * time.Hour, run: sched.RunCVEScanRetention},
 			{name: "rolling_updates", every: 15 * time.Second, run: sched.RunRollingUpdates},
 			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile},
+			{name: "migration_job_reconcile", every: 60 * time.Second, run: func(ctx context.Context) {
+				if err := migrationSweep.ReconcileLapsed(ctx); err != nil {
+					logger.Warn("migration: could not end the jobs no instance follows", "error", err)
+				}
+			}},
 
 			// Minutely, but not a minutely upstream fetch: each cluster carries
 			// its own next_check_at (default six-hourly, or a cron an operator

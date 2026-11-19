@@ -196,11 +196,10 @@ ON CONFLICT (upid) DO NOTHING;
 -- the case staleTaskGrace existed for and needs no process death. Both added
 -- exits write a constant, never vendor text.
 --
--- One shape is still unbounded: a hard kill (SIGKILL, OOM, node loss) takes the
--- goroutine with no exit to run, and the row stays 'running'. Closing that needs
--- a startup or periodic sweep, which is a different mechanism from this filter —
--- and the same crash already strands migration_jobs in 'migrating', which
--- nothing reconciles either, so it is one gap rather than a new one.
+-- A hard kill (SIGKILL, OOM, node loss) takes the goroutine with no exit to
+-- run, and the row stays 'running' until a different mechanism from this filter
+-- closes it: migration.ReconcileLapsed, which ends the cross-cluster job once its
+-- heartbeat lapses and closes the task row this listing withholds.
 --
 -- 'cross-cluster' is migration.TypeCrossCluster, pinned by
 -- TestGuard_RunningTaskListNamesTheCrossClusterType.

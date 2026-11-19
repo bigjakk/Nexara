@@ -43,6 +43,9 @@ type Querier interface {
 	// An acknowledged alert is still active: it resolves when its condition
 	// clears, as a firing one does.
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
+	// A running job's heartbeat, stamped by the instance that follows it; see
+	// migration.(*Orchestrator).ReconcileLapsed.
+	BeatMigrationJob(ctx context.Context, id uuid.UUID) error
 	// A pre-flight check starts only on a job that has not started: pending, or
 	// checking while another check runs or after one that never finished. A job
 	// that has started, failed, completed or been cancelled keeps its status (a
@@ -95,7 +98,7 @@ type Querier interface {
 	ClaimLDAPSyncLease(ctx context.Context, arg ClaimLDAPSyncLeaseParams) (LdapConfig, error)
 	// Execute's claim: only one request starts a job, and from here a cancel finds
 	// it started, although the orchestrator records the task only once Proxmox
-	// has answered.
+	// has answered. Its heartbeat starts here (BeatMigrationJob).
 	ClaimMigrationJob(ctx context.Context, id uuid.UUID) (int64, error)
 	// ClassifyClusterObjectChanges decides, once, whether something on record
 	// explains each settled change, and which audit row does (explained_by). A change
@@ -946,6 +949,9 @@ type Querier interface {
 	// one created before created_before. Not cleanup_pending: there is nothing to
 	// release.
 	ExpireUnstartedRollingUpdateJobs(ctx context.Context, arg ExpireUnstartedRollingUpdateJobsParams) ([]ExpireUnstartedRollingUpdateJobsRow, error)
+	// ListLapsedMigrationJobs' test again, at the write: a job whose instance has
+	// stamped it since it was listed is left running.
+	FailLapsedMigrationJob(ctx context.Context, arg FailLapsedMigrationJobParams) (int64, error)
 	FailRollingUpdateJob(ctx context.Context, arg FailRollingUpdateJobParams) (int64, error)
 	FailRollingUpdateNode(ctx context.Context, arg FailRollingUpdateNodeParams) (int64, error)
 	// FailStaleCVEScans abandons scans stuck in running/pending — a panic, hard
@@ -2379,6 +2385,10 @@ type Querier interface {
 	// it, and those bound under none. An account bound under another configuration is
 	// that configuration's.
 	ListLDAPUsers(ctx context.Context, configID uuid.UUID) ([]ListLDAPUsersRow, error)
+	// Jobs still "migrating" that no instance follows: their heartbeat stopped, or
+	// one claimed by a release without heartbeats has gone untouched far longer
+	// than any run takes. Database time throughout, as the heartbeat is.
+	ListLapsedMigrationJobs(ctx context.Context, arg ListLapsedMigrationJobsParams) ([]MigrationJob, error)
 	ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error)
 	// ListMigrationJobs backs the Migrations page. accessible_cluster_ids carries
 	// the caller's view:migration RBAC scope: NULL means global access (no
@@ -2592,11 +2602,10 @@ type Querier interface {
 	// the case staleTaskGrace existed for and needs no process death. Both added
 	// exits write a constant, never vendor text.
 	//
-	// One shape is still unbounded: a hard kill (SIGKILL, OOM, node loss) takes the
-	// goroutine with no exit to run, and the row stays 'running'. Closing that needs
-	// a startup or periodic sweep, which is a different mechanism from this filter —
-	// and the same crash already strands migration_jobs in 'migrating', which
-	// nothing reconciles either, so it is one gap rather than a new one.
+	// A hard kill (SIGKILL, OOM, node loss) takes the goroutine with no exit to
+	// run, and the row stays 'running' until a different mechanism from this filter
+	// closes it: migration.ReconcileLapsed, which ends the cross-cluster job once its
+	// heartbeat lapses and closes the task row this listing withholds.
 	//
 	// 'cross-cluster' is migration.TypeCrossCluster, pinned by
 	// TestGuard_RunningTaskListNamesTheCrossClusterType.
@@ -3158,6 +3167,10 @@ type Querier interface {
 	// this instead of executing migrations itself, so every dispatch goes through
 	// the single leader-held executor (see migration 000079).
 	RequestDRSEvaluation(ctx context.Context, clusterID uuid.UUID) error
+	// Checks cut off with their instance: a check is one request, so one begun
+	// this long ago ended without saving. Pending again, as a check that could not
+	// run is (AbandonMigrationJobCheck).
+	ResetLapsedMigrationChecks(ctx context.Context, lapseSecs float64) (int64, error)
 	ResolveAlert(ctx context.Context, arg ResolveAlertParams) (int64, error)
 	// ResolveVeeamInfrastructureGuests matches each row to a Proxmox guest.
 	//

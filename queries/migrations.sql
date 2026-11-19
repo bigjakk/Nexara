@@ -79,10 +79,44 @@ WHERE id = $1;
 -- name: ClaimMigrationJob :execrows
 -- Execute's claim: only one request starts a job, and from here a cancel finds
 -- it started, although the orchestrator records the task only once Proxmox
--- has answered.
+-- has answered. Its heartbeat starts here (BeatMigrationJob).
 UPDATE migration_jobs
-SET status = 'migrating'
+SET status = 'migrating', heartbeat_at = now()
 WHERE id = $1 AND status IN ('pending', 'checking');
+
+-- name: BeatMigrationJob :exec
+-- A running job's heartbeat, stamped by the instance that follows it; see
+-- migration.(*Orchestrator).ReconcileLapsed.
+UPDATE migration_jobs
+SET heartbeat_at = now()
+WHERE id = $1 AND status = 'migrating';
+
+-- name: ListLapsedMigrationJobs :many
+-- Jobs still "migrating" that no instance follows: their heartbeat stopped, or
+-- one claimed by a release without heartbeats has gone untouched far longer
+-- than any run takes. Database time throughout, as the heartbeat is.
+SELECT * FROM migration_jobs
+WHERE status = 'migrating'
+  AND ((heartbeat_at IS NOT NULL AND heartbeat_at < now() - make_interval(secs => sqlc.arg(lapse_secs)::float8))
+    OR (heartbeat_at IS NULL AND updated_at < now() - make_interval(secs => sqlc.arg(unbeaten_secs)::float8)))
+ORDER BY created_at;
+
+-- name: FailLapsedMigrationJob :execrows
+-- ListLapsedMigrationJobs' test again, at the write: a job whose instance has
+-- stamped it since it was listed is left running.
+UPDATE migration_jobs
+SET status = 'failed', completed_at = now(), error_message = sqlc.arg(error_message)
+WHERE id = sqlc.arg(id) AND status = 'migrating'
+  AND ((heartbeat_at IS NOT NULL AND heartbeat_at < now() - make_interval(secs => sqlc.arg(lapse_secs)::float8))
+    OR (heartbeat_at IS NULL AND updated_at < now() - make_interval(secs => sqlc.arg(unbeaten_secs)::float8)));
+
+-- name: ResetLapsedMigrationChecks :execrows
+-- Checks cut off with their instance: a check is one request, so one begun
+-- this long ago ended without saving. Pending again, as a check that could not
+-- run is (AbandonMigrationJobCheck).
+UPDATE migration_jobs
+SET status = 'pending'
+WHERE status = 'checking' AND updated_at < now() - make_interval(secs => sqlc.arg(lapse_secs)::float8);
 
 -- name: CancelMigrationJob :execrows
 -- Only a pending job: a claimed job is already on its way to Proxmox, and a
