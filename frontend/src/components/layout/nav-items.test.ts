@@ -68,17 +68,27 @@ describe("filterNavSections", () => {
     ).toEqual(want);
   });
 
-  // The admin pages' guards take manage:user install-wide (App.tsx).
+  // Admin opens the first admin page whose guard is held install-wide (App.tsx): a
+  // role holding only Roles or Branding got no entry, as did one holding a grant on
+  // a cluster only.
   it.each([
-    { held: "on a cluster", global: holds(), shown: false },
-    { held: "install-wide", global: holds("manage:user"), shown: true },
-  ])("offers Admin for manage:user $held: $shown", ({ global, shown }) => {
-    const links = filterNavSections(
+    { held: "nothing", global: holds(), want: undefined },
+    { held: "manage:user", global: holds("manage:user"), want: "/admin/users" },
+    { held: "manage:role", global: holds("manage:role"), want: "/admin/roles" },
+    {
+      held: "manage:settings",
+      global: holds("manage:settings"),
+      want: "/admin/branding",
+    },
+  ])("Admin with $held install-wide opens $want", ({ global, want }) => {
+    const admin = filterNavSections(
       NAV_SECTIONS,
-      holds("manage:user"),
+      holds("manage:user", "manage:role", "manage:settings"),
       global,
-    ).flatMap((s) => s.items.map((i) => i.to));
-    expect(links.includes("/admin/users")).toBe(shown);
+    )
+      .flatMap((s) => s.items)
+      .find((i) => i.labelKey === "admin");
+    expect(admin?.to).toBe(want);
   });
 });
 

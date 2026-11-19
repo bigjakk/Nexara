@@ -14,6 +14,7 @@ import {
   Upload,
   Users,
 } from "lucide-react";
+import { ADMIN_TABS } from "@/features/admin/lib/admin-tabs";
 import { useAuth } from "@/hooks/useAuth";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -22,8 +23,13 @@ export interface NavItem {
   to: string;
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: string;
-  /** requiredPermission must be held install-wide (see RequirePermission). */
+  /** The permission (or each alternative's) must be held install-wide (see RequirePermission). */
   global?: boolean;
+  /**
+   * An area whose pages take different permissions: the item shows when any is
+   * held and opens the first that is (`to` then only names the area).
+   */
+  alternatives?: readonly { to: string; requiredPermission: string }[];
 }
 
 export interface NavSection {
@@ -94,8 +100,11 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: "admin",
         to: "/admin/users",
         icon: Users,
-        // As the admin pages' guards take it (App.tsx).
-        requiredPermission: "manage:user",
+        // A role holding only Roles or Branding got no Admin entry.
+        alternatives: ADMIN_TABS.map((tab) => ({
+          to: tab.to,
+          requiredPermission: `${tab.action}:${tab.resource}`,
+        })),
         global: true,
       },
     ],
@@ -137,11 +146,22 @@ export function filterNavSections(
   return sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => {
-        if (!item.requiredPermission) return true;
-        const parts = item.requiredPermission.split(":");
-        const held = item.global === true ? hasGlobalPermission : hasPermission;
-        return held(parts[0] ?? "", parts[1] ?? "");
+      items: section.items.flatMap((item) => {
+        const check =
+          item.global === true ? hasGlobalPermission : hasPermission;
+        const holds = (permission: string) => {
+          const [action = "", resource = ""] = permission.split(":");
+          return check(action, resource);
+        };
+        if (item.alternatives) {
+          const first = item.alternatives.find((alt) =>
+            holds(alt.requiredPermission),
+          );
+          return first ? [{ ...item, to: first.to }] : [];
+        }
+        return !item.requiredPermission || holds(item.requiredPermission)
+          ? [item]
+          : [];
       }),
     }))
     .filter((section) => section.items.length > 0);
