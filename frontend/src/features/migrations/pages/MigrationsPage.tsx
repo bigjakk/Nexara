@@ -147,8 +147,8 @@ export function MigrationsPage() {
                       <DateTime value={job.created_at} />
                     </TableCell>
                     <TableCell className="py-1 text-right">
-                      {/* Only a job not yet run: the server refuses one that
-                        has started, and a check would put one back. */}
+                      {/* Only a pending job: the server refuses to cancel any
+                        other, a job being checked included. */}
                       {canManage && job.status === "pending" && (
                         <Button
                           aria-label={`Cancel the migration of ${name ?? `${kind} ${String(job.vmid)}`}`}

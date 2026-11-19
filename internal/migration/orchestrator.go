@@ -244,30 +244,54 @@ func (o *Orchestrator) resolveMigrationContext(ctx context.Context, job db.Migra
 	return mc
 }
 
-// RunPreFlight runs pre-flight checks for a migration job and updates the DB.
+// ErrNotCheckable is RunPreFlight's answer for a job that has started, failed,
+// completed or been cancelled, whose status a check would rewrite.
+var ErrNotCheckable = errors.New("migration job is not in a state that can be checked")
+
+// ErrChangedWhileChecked is RunPreFlight's answer when the job was started, or
+// checked by another request, while the check ran; its report was not saved.
+var ErrChangedWhileChecked = errors.New("migration job changed while it was being checked")
+
+// RunPreFlight runs a pending job's pre-flight checks and saves the report,
+// which moves the job to pending, or to failed when it did not pass. A check
+// that could not run leaves the job pending.
 func (o *Orchestrator) RunPreFlight(ctx context.Context, jobID uuid.UUID) (*PreFlightReport, error) {
 	job, err := o.queries.GetMigrationJob(ctx, jobID)
 	if err != nil {
 		return nil, fmt.Errorf("get migration job: %w", err)
 	}
 
-	// Update status to checking.
-	if err := o.queries.UpdateMigrationJobStatus(ctx, db.UpdateMigrationJobStatusParams{
-		ID:     jobID,
-		Status: StatusChecking,
-	}); err != nil {
+	begun, err := o.queries.BeginMigrationJobCheck(ctx, jobID)
+	if err != nil {
 		return nil, fmt.Errorf("update job status: %w", err)
 	}
+	if begun == 0 {
+		return nil, ErrNotCheckable
+	}
 
+	report, err := o.preFlightReport(ctx, job)
+	if err != nil {
+		dbCtx, cancel := cleanupCtxFor(ctx)
+		defer cancel()
+		if err := o.queries.AbandonMigrationJobCheck(dbCtx, jobID); err != nil {
+			o.logger.Warn("migration: could not end a pre-flight check that did not run", "job_id", jobID, "error", err)
+		}
+		return nil, err
+	}
+	return o.saveCheckResults(ctx, jobID, report)
+}
+
+// preFlightReport runs the checks behind RunPreFlight.
+func (o *Orchestrator) preFlightReport(ctx context.Context, job db.MigrationJob) (*PreFlightReport, error) {
 	// A job whose nodes the clusters do not hold fails its pre-flight here,
 	// before any client is built: the checks below send both to Proxmox by
 	// name. See requireJobNodes.
 	if err := o.requireJobNodes(ctx, job); err != nil {
-		return o.saveCheckResults(ctx, jobID, &PreFlightReport{Checks: []CheckResult{{
+		return &PreFlightReport{Checks: []CheckResult{{
 			Name:     "node_membership",
 			Severity: SeverityFail,
 			Message:  err.Error(),
-		}}})
+		}}}, nil
 	}
 
 	srcClient, _, err := o.clientForCluster(ctx, job.SourceClusterID)
@@ -299,11 +323,11 @@ func (o *Orchestrator) RunPreFlight(ctx context.Context, jobID uuid.UUID) (*PreF
 	if err != nil {
 		return nil, fmt.Errorf("run pre-flight checks: %w", err)
 	}
-	return o.saveCheckResults(ctx, jobID, report)
+	return report, nil
 }
 
-// saveCheckResults records a pre-flight report on the job and moves it to
-// pending, or to failed when the report did not pass.
+// saveCheckResults records a pre-flight report on a job still being checked
+// and moves it to pending, or to failed when the report did not pass.
 func (o *Orchestrator) saveCheckResults(ctx context.Context, jobID uuid.UUID, report *PreFlightReport) (*PreFlightReport, error) {
 	reportJSON, _ := json.Marshal(report)
 	status := StatusPending
@@ -311,14 +335,17 @@ func (o *Orchestrator) saveCheckResults(ctx context.Context, jobID uuid.UUID, re
 		status = StatusFailed
 	}
 
-	if err := o.queries.UpdateMigrationJobChecks(ctx, db.UpdateMigrationJobChecksParams{
+	saved, err := o.queries.SaveMigrationJobChecks(ctx, db.SaveMigrationJobChecksParams{
 		ID:           jobID,
 		CheckResults: reportJSON,
 		Status:       status,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("save check results: %w", err)
 	}
-
+	if saved == 0 {
+		return nil, ErrChangedWhileChecked
+	}
 	return report, nil
 }
 

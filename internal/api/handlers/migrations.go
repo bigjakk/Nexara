@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strconv"
 	"time"
@@ -444,12 +445,28 @@ func (h *MigrationHandler) RunCheck(c fiber.Ctx, p *apischema.Params) error {
 
 	orch := h.newOrchestrator(c)
 	report, err := orch.RunPreFlight(c.Context(), jobID)
-	if err != nil {
+	switch {
+	case errors.Is(err, migration.ErrNotCheckable):
+		return fiber.NewError(fiber.StatusConflict,
+			"Job is not in a state that can be checked (status: "+h.statusNow(c, jobID, job.Status)+")")
+	case errors.Is(err, migration.ErrChangedWhileChecked):
+		return fiber.NewError(fiber.StatusConflict,
+			"Job changed while it was being checked (status: "+h.statusNow(c, jobID, job.Status)+"); the report was not saved")
+	case err != nil:
 		slog.Error("migration pre-flight failed", "job_id", jobID, "error", err)
 		return fiber.NewError(fiber.StatusInternalServerError, "Pre-flight check failed")
 	}
 
 	return c.JSON(report)
+}
+
+// statusNow is the job's status for a 409 after a conditional write matched
+// nothing: the job moved on since the handler read it, so name what it is now.
+func (h *MigrationHandler) statusNow(c fiber.Ctx, jobID uuid.UUID, read string) string {
+	if now, err := h.queries.GetMigrationJob(c.Context(), jobID); err == nil {
+		return now.Status
+	}
+	return read
 }
 
 // Execute handles POST /api/v1/migrations/:id/execute.
@@ -502,11 +519,8 @@ func (h *MigrationHandler) Execute(c fiber.Ctx, p *apischema.Params) error {
 		if err != nil {
 			return fiber.NewError(fiber.StatusInternalServerError, "Failed to start migration job")
 		}
-		status := job.Status
-		if now, err := h.queries.GetMigrationJob(c.Context(), jobID); err == nil {
-			status = now.Status
-		}
-		return fiber.NewError(fiber.StatusConflict, "Job is not in a state that can be executed (status: "+status+")")
+		return fiber.NewError(fiber.StatusConflict,
+			"Job is not in a state that can be executed (status: "+h.statusNow(c, jobID, job.Status)+")")
 	}
 
 	orch := h.newOrchestrator(c)
@@ -574,11 +588,8 @@ func (h *MigrationHandler) Cancel(c fiber.Ctx, p *apischema.Params) error {
 	if !cancelled {
 		// Only a job that has not started can be cancelled. This one had, or
 		// did since it was read: name what it is now, and audit nothing.
-		status := job.Status
-		if now, err := h.queries.GetMigrationJob(c.Context(), jobID); err == nil {
-			status = now.Status
-		}
-		return fiber.NewError(fiber.StatusConflict, "Job is not in a state that can be cancelled (status: "+status+")")
+		return fiber.NewError(fiber.StatusConflict,
+			"Job is not in a state that can be cancelled (status: "+h.statusNow(c, jobID, job.Status)+")")
 	}
 
 	resourceIDCancel := jobID.String()

@@ -146,7 +146,11 @@ func registerMigrationEndpoints(reg *Registry, h *handlers.MigrationHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
 		Path:   migrationScope + "/:id/check",
-		Description: "Run a migration job's pre-flight checks and store the report on the job. " +
+		Description: "Run the pre-flight checks of a job not yet started and store the report on it, which leaves " +
+			"the job pending, or failed when a check failed. 409 for a job that has started, failed, completed or " +
+			"been cancelled, and for one started, or checked by another request, while this check ran, whose report " +
+			"is then not saved. A check that could not run at all, because a cluster's record or credentials " +
+			"could not be read, answers 500 and leaves the job pending; a cluster that does not answer fails its checks. " +
 			"Requires manage:migration on the job's source cluster, and on its target cluster as well when the two differ.",
 		Group:       "Migrations",
 		Permissions: Permissions{Deferred: migrationJobReason},

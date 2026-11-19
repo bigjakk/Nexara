@@ -38,20 +38,33 @@ WHERE source_cluster_id = $1 OR target_cluster_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
--- name: UpdateMigrationJobStatus :exec
+-- name: BeginMigrationJobCheck :execrows
+-- A pre-flight check starts only on a job that has not started: pending, or
+-- checking while another check runs or after one that never finished. A job
+-- that has started, failed, completed or been cancelled keeps its status (a
+-- check once put a cancelled job back to pending).
 UPDATE migration_jobs
-SET status = $2, error_message = $3
-WHERE id = $1;
+SET status = 'checking'
+WHERE id = $1 AND status IN ('pending', 'checking');
 
 -- name: UpdateMigrationJobProgress :exec
 UPDATE migration_jobs
 SET progress = $2, upid = $3
 WHERE id = $1;
 
--- name: UpdateMigrationJobChecks :exec
+-- name: SaveMigrationJobChecks :execrows
+-- A check's report moves the job on only from checking: a job started, or
+-- checked by another request, while this check ran keeps what it became (a
+-- check once wrote pending over a migrating job, which a cancel then took).
 UPDATE migration_jobs
 SET check_results = $2, status = $3
-WHERE id = $1;
+WHERE id = $1 AND status = 'checking';
+
+-- name: AbandonMigrationJobCheck :exec
+-- A check that could not run leaves the job pending, unless it moved on.
+UPDATE migration_jobs
+SET status = 'pending'
+WHERE id = $1 AND status = 'checking';
 
 -- name: CompleteMigrationJob :exec
 UPDATE migration_jobs
@@ -72,8 +85,8 @@ SET status = 'migrating'
 WHERE id = $1 AND status IN ('pending', 'checking');
 
 -- name: CancelMigrationJob :execrows
--- Only a pending job: a check in progress would write its result over the
--- cancel, and a claimed job is already on its way to Proxmox.
+-- Only a pending job: a claimed job is already on its way to Proxmox, and a
+-- job being checked is pending or failed again once its check has saved.
 UPDATE migration_jobs
 SET status = 'cancelled'
 WHERE id = $1 AND status = 'pending';

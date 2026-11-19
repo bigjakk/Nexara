@@ -79,9 +79,10 @@ func TestMigrationSlots_NonBlockingSendRejectsWhenFull(t *testing.T) {
 	}
 }
 
-// migrationJobDBTX serves one migration job in status, answers the cancel and
-// the claim as their WHERE clauses do (matching nothing once taken, when the job
-// moved on after the handler read it), and notes whether an audit row was written.
+// migrationJobDBTX serves one migration job in status, answers the cancel, the
+// claim and a check's start as their WHERE clauses do (matching nothing once
+// taken, when the job moved on after the handler read it), and notes whether an
+// audit row was written.
 type migrationJobDBTX struct {
 	cluster uuid.UUID
 	status  string
@@ -99,7 +100,7 @@ func (d *migrationJobDBTX) Exec(_ context.Context, sql string, _ ...any) (pgconn
 	switch {
 	case strings.Contains(sql, "-- name: CancelMigrationJob "):
 		return rows(d.status == migration.StatusPending)
-	case strings.Contains(sql, "-- name: ClaimMigrationJob "):
+	case strings.Contains(sql, "-- name: ClaimMigrationJob "), strings.Contains(sql, "-- name: BeginMigrationJobCheck "):
 		return rows(d.status == migration.StatusPending || d.status == migration.StatusChecking)
 	case strings.Contains(sql, "-- name: InsertAuditLog "):
 		d.audited = true
@@ -120,8 +121,9 @@ func (d *migrationJobDBTX) QueryRow(_ context.Context, sql string, _ ...any) pgx
 }
 
 // A cancel that changed nothing answered "cancelled" and audited it, for a job
-// already migrating; two Executes that both read "pending" both started the job.
-// The first row proves the fake cancels and audits at all.
+// already migrating; two Executes that both read "pending" both started the job;
+// a check put a cancelled job back to pending. The first row proves the fake
+// cancels and audits at all.
 func TestMigrationJob_RefusesAJobThatHasStarted(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -133,6 +135,7 @@ func TestMigrationJob_RefusesAJobThatHasStarted(t *testing.T) {
 		{"cancel pending", "cancel", migration.StatusPending, false, fiber.StatusOK, true},
 		{"cancel migrating", "cancel", migration.StatusMigrating, false, fiber.StatusConflict, false},
 		{"execute started by another request", "execute", migration.StatusPending, true, fiber.StatusConflict, false},
+		{"check cancelled", "check", migration.StatusCancelled, false, fiber.StatusConflict, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -147,6 +150,7 @@ func TestMigrationJob_RefusesAJobThatHasStarted(t *testing.T) {
 			id := apischema.Properties{"id": {Type: apischema.String, Format: "uuid"}}
 			app.Post("/migrations/:id/cancel", withRequestParams(t, id, []string{"id"}, h.Cancel))
 			app.Post("/migrations/:id/execute", withRequestParams(t, id, []string{"id"}, h.Execute))
+			app.Post("/migrations/:id/check", withRequestParams(t, id, []string{"id"}, h.RunCheck))
 			resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/migrations/"+uuid.NewString()+"/"+tt.action, nil))
 			if err != nil {
 				t.Fatal(err)

@@ -13,6 +13,8 @@ import (
 )
 
 type Querier interface {
+	// A check that could not run leaves the job pending, unless it moved on.
+	AbandonMigrationJobCheck(ctx context.Context, id uuid.UUID) error
 	AbandonUnreadBackupJobs(ctx context.Context, arg AbandonUnreadBackupJobsParams) (int64, error)
 	// An operator's acceptance of the reported name, for a renamed cluster or a
 	// row moved to another cluster on purpose. Only the name they were shown: zero
@@ -41,6 +43,11 @@ type Querier interface {
 	// An acknowledged alert is still active: it resolves when its condition
 	// clears, as a firing one does.
 	AutoResolveAlert(ctx context.Context, id uuid.UUID) (int64, error)
+	// A pre-flight check starts only on a job that has not started: pending, or
+	// checking while another check runs or after one that never finished. A job
+	// that has started, failed, completed or been cancelled keeps its status (a
+	// check once put a cancelled job back to pending).
+	BeginMigrationJobCheck(ctx context.Context, id uuid.UUID) (int64, error)
 	// Moves the user's auth_epoch to its next value and says how many rows it changed
 	// (0: there is no such user). It is the FIRST statement of every revoke-all —
 	// before the listing of the live sessions and the revoke of them — and a statement
@@ -57,8 +64,8 @@ type Querier interface {
 	// transaction the lock is held until that transaction ends, so the sign-ins that
 	// raced it decide after the whole revoke-all, not between its statements.
 	BumpUserAuthEpoch(ctx context.Context, id uuid.UUID) (int64, error)
-	// Only a pending job: a check in progress would write its result over the
-	// cancel, and a claimed job is already on its way to Proxmox.
+	// Only a pending job: a claimed job is already on its way to Proxmox, and a
+	// job being checked is pending or failed again once its check has saved.
 	CancelMigrationJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CancelRollingUpdateJob(ctx context.Context, id uuid.UUID) (int64, error)
 	CancelVMImportJob(ctx context.Context, id uuid.UUID) error
@@ -3256,6 +3263,10 @@ type Querier interface {
 	// diff against, a restart included. GetClusterObjectReading hands it back; no row
 	// is a kind never read.
 	SaveClusterObjectReading(ctx context.Context, arg SaveClusterObjectReadingParams) error
+	// A check's report moves the job on only from checking: a job started, or
+	// checked by another request, while this check ran keeps what it became (a
+	// check once wrote pending over a migrating job, which a cancel then took).
+	SaveMigrationJobChecks(ctx context.Context, arg SaveMigrationJobChecksParams) (int64, error)
 	SetDRSEnabled(ctx context.Context, arg SetDRSEnabledParams) error
 	// SetGuestToolsStage moves the staging state machine and records what the
 	// guest's CD-ROM looked like before we borrowed it.
@@ -3451,9 +3462,7 @@ type Querier interface {
 	UpdateLDAPConfigLastSync(ctx context.Context, id uuid.UUID) error
 	UpdateLDAPUserProfile(ctx context.Context, arg UpdateLDAPUserProfileParams) (User, error)
 	UpdateMaintenanceWindow(ctx context.Context, arg UpdateMaintenanceWindowParams) (MaintenanceWindow, error)
-	UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error
 	UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error
-	UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error
 	UpdateNodeAddress(ctx context.Context, arg UpdateNodeAddressParams) error
 	// UpdateNodeStatusFast flips just the status column, and only when it actually
 	// differs — the fast resource-sync loop calls this per node every few seconds

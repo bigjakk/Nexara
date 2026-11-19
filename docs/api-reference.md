@@ -2089,7 +2089,7 @@ after the node is back).
 | POST | `/migrations` | Create a cross-cluster migration |
 | GET | `/migrations` | List migrations the caller can view on either endpoint cluster |
 | GET | `/migrations/:id` | Get migration details |
-| POST | `/migrations/:id/check` | Run pre-migration check |
+| POST | `/migrations/:id/check` | Run the pre-flight checks of a job not yet started; `409` for one that has started, failed, completed or been cancelled, and for one started, or checked by another request, while the check ran (that report is not saved) |
 | POST | `/migrations/:id/execute` | Execute migration; `409` unless the job is pending or checking, a start by another request included |
 | POST | `/migrations/:id/cancel` | Cancel a pending job, one not yet started; `409` for any other, a job being checked included |
 | GET | `/clusters/:id/migrations` | List migrations for a cluster |

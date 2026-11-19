@@ -24,16 +24,19 @@ import (
 // jobDB is a db.DBTX for the node-membership tests: it holds one migration
 // job and the nodes of each cluster, records every statement by its sqlc name,
 // and answers GetCluster — the read behind clientForCluster, which is the first
-// step towards Proxmox — by failing the test.
+// step towards Proxmox — by failing the test, unless clusterErr is set. Every
+// write matches a row except those named in unmatched.
 type jobDB struct {
-	t        *testing.T
-	job      db.MigrationJob
-	members  map[uuid.UUID][]string
-	lookErr  error
-	mu       sync.Mutex
-	names    []string
-	lookedAt []string // "cluster/node" for each membership question
-	execs    map[string][]any
+	t          *testing.T
+	job        db.MigrationJob
+	members    map[uuid.UUID][]string
+	lookErr    error
+	clusterErr error
+	unmatched  map[string]bool
+	mu         sync.Mutex
+	names      []string
+	lookedAt   []string // "cluster/node" for each membership question
+	execs      map[string][]any
 }
 
 var sqlcName = regexp.MustCompile(`-- name: (\w+)`)
@@ -57,7 +60,10 @@ func (d *jobDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Command
 		d.execs = map[string][]any{}
 	}
 	d.execs[name] = args
-	return pgconn.CommandTag{}, nil
+	if d.unmatched[name] {
+		return pgconn.NewCommandTag("UPDATE 0"), nil
+	}
+	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
 func (d *jobDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -85,6 +91,9 @@ func (d *jobDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 		}
 		return structRow{err: pgx.ErrNoRows}
 	default:
+		if name == "GetCluster" && d.clusterErr != nil {
+			return structRow{err: d.clusterErr}
+		}
 		d.t.Errorf("%s was asked: the job reached for a Proxmox client (or read something else) "+
 			"with a node the cluster does not hold", name)
 		return structRow{err: errors.New("unexpected")}
@@ -179,7 +188,7 @@ func TestJobNodes_ANodeTheClusterDoesNotHoldIsNeverSentToProxmox(t *testing.T) {
 			if !slices.Equal(d.lookedAt, tt.wantAsked) {
 				t.Errorf("asked %v, want %v", d.lookedAt, tt.wantAsked)
 			}
-			saved, ok := d.execs["UpdateMigrationJobChecks"]
+			saved, ok := d.execs["SaveMigrationJobChecks"]
 			if !ok {
 				t.Fatalf("the failed report was never saved; statements: %v", d.names)
 			}

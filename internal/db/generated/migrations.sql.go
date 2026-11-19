@@ -13,14 +13,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const abandonMigrationJobCheck = `-- name: AbandonMigrationJobCheck :exec
+UPDATE migration_jobs
+SET status = 'pending'
+WHERE id = $1 AND status = 'checking'
+`
+
+// A check that could not run leaves the job pending, unless it moved on.
+func (q *Queries) AbandonMigrationJobCheck(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, abandonMigrationJobCheck, id)
+	return err
+}
+
+const beginMigrationJobCheck = `-- name: BeginMigrationJobCheck :execrows
+UPDATE migration_jobs
+SET status = 'checking'
+WHERE id = $1 AND status IN ('pending', 'checking')
+`
+
+// A pre-flight check starts only on a job that has not started: pending, or
+// checking while another check runs or after one that never finished. A job
+// that has started, failed, completed or been cancelled keeps its status (a
+// check once put a cancelled job back to pending).
+func (q *Queries) BeginMigrationJobCheck(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, beginMigrationJobCheck, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const cancelMigrationJob = `-- name: CancelMigrationJob :execrows
 UPDATE migration_jobs
 SET status = 'cancelled'
 WHERE id = $1 AND status = 'pending'
 `
 
-// Only a pending job: a check in progress would write its result over the
-// cancel, and a claimed job is already on its way to Proxmox.
+// Only a pending job: a claimed job is already on its way to Proxmox, and a
+// job being checked is pending or failed again once its check has saved.
 func (q *Queries) CancelMigrationJob(ctx context.Context, id uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, cancelMigrationJob, id)
 	if err != nil {
@@ -329,6 +359,29 @@ func (q *Queries) ListMigrationJobsByCluster(ctx context.Context, arg ListMigrat
 	return items, nil
 }
 
+const saveMigrationJobChecks = `-- name: SaveMigrationJobChecks :execrows
+UPDATE migration_jobs
+SET check_results = $2, status = $3
+WHERE id = $1 AND status = 'checking'
+`
+
+type SaveMigrationJobChecksParams struct {
+	ID           uuid.UUID `json:"id"`
+	CheckResults []byte    `json:"check_results"`
+	Status       string    `json:"status"`
+}
+
+// A check's report moves the job on only from checking: a job started, or
+// checked by another request, while this check ran keeps what it became (a
+// check once wrote pending over a migrating job, which a cancel then took).
+func (q *Queries) SaveMigrationJobChecks(ctx context.Context, arg SaveMigrationJobChecksParams) (int64, error) {
+	result, err := q.db.Exec(ctx, saveMigrationJobChecks, arg.ID, arg.CheckResults, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setMigrationJobStarted = `-- name: SetMigrationJobStarted :exec
 UPDATE migration_jobs
 SET status = 'migrating', started_at = $2, upid = $3
@@ -346,23 +399,6 @@ func (q *Queries) SetMigrationJobStarted(ctx context.Context, arg SetMigrationJo
 	return err
 }
 
-const updateMigrationJobChecks = `-- name: UpdateMigrationJobChecks :exec
-UPDATE migration_jobs
-SET check_results = $2, status = $3
-WHERE id = $1
-`
-
-type UpdateMigrationJobChecksParams struct {
-	ID           uuid.UUID `json:"id"`
-	CheckResults []byte    `json:"check_results"`
-	Status       string    `json:"status"`
-}
-
-func (q *Queries) UpdateMigrationJobChecks(ctx context.Context, arg UpdateMigrationJobChecksParams) error {
-	_, err := q.db.Exec(ctx, updateMigrationJobChecks, arg.ID, arg.CheckResults, arg.Status)
-	return err
-}
-
 const updateMigrationJobProgress = `-- name: UpdateMigrationJobProgress :exec
 UPDATE migration_jobs
 SET progress = $2, upid = $3
@@ -377,22 +413,5 @@ type UpdateMigrationJobProgressParams struct {
 
 func (q *Queries) UpdateMigrationJobProgress(ctx context.Context, arg UpdateMigrationJobProgressParams) error {
 	_, err := q.db.Exec(ctx, updateMigrationJobProgress, arg.ID, arg.Progress, arg.Upid)
-	return err
-}
-
-const updateMigrationJobStatus = `-- name: UpdateMigrationJobStatus :exec
-UPDATE migration_jobs
-SET status = $2, error_message = $3
-WHERE id = $1
-`
-
-type UpdateMigrationJobStatusParams struct {
-	ID           uuid.UUID `json:"id"`
-	Status       string    `json:"status"`
-	ErrorMessage string    `json:"error_message"`
-}
-
-func (q *Queries) UpdateMigrationJobStatus(ctx context.Context, arg UpdateMigrationJobStatusParams) error {
-	_, err := q.db.Exec(ctx, updateMigrationJobStatus, arg.ID, arg.Status, arg.ErrorMessage)
 	return err
 }
