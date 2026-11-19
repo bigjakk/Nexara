@@ -613,6 +613,9 @@ func TestObserverKinds(t *testing.T) {
 			}
 			for i := range rows {
 				rows[i].MembersJoined, rows[i].MembersLeft = nil, nil // ids, in columns no reader selects
+				// Set by the observer, never from Proxmox, and able to hold a value's digits by chance:
+				// the times read 22:15 throughout 22:15 UTC.
+				rows[i].ID, rows[i].LastSeenAt, rows[i].ObservedAt = "", time.Time{}, time.Time{}
 			}
 			raw, _ := json.Marshal(rows)
 			if strings.Contains(string(raw), tc.value) {
