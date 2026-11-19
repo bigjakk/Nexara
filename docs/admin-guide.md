@@ -500,7 +500,8 @@ Permissions follow the pattern `action:resource`. Examples:
 
 Note that acting on a guest and configuring it are separate: starting, stopping
 and snapshotting a VM is `execute:vm`, while editing its hardware or creating it is
-`manage:vm`. The **Migrate** button creates a migration job, so it needs
+`manage:vm`. Importing one creates it, so an import needs `manage:vm` too, besides
+`manage:vm_import`. The **Migrate** button creates a migration job, so it needs
 `manage:migration`; `execute:vm` covers only the API's direct migrate route.
 
 The complete catalog is whatever **Admin > Roles** lists — it is seeded from the database, so the role editor is always the authoritative list.
@@ -1255,7 +1256,7 @@ The history table shows **Name**, **Target**, **Source**, **Status** (pending / 
 
 ### Permissions
 
-Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Four operations additionally require storage-management rights (`manage:storage`) because they exercise or change storage configuration: probing a download URL, downloading it to storage, enabling import content on an existing storage, and removing it from a store that holds other content. **Upload OVA** takes either permission.
+Importing is gated by a dedicated VM-import permission (`manage:vm_import`). Starting an import also needs `manage:vm`, since it creates a VM, and `execute:vm` to start the VM after the import or while it imports. Four operations additionally require storage-management rights (`manage:storage`) because they exercise or change storage configuration: probing a download URL, downloading it to storage, enabling import content on an existing storage, and removing it from a store that holds other content. **Upload OVA** takes either permission.
 
 ---
 

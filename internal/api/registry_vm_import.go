@@ -77,14 +77,16 @@ func importVolumeParam(description string) apischema.Property {
 // VMImportHandler.
 //
 // Every one of them is the uniform shape the legacy handlers had — resolve
-// the cluster from the path, then one static requireClusterPerm — so all 11
-// declare a plain Check and every hand-placed call is gone from the handler
-// bodies. Nothing here is Deferred and nothing is Advisory: no listing in
-// this domain filters through accessibleClusters, and no permission depends
-// on a body value or a DB lookup.
+// the cluster from the path, then one static requireClusterPerm — and every
+// hand-placed call is gone from the handler bodies. Nothing here is Deferred
+// and nothing is Advisory: no listing in this domain filters through
+// accessibleClusters, and no route's own gate depends on a body value or a DB
+// lookup (what a request's options add, such as execute:vm for a start, the
+// handlers check).
 //
 // TWO of the 11 are gated on a STORAGE grant rather than on vm_import, and
-// both are deliberate rather than an oversight — see their Descriptions.
+// starting an import also takes manage:vm, as it creates a VM (an AllOf). All
+// three are deliberate rather than an oversight — see their Descriptions.
 func registerVMImportEndpoints(reg *Registry, h *handlers.VMImportHandler) {
 	reg.Register(Endpoint{
 		Method: fiber.MethodPost,
@@ -259,11 +261,15 @@ func registerVMImportEndpoints(reg *Registry, h *handlers.VMImportHandler) {
 		Path:   importScope,
 		Description: "Start an import. Records the job, dispatches Proxmox's create-with-import-from " +
 			"call against the target node and returns the job; the disk conversion runs as a background " +
-			"task the scheduler reconciles.",
-		Group:       "VM Import",
-		Permissions: clusterCheck("manage", "vm_import"),
-		Parameters:  clusterParams(startImportParams()),
-		Handler:     h.StartVMImport,
+			"task the scheduler reconciles. An import creates a VM, so it requires manage:vm as well as " +
+			"manage:vm_import, as creating a VM does.",
+		Group: "VM Import",
+		Permissions: Permissions{AllOf: []Check{
+			{Action: "manage", Resource: "vm_import", Scope: ScopeCluster},
+			{Action: "manage", Resource: "vm", Scope: ScopeCluster},
+		}},
+		Parameters: clusterParams(startImportParams()),
+		Handler:    h.StartVMImport,
 	})
 	reg.Register(Endpoint{
 		Method:      fiber.MethodGet,

@@ -24,13 +24,13 @@ vi.mock("../api/import-queries", () => ({
 }));
 
 describe("ImportsPage", () => {
-  // The button opens the import dialog the Create menu gates on the same
-  // permission; without it the dialog's own requests would be refused.
+  // The button opens the import dialog, gated as the Create menu gates it: an
+  // import creates a VM, so manage:vm_import alone would be refused.
   it.each([
-    ["offers Import VM to a user who may manage imports", true],
-    ["does not offer it to one who may not", false],
+    ["offers Import VM to a user who may import and create VMs", true],
+    ["does not offer it to one who may only manage imports", false],
   ])("%s", (_name, granted) => {
-    grantPermissions(...(granted ? ["manage:vm_import"] : []));
+    grantPermissions("manage:vm_import", ...(granted ? ["manage:vm"] : []));
     renderWithProviders(<ImportsPage />);
     // The page has settled on its cluster: the panels are drawn.
     expect(

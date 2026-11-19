@@ -12,12 +12,14 @@ vi.mock("@/lib/api-client", async () =>
 );
 
 // Create offered a Viewer every create, each refused: a create takes what its
-// route declares, and a role allowed none gets no Create button.
+// route declares (an import, which creates a VM, manage:vm as well), and a role
+// allowed none gets no Create button.
 it.each([
   [["manage:vm"], ["Virtual machine"]],
+  [["manage:container", "manage:vm_import"], ["Container"]],
   [
-    ["manage:container", "manage:vm_import"],
-    ["Container", "Import VM"],
+    ["manage:vm", "manage:vm_import"],
+    ["Virtual machine", "Import VM"],
   ],
   [["view:vm"], []],
 ])("with %j offers %j", async (permissions, offered) => {

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Segmented } from "@/components/ui/segmented";
 import { PageHeader } from "@/components/page/PageHeader";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useCreateAllowed } from "@/components/layout/create-actions";
 import { useCreateResourceStore } from "@/stores/create-resource-store";
 import { useClusters } from "@/features/dashboard/api/dashboard-queries";
 import { useImportJobs, useImportSources } from "../api/import-queries";
@@ -25,7 +25,7 @@ const SEGMENTED_CLUSTER_LIMIT = 4;
 export function ImportsPage() {
   const { data: clusters } = useClusters();
   const [clusterId, setClusterId] = useState("");
-  const { canManage } = usePermissions();
+  const createAllowed = useCreateAllowed();
   const requestCreate = useCreateResourceStore((s) => s.request);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function ImportsPage() {
 
   // The dialog the Create menu opens, started here for the cluster on show.
   const importButton =
-    clusterId !== "" && canManage("vm_import") ? (
+    clusterId !== "" && createAllowed("import") ? (
       <Button
         size="sm"
         className="gap-1.5"

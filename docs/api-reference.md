@@ -1341,7 +1341,7 @@ Import VMs from ESXi/vCenter sources or OVA/OVF appliances. Reads require `view:
 | POST | `/clusters/:id/vm-import-sources/enable-content` | Enable `import` content on an existing storage — **requires `manage:storage`** |
 | DELETE | `/clusters/:id/vm-import-sources/:storage` | Unregister an import source (only accepts import-source storages): an ESXi source or a store holding only imports is deleted; a store holding other content too loses only its `import` content type, which also **requires `manage:storage`**; `409` while one of Nexara's pending or running imports reads from it |
 | GET | `/clusters/:id/vm-imports` | List import jobs |
-| POST | `/clusters/:id/vm-imports` | Start an import |
+| POST | `/clusters/:id/vm-imports` | Start an import — also **requires `manage:vm`**, since it creates a VM (`start_after` and `live_import` need `execute:vm` as well, as above) |
 | GET | `/clusters/:id/vm-imports/:id` | Get import job status |
 | POST | `/clusters/:id/vm-imports/:id/cancel` | Cancel an import (optionally deleting the partially created VM, which also **requires `delete:vm`**; cancelling a live import also **requires `execute:vm`**, since its VM stops with it; `delete_vm` destroys nothing for an import whose create has not reached Proxmox) |
 

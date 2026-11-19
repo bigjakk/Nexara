@@ -53,19 +53,28 @@ describe("SearchBar", () => {
   });
 
   // Each create takes what its route declares; the palette offered a Viewer both.
-  it.each([
-    [["manage:vm"], /Create virtual machine/, /Create container/],
-    [["manage:container"], /Create container/, /Create virtual machine/],
-  ])("with %j offers only the create it allows", async (permissions, offered, refused) => {
+  // An import creates a VM, so it takes manage:vm as well.
+  it.each<[string[], string, RegExp | null, RegExp | null]>([
+    [["manage:vm"], "create", /Create virtual machine/, /Create container/],
+    [["manage:container"], "create", /Create container/, /Create virtual machine/],
+    [["manage:vm_import"], "import", null, /Import virtual machine/],
+    [["manage:vm_import", "manage:vm"], "import", /Import virtual machine/, null],
+  ])("with %j, typing %s, offers only the create it allows", async (permissions, query, offered, refused) => {
     grantPermissions(...permissions);
     vi.mocked(apiClient.list).mockResolvedValue([] as never);
     const user = setupUser();
     renderWithProviders(<SearchBar />);
 
     await user.click(screen.getByRole("button", { name: /Search or jump to/ }));
-    await user.type(screen.getByRole("combobox"), "create");
-    expect(await screen.findByRole("option", { name: offered })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: refused })).not.toBeInTheDocument();
+    await user.type(screen.getByRole("combobox"), query);
+    if (offered) {
+      expect(await screen.findByRole("option", { name: offered })).toBeInTheDocument();
+    } else {
+      expect(await screen.findByText(/No results/i)).toBeInTheDocument();
+    }
+    if (refused) {
+      expect(screen.queryByRole("option", { name: refused })).not.toBeInTheDocument();
+    }
   });
 
   // Each admin page takes what its route guard takes (App.tsx), install-wide;

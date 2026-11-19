@@ -30,7 +30,7 @@ func TestStartingAGuestNeedsExecute(t *testing.T) {
 		return handlers.NewContainerHandler(q, backupRunEncKey, nil).CreateContainer
 	}
 	type row struct {
-		name, path, grant, body, need string
+		name, path, grant, body, need string // grant: the route's own permissions, space-separated
 		status                        int
 		bind                          func(*db.Queries) func(fiber.Ctx, *apischema.Params) error
 	}
@@ -39,11 +39,11 @@ func TestStartingAGuestNeedsExecute(t *testing.T) {
 	rows = append(rows, []row{
 		{"VM create with start", vms, "manage:vm", `{"node":"pve-01","vmid":101,"start":true}`, "execute:vm", 403, vm},
 		{"container create with start", cts, "manage:container", ctBody + `,"start":true}`, "execute:container", 403, ct},
-		{"import with start_after", importScope, "manage:vm_import", importBody + `,"start_after":true}`, "execute:vm", 403,
+		{"import with start_after", importScope, "manage:vm_import manage:vm", importBody + `,"start_after":true}`, "execute:vm", 403,
 			func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 				return handlers.NewVMImportHandler(q, backupRunEncKey, nil).StartVMImport
 			}},
-		{"import with live_import", importScope, "manage:vm_import", importBody + `,"live_import":true}`, "execute:vm", 403,
+		{"import with live_import", importScope, "manage:vm_import manage:vm", importBody + `,"live_import":true}`, "execute:vm", 403,
 			func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 				return handlers.NewVMImportHandler(q, backupRunEncKey, nil).StartVMImport
 			}},
@@ -67,7 +67,7 @@ func TestStartingAGuestNeedsExecute(t *testing.T) {
 			t.Parallel()
 			var asked atomic.Int32
 			pve := &backupRunPVE{handle: func(http.ResponseWriter, *http.Request) bool { asked.Add(1); return false }}
-			app, dbtx := newPVEAppAs(t, pve, grantsOf(tt.grant), fiber.MethodPost, tt.path, tt.bind)
+			app, dbtx := newPVEAppAs(t, pve, grantsOf(strings.Fields(tt.grant)...), fiber.MethodPost, tt.path, tt.bind)
 			req := httptest.NewRequest(http.MethodPost, backupRoute(tt.path), strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("X-Test-User", "yes")

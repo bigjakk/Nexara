@@ -16,6 +16,7 @@ import {
 } from "@/features/search/api/search-queries";
 import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { useAuth } from "@/hooks/useAuth";
+import { useCreateAllowed } from "./create-actions";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useThemeStore } from "@/stores/theme-store";
 import { StatusIcon } from "@/components/StatusIcon";
@@ -398,6 +399,7 @@ export function SearchBar() {
   const request = useCreateResourceStore((s) => s.request);
   const { hasPermission } = useAuth();
   const { hasGlobalPermission } = usePermissions();
+  const createAllowed = useCreateAllowed();
   const setThemeMode = useThemeStore((s) => s.setMode);
   const searchQuery = useGlobalSearch(query);
   const { data: clusters } = useClusters();
@@ -485,7 +487,7 @@ export function SearchBar() {
   const actions = useMemo<ActionEntry[]>(() => {
     // Each create takes what its route declares, as in the Create menu.
     const list: ActionEntry[] = [];
-    if (can("manage:vm")) {
+    if (createAllowed("vm")) {
       list.push({
         id: "create-vm",
         label: "Create virtual machine…",
@@ -497,7 +499,7 @@ export function SearchBar() {
         },
       });
     }
-    if (can("manage:container")) {
+    if (createAllowed("ct")) {
       list.push({
         id: "create-ct",
         label: "Create container…",
@@ -509,7 +511,7 @@ export function SearchBar() {
         },
       });
     }
-    if (can("manage:vm_import")) {
+    if (createAllowed("import")) {
       list.push({
         id: "import-vm",
         label: "Import virtual machine…",
@@ -567,7 +569,7 @@ export function SearchBar() {
       },
     );
     return list;
-  }, [startCreate, goTo, setThemeMode, close, can]);
+  }, [startCreate, goTo, setThemeMode, close, createAllowed]);
 
   const q = query.toLowerCase();
 

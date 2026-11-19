@@ -13,10 +13,10 @@ beforeEach(() => {
   vi.mocked(apiClient.list).mockResolvedValue([]);
 });
 
-// An import is offered on manage:vm_import, but a URL download into a store
-// takes manage:storage even for an OVA, and so does adding the import content
-// type the empty source list asks for. An upload, and registering an ESXi
-// source, take manage:vm_import.
+// An import is offered on manage:vm_import and manage:vm, but a URL download
+// into a store takes manage:storage even for an OVA, and so does adding the
+// import content type the empty source list asks for. An upload, and
+// registering an ESXi source, take manage:vm_import.
 it.each<[string, string[], boolean]>([
   ["manage:vm_import", ["manage:vm_import"], false],
   ["manage:storage too", ["manage:vm_import", "manage:storage"], true],

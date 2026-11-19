@@ -39,14 +39,22 @@ func vmImportRoute(path string) string {
 	).Replace(path)
 }
 
+// vmImportRoutesOutsideTheClusterCheckShape is this domain's half of the
+// registry-wide exception list in registry_vms_test.go.
+var vmImportRoutesOutsideTheClusterCheckShape = map[string]string{
+	"POST /api/v1/clusters/:cluster_id/vm-imports": "AllOf manage:vm_import + manage:vm: an import " +
+		"creates a VM, which takes manage:vm as POST …/vms does",
+}
+
 // vmImportLegacyPermissions is what each handler checked with hand-placed
 // calls BEFORE Phase 6f, transcribed from
 // `git show HEAD:internal/api/handlers/vm_import.go` at commit 1d2b59f.
 //
 // Every entry is one static requireClusterPerm, so every one hoists. The
-// table is here for the two entries that are NOT manage:vm_import: both are
+// table is here for the entries that are NOT manage:vm_import alone: each is
 // deliberate, and a table is what stops a later "consistency" pass quietly
-// lowering them.
+// lowering them. Starting an import has since needed manage:vm as well: it
+// creates a VM.
 var vmImportLegacyPermissions = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/import-metadata":                  "view:vm_import",
 	"GET /api/v1/clusters/:cluster_id/query-url-metadata":                "manage:storage",
@@ -56,7 +64,7 @@ var vmImportLegacyPermissions = map[string]string{
 	"POST /api/v1/clusters/:cluster_id/vm-import-sources/enable-content": "manage:storage",
 	"DELETE /api/v1/clusters/:cluster_id/vm-import-sources/:storage":     "manage:vm_import",
 	"GET /api/v1/clusters/:cluster_id/vm-imports":                        "view:vm_import",
-	"POST /api/v1/clusters/:cluster_id/vm-imports":                       "manage:vm_import",
+	"POST /api/v1/clusters/:cluster_id/vm-imports":                       "manage:vm_import + manage:vm",
 	"GET /api/v1/clusters/:cluster_id/vm-imports/:id":                    "view:vm_import",
 	"POST /api/v1/clusters/:cluster_id/vm-imports/:id/cancel":            "manage:vm_import",
 }
@@ -74,7 +82,8 @@ func declaredVMImportEndpoints(t *testing.T) map[string]Endpoint {
 //
 // All 11 hand-placed calls move into middleware and none stays: this is the
 // uniform shape — resolve the cluster from the path, then one static
-// requireClusterPerm — that the registry exists for.
+// requireClusterPerm — that the registry exists for. The start route has since
+// been raised on purpose, to an AllOf with manage:vm.
 func TestVMImportRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	declared := declaredVMImportEndpoints(t)
 	if len(declared) != vmImportRouteCount {
@@ -92,18 +101,24 @@ func TestVMImportRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 			t.Errorf("%s was gated %s before the migration but is not declared in the registry", key, want)
 			continue
 		}
-		if e.Permissions.Check == nil {
+		checks := e.Permissions.AllOf
+		if e.Permissions.Check != nil {
+			checks = []Check{*e.Permissions.Check}
+		}
+		if len(checks) == 0 {
 			t.Errorf("%s declares %q rather than a Check; its cluster is in its own path",
 				key, e.Permissions.Describe())
 			continue
 		}
 		hoisted++
 		if got := e.Permissions.Describe(); got != want {
-			t.Errorf("%s declares %q but the handler enforced %q before the migration", key, got, want)
+			t.Errorf("%s declares %q, but vmImportLegacyPermissions says %q", key, got, want)
 		}
-		if e.Permissions.Check.Scope != ScopeCluster {
-			t.Errorf("%s is %s-scoped; requireClusterPerm resolved the cluster from the path",
-				key, e.Permissions.Check.Scope)
+		for _, check := range checks {
+			if check.Scope != ScopeCluster {
+				t.Errorf("%s is %s-scoped on %s; requireClusterPerm resolved the cluster from the path",
+					key, check.Scope, check)
+			}
 		}
 	}
 	if hoisted != vmImportRouteCount {
@@ -119,32 +134,33 @@ func TestVMImportRoutesDeclareTheSamePermissionTheyEnforced(t *testing.T) {
 	}
 }
 
-// TestURLProbeKeepsItsStorageGrant is the assertion behind the one permission in this domain that
-// looks wrong and is not. query-url-metadata makes a NODE issue an outbound request to a caller-supplied
-// URL (an SSRF-shaped primitive), so it was deliberately held to manage:storage, the same bar as the
-// download it precedes, rather than the lower manage:vm_import. enable-content is manage:storage for a
-// related reason: changing what a storage may hold is a storage-management act. A later "these are import
-// routes, they should all be manage:vm_import" pass would be a privilege reduction on both, and this is
-// where it fails.
-func TestURLProbeKeepsItsStorageGrant(t *testing.T) {
+// TestImportRoutesKeepTheirOtherGrant is the assertion behind the permissions in this domain that look
+// wrong and are not. query-url-metadata makes a NODE issue an outbound request to a caller-supplied URL
+// (an SSRF-shaped primitive), so it is held to manage:storage, the same bar as the download it precedes,
+// rather than the lower manage:vm_import; enable-content changes what a storage may hold, a
+// storage-management act. Starting an import creates a VM, which takes manage:vm. A later "these are
+// import routes, they should all be manage:vm_import" pass would lower each, and this is where it fails.
+func TestImportRoutesKeepTheirOtherGrant(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
-		method string
-		path   string
-		why    string
+		method, path, want, other, why string
 	}{
-		{fiber.MethodGet, clusterScope + "/query-url-metadata",
+		{fiber.MethodGet, clusterScope + "/query-url-metadata", "manage:storage", "manage:storage",
 			"the node makes an outbound request to a caller-supplied URL"},
-		{fiber.MethodPost, clusterScope + "/vm-import-sources/enable-content",
+		{fiber.MethodPost, clusterScope + "/vm-import-sources/enable-content", "manage:storage", "manage:storage",
 			"it changes what a storage may hold"},
+		{fiber.MethodPost, importScope, "manage:vm_import + manage:vm", "manage:vm", "it creates a VM"},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
 			e := declaredEndpoint(t, tt.method, tt.path)
-			if got := e.Permissions.Describe(); got != "manage:storage" {
-				t.Fatalf("declares %q, want manage:storage — %s", got, tt.why)
+			if got := e.Permissions.Describe(); got != tt.want {
+				t.Fatalf("declares %q, want %s — %s", got, tt.want, tt.why)
 			}
 			// And the Description has to say WHY, or the next reader sees an
-			// inconsistency rather than a decision.
-			if !strings.Contains(e.Description, "manage:storage") ||
+			// inconsistency rather than a decision. (\b: manage:vm is a prefix of
+			// manage:vm_import.)
+			if !regexp.MustCompile(regexp.QuoteMeta(tt.other)+`\b`).MatchString(e.Description) ||
 				!strings.Contains(e.Description, "manage:vm_import") {
 				t.Errorf("the Description does not name both grants, so the docs read as an "+
 					"inconsistency rather than a decision: %q", e.Description)
@@ -298,7 +314,7 @@ func TestStartingAnImportRecordsItsSourceWithItsStorage(t *testing.T) {
 				_, _ = w.Write([]byte(`{"data":{"type":"vm","source":"ova","create-args":{},"disks":{},"net":{}}}`))
 				return true
 			}}
-			app, dbtx := newPVEAppAs(t, pve, grantsOf("manage:vm_import"), fiber.MethodPost, importScope,
+			app, dbtx := newPVEAppAs(t, pve, grantsOf("manage:vm_import", "manage:vm"), fiber.MethodPost, importScope,
 				func(q *db.Queries) func(fiber.Ctx, *apischema.Params) error {
 					return handlers.NewVMImportHandler(q, backupRunEncKey, nil).StartVMImport
 				})

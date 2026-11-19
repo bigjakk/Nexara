@@ -368,6 +368,7 @@ var routesOutsideTheClusterCheckShape = func() map[string]string {
 		settingsRoutesOutsideTheClusterCheckShape,
 		historyRoutesOutsideTheClusterCheckShape,
 		rollingRoutesOutsideTheClusterCheckShape,
+		vmImportRoutesOutsideTheClusterCheckShape,
 	} {
 		maps.Copy(out, m)
 	}
