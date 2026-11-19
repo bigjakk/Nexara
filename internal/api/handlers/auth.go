@@ -2446,11 +2446,11 @@ func refreshLookupFailed(what string, sessionID uuid.UUID, err error) error {
 	return fiber.NewError(fiber.StatusServiceUnavailable, "Could not verify the refresh token right now; please retry shortly")
 }
 
-// apiKeyTokenPrefix starts every API key (the generator is in api_keys.go, and
+// APIKeyTokenPrefix starts every API key (the generator is in api_keys.go, and
 // authRequired and authOptional branch on it in internal/api/middleware.go). A
 // bearer that starts with it is a key and never a JWT: a key is one base64url
 // word, a JWT three words joined by dots, so no string is both.
-const apiKeyTokenPrefix = "nxra_"
+const APIKeyTokenPrefix = "nxra_"
 
 // logoutNotYoursMessage is what Logout's 403 says. "Nothing was revoked" is true of
 // every refusal: no session was ended. The cookie is left alone as well, except in a
@@ -2509,13 +2509,13 @@ func refreshCookieCount(c fiber.Ctx) int {
 // as the parser itself reads past it: a key that did not authenticate is not an
 // expired credential of anyone's, only a bad one, and there is nothing to read from
 // it. (No key could be parsed as a JWT in any case, which is why this is a belt for
-// braces rather than a behaviour — see apiKeyTokenPrefix.)
+// braces rather than a behaviour — see APIKeyTokenPrefix.)
 func (h *AuthHandler) signOutIsSomeoneElses(c fiber.Ctx, owner uuid.UUID) bool {
 	if named, ok := c.Locals("user_id").(uuid.UUID); ok {
 		return named != owner
 	}
 	token := auth.BearerToken(c.Get("Authorization"))
-	if token == "" || strings.HasPrefix(strings.TrimSpace(token), apiKeyTokenPrefix) || h.jwtService == nil {
+	if token == "" || strings.HasPrefix(strings.TrimSpace(token), APIKeyTokenPrefix) || h.jwtService == nil {
 		return false
 	}
 	return h.jwtService.AccessTokenIsSomeoneElses(token, owner)

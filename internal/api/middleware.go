@@ -1219,8 +1219,7 @@ func (s *Server) authRequired() fiber.Handler {
 			return fiber.NewError(fiber.StatusUnauthorized, "Missing authorization token")
 		}
 
-		// API key tokens start with "nxra_".
-		if strings.HasPrefix(token, "nxra_") {
+		if strings.HasPrefix(token, handlers.APIKeyTokenPrefix) {
 			if err := s.authenticateAPIKey(c, token); err != nil {
 				return err
 			}
@@ -1287,8 +1286,7 @@ func (s *Server) authOptional() fiber.Handler {
 			return c.Next()
 		}
 
-		// API key tokens start with "nxra_".
-		if strings.HasPrefix(token, "nxra_") {
+		if strings.HasPrefix(token, handlers.APIKeyTokenPrefix) {
 			// Best-effort: a key that is refused continues unauthenticated. A lookup
 			// that could not answer is not a refusal, and is answered as such.
 			if err := s.authenticateAPIKey(c, token); err != nil {

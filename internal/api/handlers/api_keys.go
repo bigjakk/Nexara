@@ -140,7 +140,7 @@ func (h *APIKeyHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	if _, err := rand.Read(randomBytes); err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to generate API key")
 	}
-	fullKey := "nxra_" + base64.RawURLEncoding.EncodeToString(randomBytes)
+	fullKey := APIKeyTokenPrefix + base64.RawURLEncoding.EncodeToString(randomBytes)
 
 	// Store the first 12 characters as prefix for identification.
 	keyPrefix := fullKey[:12]
