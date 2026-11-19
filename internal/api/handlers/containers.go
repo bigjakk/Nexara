@@ -676,6 +676,15 @@ func (h *ContainerHandler) CreateContainer(c fiber.Ctx, p *apischema.Params) err
 	if err := refuseExtraRestoreKeys(extra, true); err != nil {
 		return err
 	}
+	if err := refuseExtraOtherRouteKeys(extra); err != nil {
+		return err
+	}
+	if err := refuseForeignVolumes("extra.", extra, lxcVolumeKey, nil, false); err != nil {
+		return err
+	}
+	if err := refuseForeignVolumes("", map[string]string{"rootfs": p.String("rootfs")}, lxcVolumeKey, nil, false); err != nil {
+		return err
+	}
 
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
@@ -871,6 +880,9 @@ func (h *ContainerHandler) SetContainerConfig(c fiber.Ctx, p *apischema.Params) 
 
 	read := readBefore(c.Context(), pxClient)
 	before := read(proxmox.ObserveGuestConfig(node.Name, "lxc", int(ct.Vmid)))
+	if err := refuseForeignVolumes("fields.", fields, lxcVolumeKey, before, before == nil); err != nil {
+		return err
+	}
 	if err := pxClient.SetContainerConfig(c.Context(), node.Name, int(ct.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}

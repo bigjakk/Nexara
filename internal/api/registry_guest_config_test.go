@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,6 +94,65 @@ func TestGuestConfigAuditRow(t *testing.T) {
 				audit: auditRow(resourceType, guestID.String(), "config_update", tt.details),
 				never: []string{probe},
 			})
+		})
+	}
+}
+
+// A config write may name a volume the guest has, not another guest's or an
+// import source's, which the API token could attach as a disk or a CD, nor park
+// one as an unused disk to attach later. The check reads the guest's config
+// first; a read that fails refuses (502).
+func TestGuestConfigWriteNamesOnlyItsOwnVolumes(t *testing.T) {
+	t.Parallel()
+	vmConfig, ctConfig := clusterScope+"/vms/:vm_id/config", clusterScope+"/containers/:ct_id/config"
+	own := `{"data":{"scsi0":"store01:vm-101-disk-0,size=32G","unused0":"store01:vm-101-disk-1"}}`
+	for _, tt := range []struct {
+		name, route, fields, before string
+		status                      int
+	}{
+		{"its unused disk, attached", vmConfig, `{"scsi1":"store01:vm-101-disk-1"}`, own, fiber.StatusOK},
+		{"another guest's disk", vmConfig, `{"scsi1":"store01:vm-102-disk-0"}`, own, fiber.StatusBadRequest},
+		{"another guest's volume as a mount point", ctConfig, `{"mp1":"store01:vm-102-disk-0,mp=/mnt"}`, own,
+			fiber.StatusBadRequest},
+		{"another guest's volume as a container's unused disk", ctConfig, `{"unused1":"store01:vm-102-disk-0"}`, own,
+			fiber.StatusBadRequest},
+		{"a volume when the config cannot be read", vmConfig, `{"scsi1":"store01:vm-101-disk-1"}`, "",
+			fiber.StatusBadGateway},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pve := &accessUpdatePVE{}
+			guestType, read := "qemu", "/api2/json/nodes/pve-01/qemu/101/config"
+			if tt.route == ctConfig {
+				guestType, read = "lxc", "/api2/json/nodes/pve-01/lxc/101/config"
+			}
+			if tt.before == "" {
+				pve.refuse(http.MethodGet+" "+read, http.StatusInternalServerError, `{"data":null}`)
+			} else {
+				pve.replyEach(http.MethodGet+" "+read, tt.before, tt.before)
+			}
+			store := newClusterStore(t, pve.serve(t), "", "")
+			nodeID, guestID := uuid.New(), uuid.New()
+			queries := db.New(blockJobsDB{
+				accessUpdateDB: store,
+				vm:             db.Vm{ID: guestID, ClusterID: store.cluster.ID, NodeID: nodeID, Vmid: 101, Type: guestType},
+				node:           db.Node{ID: nodeID, ClusterID: store.cluster.ID, Name: "pve-01"},
+			})
+			handler := handlers.NewVMHandler(queries, accessUpdateEncKey, nil).SetVMConfig
+			if tt.route == ctConfig {
+				handler = handlers.NewContainerHandler(queries, accessUpdateEncKey, nil).SetContainerConfig
+			}
+			app := mountReal(t, stubAuth(grantsOf("manage:vm", "manage:container")),
+				realRoute{fiber.MethodPut, tt.route, handler})
+			target := strings.NewReplacer(":cluster_id", testClusterID, ":vm_id", guestID.String(),
+				":ct_id", guestID.String()).Replace(tt.route)
+			req := jsonRequest(http.MethodPut, target, `{"fields":`+tt.fields+`}`)
+			req.Header.Set("X-Test-User", "yes")
+			status, _ := send(t, app, req)
+			wrote := slices.ContainsFunc(pve.lines(), func(l string) bool { return !strings.HasPrefix(l, "GET ") })
+			if status != tt.status || wrote != (tt.status == fiber.StatusOK) {
+				t.Errorf("answered %d and wrote %v (%v); want %d, a write only on 200", status, wrote, pve.lines(), tt.status)
+			}
 		})
 	}
 }

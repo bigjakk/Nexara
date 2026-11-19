@@ -659,6 +659,9 @@ var sweepRouteOverrides = map[string]sweepEndpointOverride{
 	// A handler rule: the node must be the one the UPID names (the collector
 	// polls the task there), and sweepValueOverrides' upid names pve-01.
 	"POST " + taskHistoryScope: {values: map[string]any{"node": "pve-01"}},
+	// The media route's volid pattern: an ISO or "none", which nothing in
+	// stringCandidatePool is.
+	"POST " + clusterScope + "/vms/:vm_id/media": {values: map[string]any{"volid": "none"}},
 	// Not a handler rule either, like "device_id" in sweepValueOverrides:
 	// the PCI address pattern (registry_mappings.go), which nothing in
 	// stringCandidatePool satisfies. Scoped to the route because "path" is

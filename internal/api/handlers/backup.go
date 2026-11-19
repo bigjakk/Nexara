@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2200,6 +2202,134 @@ func refuseExtraRestoreKeys(extra map[string]string, container bool) error {
 			where = "a live import goes through POST /api/v1/clusters/:cluster_id/vm-imports"
 		}
 		return fiber.NewError(fiber.StatusBadRequest, "extra."+k+" is not accepted on a create: "+where)
+	}
+	return nil
+}
+
+// createExtraOtherRouteKeys are the create-call options that do another route's
+// work: ha-managed adds the new guest to HA, which the HA routes gate on
+// manage:ha, and import-working-storage only serves a disk import, which goes
+// through the import route.
+var createExtraOtherRouteKeys = map[string]string{
+	"ha-managed":             "add the guest to HA through POST /api/v1/clusters/:cluster_id/ha/resources",
+	"import-working-storage": "an import goes through POST /api/v1/clusters/:cluster_id/vm-imports",
+}
+
+// refuseExtraOtherRouteKeys refuses a create whose extra names one of them,
+// whatever its value.
+func refuseExtraOtherRouteKeys(extra map[string]string) error {
+	keys := make([]string, 0, 1)
+	for k := range extra {
+		if _, ok := createExtraOtherRouteKeys[k]; ok {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	slices.Sort(keys)
+	return fiber.NewError(fiber.StatusBadRequest,
+		"extra."+keys[0]+" is not accepted on a create: "+createExtraOtherRouteKeys[keys[0]])
+}
+
+// qemuDriveKey is a VM config key whose value is a drive (cdrom is ide2's
+// alias). qemuVolumeKey and lxcVolumeKey are the keys that name a volume, a
+// VM's and a container's, unusedN included: Proxmox takes an unusedN a caller
+// writes, and a volume it names would count as the guest's own on the next.
+var (
+	qemuDriveKey  = regexp.MustCompile(`^((ide|sata|scsi|virtio)\d+|efidisk0|tpmstate0|cdrom)$`)
+	qemuVolumeKey = regexp.MustCompile(`^((ide|sata|scsi|virtio)\d+|efidisk0|tpmstate0|cdrom|unused\d+)$`)
+	lxcVolumeKey  = regexp.MustCompile(`^(rootfs|mp\d+|unused\d+)$`)
+)
+
+// refuseImportFrom refuses a drive value that imports a disk (import-from=). A
+// disk import goes through the import route, which takes manage:vm_import and
+// reads only an import source; a config write or a create would copy any volume
+// Proxmox can read, an ESXi source's disks included, on manage:vm alone. The test
+// is a substring, as no volume name holds it and Proxmox's own parsing of a
+// drive string decides nothing here. prefix names where the value came from.
+func refuseImportFrom(prefix string, drives map[string]string) error {
+	keys := make([]string, 0, 1)
+	for k, v := range drives {
+		if qemuDriveKey.MatchString(k) && strings.Contains(strings.ToLower(v), "import-from") {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	slices.Sort(keys)
+	return fiber.NewError(fiber.StatusBadRequest, prefix+keys[0]+
+		" imports a disk (import-from), which is not accepted here: an import goes through POST /api/v1/clusters/:cluster_id/vm-imports")
+}
+
+// isoVolume is an ISO on a file-based store, the one shape Proxmox gives one.
+// ISOVolumePattern is also the media route's volid (registry_vms.go).
+const ISOVolumePattern = `[A-Za-z][A-Za-z0-9._-]*:iso/[^/,]+`
+
+var isoVolume = regexp.MustCompile(`^` + ISOVolumePattern + `$`)
+
+// newVolume is a new allocation: <storage>:<GiB>, or cloud-init's <storage>:cloudinit.
+var newVolume = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]*:(\d+(\.\d+)?|cloudinit)$`)
+
+// newOrSharedVolume is a volume a guest may name without owning it: no medium,
+// the host's drive, an ISO, or a new allocation.
+func newOrSharedVolume(vol string) bool {
+	return vol == "none" || vol == "cdrom" || isoVolume.MatchString(vol) || newVolume.MatchString(vol)
+}
+
+// driveVolumes returns every volume a drive value names, as Proxmox reads one:
+// a part with no "=" (the default key, file), file= and its alias volume=.
+func driveVolumes(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		k, v, keyed := strings.Cut(part, "=")
+		switch {
+		case !keyed && strings.TrimSpace(part) != "":
+			out = append(out, part)
+		case keyed && (k == "file" || k == "volume"):
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// refuseForeignVolumes refuses a value under one of keyRe's keys naming an
+// existing volume that the guest's config does not name already under one of
+// them. The API token may attach any volume it can read: another guest's disk, a
+// container's, or an import source's (an ESXi host's VMs among them), which
+// Proxmox would hand a guest as a disk or a CD, read-only or not. config is the
+// guest's configuration as read before the write, nil on a create, which names
+// no existing volume; free text such as a description names none.
+func refuseForeignVolumes(prefix string, drives map[string]string, keyRe *regexp.Regexp,
+	config map[string]json.RawMessage, readFailed bool) error {
+	named := map[string]bool{}
+	for key, raw := range config {
+		var v string
+		if keyRe.MatchString(key) && json.Unmarshal(raw, &v) == nil {
+			for _, vol := range driveVolumes(v) {
+				named[vol] = true
+			}
+		}
+	}
+	keys := slices.Sorted(maps.Keys(drives))
+	for _, k := range keys {
+		if !keyRe.MatchString(k) {
+			continue
+		}
+		for _, vol := range driveVolumes(drives[k]) {
+			// Without a storage, Proxmox reads no volume: an invalid name, or a
+			// host path, which only root@pam may set.
+			if !strings.Contains(vol, ":") || newOrSharedVolume(vol) || named[vol] {
+				continue
+			}
+			if readFailed {
+				return fiber.NewError(fiber.StatusBadGateway,
+					"Could not read the guest's configuration to check the volume "+prefix+k+" names")
+			}
+			return fiber.NewError(fiber.StatusBadRequest, prefix+k+" names a volume this guest does not have: "+
+				"a write may attach a new volume, an ISO or one of the guest's own, not another guest's or an import source's")
+		}
 	}
 	return nil
 }

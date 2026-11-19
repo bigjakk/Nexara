@@ -632,12 +632,16 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("execute", "vm"),
 		Parameters: vmParams(apischema.Properties{
+			// An ISO or nothing: any other volume the token can read (another
+			// guest's disk, an import source's) would reach the guest as a CD,
+			// and a comma would carry drive options into the CD-ROM line.
 			"volid": {
 				Type:        apischema.String,
 				MinLength:   apischema.Ptr(1),
 				MaxLength:   apischema.Ptr(512),
-				Typetext:    "<volume id>|none",
-				Description: `Volume id of the ISO ("store01:iso/debian.iso"), or "none" to eject.`,
+				Pattern:     `^(none|` + handlers.ISOVolumePattern + `)$`,
+				Typetext:    "<storage>:iso/<file>|none",
+				Description: `Volume id of the ISO ("store01:iso/debian.iso"), or "none" to eject. Any other volume, or a comma, is refused with 400.`,
 			},
 		}),
 		Handler: h.ChangeMedia,
@@ -679,7 +683,13 @@ func registerVMEndpoints(reg *Registry, h *handlers.VMHandler, mappingUsageLimit
 		Path:   clusterScope + "/vms/:vm_id/config",
 		Description: "Write Proxmox configuration keys on a VM. The write goes out with the cluster's API token, " +
 			"so manage:vm here can attach any resource mapping that token can use — a USB or PCI device " +
-			"(usbN or hostpciN mapping=<id>) or a VirtioFS directory; Nexara has no per-mapping permission.",
+			"(usbN or hostpciN mapping=<id>) or a VirtioFS directory; Nexara has no per-mapping permission. " +
+			"A drive value carrying import-from is refused with 400: a disk import goes through " +
+			"POST /api/v1/clusters/:cluster_id/vm-imports. So is a drive naming a volume the VM does not have " +
+			"(another guest's disk, a container's, an import source's), which the token could attach: a new " +
+			"volume, an ISO, none or a volume the VM's configuration names already are accepted, and 502 answers " +
+			"when that configuration cannot be read first. A CD-ROM line naming an ISO is hardware configuration " +
+			"here, as Proxmox's VM.Config.CDROM is a configuration privilege; the media route offers the same to execute:vm.",
 		Group:       "Virtual Machines",
 		Permissions: clusterCheck("manage", "vm"),
 		Parameters: vmParams(apischema.Properties{
@@ -1204,7 +1214,11 @@ func createVMParams() apischema.Properties {
 				"A key a typed parameter of this route sets (start, vmid, name, pool, …) is refused with 400: " +
 				"use the typed parameter. Restore options (archive, force, unique, live-restore) are refused with " +
 				"400 too: a restore goes through POST /api/v1/clusters/:cluster_id/restore and a live import " +
-				"through the import route.",
+				"through the import route. So are ha-managed (add the guest to HA through " +
+				"POST /api/v1/clusters/:cluster_id/ha/resources) and import-working-storage, and a drive value " +
+				"carrying import-from or naming an existing volume, here or in scsi0, ide2, cdrom, efidisk0 or " +
+				"tpmstate0: a create allocates new volumes or names an ISO, and a disk import goes through the " +
+				"import route.",
 		},
 	}
 }

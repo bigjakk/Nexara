@@ -368,3 +368,60 @@ func TestDatastoreMetricsWindowFallback(t *testing.T) {
 		})
 	}
 }
+
+// Only a drive's value is a disk import: a description may mention import-from,
+// and a CD-ROM line or an ordinary disk is no import.
+func TestRefuseImportFromReadsOnlyDrives(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		key, value string
+		refused    bool
+	}{
+		{"scsi1", "store01:0,import-from=store02:import/linux01.ova/disk0.vmdk", true},
+		{"efidisk0", "store01:1,IMPORT-FROM=store02:vm-101-disk-1", true},
+		{"description", "copied with import-from from linux01", false},
+		{"ide2", "store01:iso/linux01.iso,media=cdrom", false},
+		{"virtio0", "store01:vm-101-disk-0,size=32G", false},
+	} {
+		err := refuseImportFrom("fields.", map[string]string{tt.key: tt.value})
+		if (err != nil) != tt.refused || (err != nil && !strings.Contains(err.Error(), "fields."+tt.key)) {
+			t.Errorf("%s=%q: refused %v (%v), want %v", tt.key, tt.value, err != nil, err, tt.refused)
+		}
+	}
+}
+
+// A drive may name a new volume, an ISO, nothing, or one the guest's config
+// names already under a volume key, in each spelling Proxmox reads (a bare part,
+// file=, its alias volume=); an unusedN is held to it too, and free text names
+// nothing. A config that could not be read refuses (502).
+func TestRefuseForeignVolumesReadsEverySpelling(t *testing.T) {
+	t.Parallel()
+	config := map[string]json.RawMessage{"unused0": json.RawMessage(`"store01:vm-101-disk-1"`),
+		"description": json.RawMessage(`"notes,store01:vm-102-disk-0"`)}
+	for _, tt := range []struct {
+		key, value string
+		readFailed bool
+		want       string
+	}{
+		{"scsi1", "store01:vm-101-disk-1,iothread=1", false, ""},
+		{"scsi1", "store01:vm-102-disk-0", false, "fields.scsi1 names a volume this guest does not have"},
+		{"scsi1", "file=store01:vm-102-disk-0", false, "fields.scsi1 names a volume"},
+		{"scsi1", "volume=store01:vm-102-disk-0", false, "fields.scsi1 names a volume"},
+		{"virtio0", "store01:32,format=qcow2", false, ""},
+		{"ide3", "store01:cloudinit", false, ""},
+		{"ide2", "store01:iso/linux01.iso,media=cdrom", false, ""},
+		{"scsi1", "test01", false, ""},
+		{"description", "store01:vm-102-disk-0", false, ""},
+		{"scsi1", "store01:vm-102-disk-0", true, "Could not read the guest's configuration"},
+		{"unused1", "store01:vm-102-disk-0", false, "fields.unused1 names a volume"},
+	} {
+		err := refuseForeignVolumes("fields.", map[string]string{tt.key: tt.value}, qemuVolumeKey, config, tt.readFailed)
+		got := ""
+		if err != nil {
+			got = err.Error()
+		}
+		if (tt.want == "") != (err == nil) || !strings.Contains(got, tt.want) {
+			t.Errorf("%s=%q: got %q, want %q", tt.key, tt.value, got, tt.want)
+		}
+	}
+}

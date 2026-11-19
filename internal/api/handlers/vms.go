@@ -1378,6 +1378,23 @@ func (h *VMHandler) CreateVM(c fiber.Ctx, p *apischema.Params) error {
 	if err := refuseExtraRestoreKeys(extra, false); err != nil {
 		return err
 	}
+	if err := refuseExtraOtherRouteKeys(extra); err != nil {
+		return err
+	}
+	if err := refuseImportFrom("extra.", extra); err != nil {
+		return err
+	}
+	typedDrives := map[string]string{"scsi0": p.String("scsi0"), "ide2": p.String("ide2"),
+		"cdrom": p.String("cdrom"), "efidisk0": p.String("efidisk0"), "tpmstate0": p.String("tpmstate0")}
+	if err := refuseImportFrom("", typedDrives); err != nil {
+		return err
+	}
+	if err := refuseForeignVolumes("", typedDrives, qemuVolumeKey, nil, false); err != nil {
+		return err
+	}
+	if err := refuseForeignVolumes("extra.", extra, qemuVolumeKey, nil, false); err != nil {
+		return err
+	}
 
 	vmid := int(p.Int("vmid"))
 	node := p.String("node")
@@ -1506,6 +1523,9 @@ func (h *VMHandler) SetVMConfig(c fiber.Ctx, p *apischema.Params) error {
 	if len(fields) == 0 {
 		return fiber.NewError(fiber.StatusBadRequest, "fields map is required")
 	}
+	if err := refuseImportFrom("fields.", fields); err != nil {
+		return err
+	}
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {
@@ -1514,6 +1534,9 @@ func (h *VMHandler) SetVMConfig(c fiber.Ctx, p *apischema.Params) error {
 
 	read := readBefore(c.Context(), pxClient)
 	before := read(proxmox.ObserveGuestConfig(node.Name, "qemu", int(vm.Vmid)))
+	if err := refuseForeignVolumes("fields.", fields, qemuVolumeKey, before, before == nil); err != nil {
+		return err
+	}
 	if err := pxClient.SetVMConfig(c.Context(), node.Name, int(vm.Vmid), fields); err != nil {
 		return mapProxmoxError(err)
 	}
@@ -1906,7 +1929,7 @@ func (h *VMHandler) ChangeMedia(c fiber.Ctx, p *apischema.Params) error {
 	if err != nil {
 		return err
 	}
-	volid := p.String("volid")
+	volid := p.String("volid") // an ISO or "none": the route's pattern
 
 	vm, node, cluster, pxClient, err := h.resolveVM(c, clusterID, vmID)
 	if err != nil {

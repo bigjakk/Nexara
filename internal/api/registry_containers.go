@@ -168,9 +168,11 @@ func registerContainerEndpoints(reg *Registry, h *handlers.ContainerHandler) {
 		Handler:     h.GetContainerConfig,
 	})
 	reg.Register(Endpoint{
-		Method:      fiber.MethodPut,
-		Path:        containerScope + "/:ct_id/config",
-		Description: "Write Proxmox configuration keys on a container.",
+		Method: fiber.MethodPut,
+		Path:   containerScope + "/:ct_id/config",
+		Description: "Write Proxmox configuration keys on a container. A rootfs or mpN naming a volume the " +
+			"container does not have (another guest's) is refused with 400, and 502 answers when its " +
+			"configuration cannot be read first.",
 		Group:       "Containers",
 		Permissions: clusterCheck("manage", "container"),
 		Parameters: ctParams(apischema.Properties{
@@ -395,7 +397,9 @@ func createCTParams() apischema.Properties {
 				"else this schema does not name. A key a typed parameter of this route sets (start, vmid, " +
 				"hostname, ostemplate, password, pool, …) is refused with 400: use the typed parameter. Restore " +
 				"options (restore, force, unique) are refused with 400 too: a restore goes through " +
-				"POST /api/v1/clusters/:cluster_id/restore.",
+				"POST /api/v1/clusters/:cluster_id/restore. So is ha-managed: add the guest to HA through " +
+				"POST /api/v1/clusters/:cluster_id/ha/resources. A rootfs or mpN naming an existing volume, here or " +
+				"in rootfs, is refused with 400 too: a create allocates new volumes.",
 		},
 	}
 }

@@ -1215,7 +1215,27 @@ naming it: use the typed parameter. Restore options are not accepted on a create
 either: `archive`, `force`, `unique` and `live-restore` on a VM, `restore`,
 `force` and `unique` on a container, whatever their value, answer `400`. A
 restore goes through `POST /clusters/:id/restore` and a live import through the
-import route.
+import route. Nor are another route's options: `ha-managed` (add the guest to HA
+through `POST /clusters/:id/ha/resources`, which needs `manage:ha`) and, on a VM,
+`import-working-storage`.
+
+**A disk import goes only through the import route.** A drive value (`ideN`,
+`sataN`, `scsiN`, `virtioN`, `efidisk0`, `tpmstate0`) carrying `import-from`
+answers `400` on a VM create, in its typed disk parameters or in `extra`, and on
+`PUT /clusters/:id/vms/:vm_id/config`: it would copy a volume, an import
+source's included, on `manage:vm` alone, where `POST /clusters/:id/vm-imports`
+needs `manage:vm_import`. Nor may a write attach a volume the guest does not
+have, which the API token could hand it as a disk or a CD: another guest's disk,
+a container's, or an import source's (an ESXi host's VMs among them). A drive
+value (an `unusedN`, and a container's `rootfs` and `mpN`, too) may name a new volume
+(`<storage>:<GiB>`, `<storage>:cloudinit`), an ISO (`<storage>:iso/<file>`),
+`none`, or, on a config write, a volume the guest's configuration names already
+(an `unusedN` disk included); anything else answers `400`, and so does any
+existing volume on a create. A config write that names an existing volume reads
+the guest's configuration first and answers `502` when that read fails. The
+media route takes an ISO or `none` only. A CD-ROM line naming an ISO in a config
+write stays hardware configuration (`manage:vm`), as Proxmox's `VM.Config.CDROM`
+is a configuration privilege; the media route offers the same to `execute:vm`.
 
 **Restoring over a guest needs `delete` on its kind.** A `force` restore
 replaces the guest at that VMID as deleting it would, so it needs what its
@@ -1241,14 +1261,14 @@ permission, and nothing is asked of Proxmox.
 | DELETE | `/clusters/:id/vms/:vm_id/snapshots/:name` | Delete a snapshot |
 | POST | `/clusters/:id/vms/:vm_id/snapshots/:name/rollback` | Rollback to snapshot |
 | GET | `/clusters/:id/vms/:vm_id/config` | Get VM configuration |
-| PUT | `/clusters/:id/vms/:vm_id/config` | Update VM configuration |
+| PUT | `/clusters/:id/vms/:vm_id/config` | Update VM configuration (a drive value carrying `import-from`, or naming a volume the guest does not have, answers `400`, as above) |
 | GET | `/clusters/:id/vms/:vm_id/agent` | Get QEMU guest agent info |
 | GET | `/clusters/:id/vms/:vm_id/block-jobs` | Get a running VM's QEMU block jobs |
 | POST | `/clusters/:id/vms/:vm_id/disks/resize` | Resize a disk |
 | POST | `/clusters/:id/vms/:vm_id/disks/move` | Move a disk to another storage |
 | POST | `/clusters/:id/vms/:vm_id/disks/attach` | Allocate and attach a disk. Omit `index` to take the lowest free slot on the bus; an occupied slot, or one the VM boots from, is refused. `size` takes `500`, `"500"`, `"500G"`, `"512M"` or `"1T"` and may not exceed the target pool's total capacity |
 | POST | `/clusters/:id/vms/:vm_id/disks/detach` | Detach a disk by its config key. A drive key (`ide0`–`ide3`, `sata0`–`sata5`, `scsi0`–`scsi30`, `virtio0`–`virtio15`, `efidisk0`, `tpmstate0`) parks a volume the VM owns as `unusedN`, except a cloud-init drive, which is deleted; `unused0`–`unused255` and `vmstate` delete the volume from storage if this VM owns it. Any other config key is refused |
-| POST | `/clusters/:id/vms/:vm_id/media` | Change CD/DVD media |
+| POST | `/clusters/:id/vms/:vm_id/media` | Change CD/DVD media (`execute:vm`; `volid` is an ISO, `<storage>:iso/<file>`, or `none`, and anything else answers `400`) |
 | PUT | `/clusters/:id/vms/:vm_id/pool` | Set VM resource pool |
 
 ### VM Folders
@@ -1605,6 +1625,8 @@ request set the comment (`""` clears it) — never the comment's text.
 
 ### Firewall
 
+Reads take `view:network`, adds and edits `manage:network`, and every delete `delete:network`, on the cluster.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/clusters/:id/firewall/rules` | List cluster firewall rules |
@@ -1625,8 +1647,6 @@ request set the comment (`""` clears it) — never the comment's text.
 | GET | `/clusters/:id/firewall/aliases` | List firewall aliases |
 | POST | `/clusters/:id/firewall/aliases` | Create alias |
 | PUT | `/clusters/:id/firewall/aliases/:name` | Update alias |
-Reads take `view:network`, adds and edits `manage:network`, and every delete `delete:network`, on the cluster.
-
 | DELETE | `/clusters/:id/firewall/aliases/:name` | Delete alias |
 | GET | `/clusters/:id/firewall/ipset` | List IP sets |
 | POST | `/clusters/:id/firewall/ipset` | Create IP set |
