@@ -346,7 +346,8 @@ type Syncer struct {
 	lastSyncErrorMu      sync.Mutex
 	lastSyncError        map[uuid.UUID]time.Time // rate-limits the endpoint-failover report
 	lastSyncFailure      map[uuid.UUID]time.Time // rate-limits the error-level sync-failure report
-	fastSyncInFlight     atomic.Bool             // re-entrancy guard for SyncAllResources
+	fastSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAllResources pass is running
+	fullSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAll pass is running
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
 	osTypeSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestOSTypes
@@ -1816,24 +1817,36 @@ func (s *Syncer) syncReplication(ctx context.Context, client ProxmoxClient, clus
 	}
 }
 
-// SyncAll syncs all active clusters and returns collected metric results.
-func (s *Syncer) SyncAll(ctx context.Context) []*ClusterMetricResult {
+// SyncAll syncs every active cluster and hands each one's metric result to
+// emit as soon as that cluster is done, so emit may run concurrently, once per
+// cluster that synced. It returns when the clusters it started are done.
+//
+// Clusters sync in parallel, each under its own deadline, and a cluster whose
+// last pass is still running is skipped: the caller starts a pass every tick
+// without waiting for this one, so an endpoint that hangs holds back only its
+// own cluster (it once held every cluster's next pass for its full timeout).
+func (s *Syncer) SyncAll(ctx context.Context, emit func(*ClusterMetricResult)) {
+	// Callers run it in a goroutine of its own, so nothing above would catch it.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("cluster sync pass panicked", "panic", r)
+		}
+	}()
 	clusters, err := s.queries.ListActiveClusters(ctx)
 	if err != nil {
 		s.logger.Error("failed to list active clusters", "error", err)
-		return nil
+		return
 	}
 
-	// Sync clusters in parallel, each under its own deadline, so one
-	// unreachable endpoint can't stall the other clusters' metrics, events,
-	// and task ingest (a blackholed endpoint used to freeze the whole
-	// sequential pass for the full client timeout plus failover attempts).
-	results := make([]*ClusterMetricResult, len(clusters))
 	var wg sync.WaitGroup
-	for i, cluster := range clusters {
+	for _, cluster := range clusters {
+		if _, running := s.fullSyncInFlight.LoadOrStore(cluster.ID, struct{}{}); running {
+			continue
+		}
 		wg.Add(1)
-		go func(i int, cluster db.Cluster) {
+		go func(cluster db.Cluster) {
 			defer wg.Done()
+			defer s.fullSyncInFlight.Delete(cluster.ID)
 			defer func() {
 				if r := recover(); r != nil {
 					s.logger.Error("cluster sync panicked",
@@ -1866,18 +1879,10 @@ func (s *Syncer) SyncAll(ctx context.Context) []*ClusterMetricResult {
 				}
 				return
 			}
-			results[i] = result
-		}(i, cluster)
+			emit(result)
+		}(cluster)
 	}
 	wg.Wait()
-
-	out := make([]*ClusterMetricResult, 0, len(results))
-	for _, r := range results {
-		if r != nil {
-			out = append(out, r)
-		}
-	}
-	return out
 }
 
 // clusterSyncTimeout bounds a single cluster's sync pass. Generous — large

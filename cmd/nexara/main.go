@@ -546,7 +546,9 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 				for {
 					select {
 					case <-fastTicker.C:
-						syncer.SyncAllResources(ctx)
+						// Not waited for: a cluster still in its last pass is
+						// skipped, so one that hangs delays no other cluster.
+						go syncer.SyncAllResources(ctx)
 					case <-ctx.Done():
 						return
 					}
@@ -848,15 +850,20 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 			}
 		}()
 
-		// Run initial sync immediately.
-		results := syncer.SyncAll(ctx)
-		mc.ProcessResults(ctx, results)
+		// Each tick starts a pass without waiting for the last: SyncAll skips a
+		// cluster still in its last pass, so one that hangs delays no other
+		// cluster, and each cluster's metrics are written as it finishes.
+		fullSync := func() {
+			syncer.SyncAll(ctx, func(r *collector.ClusterMetricResult) {
+				mc.ProcessResults(ctx, []*collector.ClusterMetricResult{r})
+			})
+		}
+		go fullSync() // the initial sync, at once
 
 		for {
 			select {
 			case <-ticker.C:
-				results := syncer.SyncAll(ctx)
-				mc.ProcessResults(ctx, results)
+				go fullSync()
 			case <-ctx.Done():
 				logger.Info("collector stopped")
 				return

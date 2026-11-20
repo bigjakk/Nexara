@@ -32,14 +32,16 @@ const unknownStatusGrace = time.Minute
 // per-node enrichment (metrics, hardware, Ceph, tasks) stays on the slow
 // SyncAll cadence and OS detection on its own loop (SyncAllGuestOSTypes).
 //
-// Re-entrancy-guarded: if a pass is still running when the next tick fires,
-// the tick is skipped rather than queued.
+// Re-entrancy-guarded per cluster: a cluster whose last pass is still running
+// is skipped, the others are not, so the caller can start a pass every tick
+// without waiting for this one and a cluster that hangs holds back only itself.
 func (s *Syncer) SyncAllResources(ctx context.Context) {
-	if !s.fastSyncInFlight.CompareAndSwap(false, true) {
-		return
-	}
-	defer s.fastSyncInFlight.Store(false)
-
+	// Callers run it in a goroutine of its own, so nothing above would catch it.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("fast sync pass panicked", "panic", r)
+		}
+	}()
 	clusters, err := s.queries.ListActiveClusters(ctx)
 	if err != nil {
 		s.logger.Warn("fast sync: failed to list active clusters", "error", err)
@@ -48,9 +50,13 @@ func (s *Syncer) SyncAllResources(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	for _, cluster := range clusters {
+		if _, running := s.fastSyncInFlight.LoadOrStore(cluster.ID, struct{}{}); running {
+			continue
+		}
 		wg.Add(1)
 		go func(cluster db.Cluster) {
 			defer wg.Done()
+			defer s.fastSyncInFlight.Delete(cluster.ID)
 			defer func() {
 				if r := recover(); r != nil {
 					s.logger.Error("fast sync panicked",

@@ -1368,12 +1368,129 @@ func TestSyncAll(t *testing.T) {
 	mq.clusters = []db.Cluster{cluster}
 	syncer := newTestSyncer(mq)
 
-	results := syncer.SyncAll(context.Background())
+	var results []*ClusterMetricResult
+	syncer.SyncAll(context.Background(), func(r *ClusterMetricResult) {
+		results = append(results, r)
+	})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 	if results[0].ClusterID != cluster.ID {
 		t.Errorf("result cluster ID = %s, want %s", results[0].ClusterID, cluster.ID)
+	}
+}
+
+// stuckClient is a cluster whose first call hangs until released, the way a
+// node going down mid-request does. Any later call fails at once and counts.
+type stuckClient struct {
+	ProxmoxClient
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *stuckClient) hang(ctx context.Context) error {
+	if c.calls.Add(1) > 1 {
+		return errors.New("stuck cluster asked again")
+	}
+	close(c.entered)
+	select {
+	case <-c.release:
+	case <-ctx.Done():
+	}
+	return errors.New("stuck cluster gave up")
+}
+
+func (c *stuckClient) GetNodes(ctx context.Context) ([]proxmox.NodeListEntry, error) {
+	return nil, c.hang(ctx)
+}
+
+func (c *stuckClient) GetClusterResources(ctx context.Context, _ string) ([]proxmox.ClusterResource, error) {
+	return nil, c.hang(ctx)
+}
+
+// A cluster that hangs held every cluster's next pass for its whole timeout:
+// a shut-down cluster froze another's status for up to 30 s, its full sync for
+// 2 min. The next pass must sync the others, and leave the stuck one alone.
+func TestSyncPasses_AStuckClusterHoldsBackNoOther(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		path  string // what the healthy cluster's pass asks once
+		run   func(*Syncer, context.Context, func(*ClusterMetricResult))
+		emits bool
+	}{
+		{"fast", "/api2/json/cluster/resources", func(s *Syncer, ctx context.Context, _ func(*ClusterMetricResult)) {
+			s.SyncAllResources(ctx)
+		}, false},
+		{"full", "/api2/json/version", func(s *Syncer, ctx context.Context, emit func(*ClusterMetricResult)) {
+			s.SyncAll(ctx, emit)
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var healthyPasses atomic.Int32
+			answer := func(body any) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == tc.path {
+						healthyPasses.Add(1)
+					}
+					jsonResponse(w, body)
+				}
+			}
+			srv := newTestServer(t, map[string]http.HandlerFunc{
+				"/api2/json/cluster/resources": answer([]proxmox.ClusterResource{{Type: "node", Node: "pve-01", Status: "online"}}),
+				"/api2/json/nodes":             answer([]proxmox.NodeListEntry{}),
+				"/api2/json/version":           answer(map[string]string{"version": "9.0"}),
+			})
+			defer srv.Close()
+			stuck := makeCluster(t, "https://stuck.example.com")
+			healthy := makeCluster(t, srv.URL)
+			client := &stuckClient{entered: make(chan struct{}), release: make(chan struct{})}
+			mq := newMockQueries()
+			mq.clusters = []db.Cluster{stuck}
+			s := newTestSyncer(mq)
+			s.clientFactory = func(apiURL, tokenID, secret, fp string) (ProxmoxClient, error) {
+				if apiURL == stuck.ApiUrl {
+					return client, nil
+				}
+				return DefaultClientFactory(apiURL, tokenID, secret, fp)
+			}
+			ctx := context.Background()
+
+			firstDone := make(chan struct{})
+			go func() {
+				tc.run(s, ctx, func(*ClusterMetricResult) {})
+				close(firstDone)
+			}()
+			<-client.entered
+			mq.clusters = []db.Cluster{stuck, healthy}
+
+			var emitted []uuid.UUID
+			var mu sync.Mutex
+			tc.run(s, ctx, func(r *ClusterMetricResult) {
+				mu.Lock()
+				defer mu.Unlock()
+				emitted = append(emitted, r.ClusterID)
+			})
+			close(client.release)
+			<-firstDone
+
+			if got := healthyPasses.Load(); got != 1 {
+				t.Errorf("the healthy cluster synced %d times while the other hung, want 1", got)
+			}
+			if got := client.calls.Load(); got != 1 {
+				t.Errorf("the stuck cluster was asked %d times, want 1: its running pass was not skipped", got)
+			}
+			if tc.emits && !slices.Equal(emitted, []uuid.UUID{healthy.ID}) {
+				t.Errorf("emitted %v, want the healthy cluster's result alone", emitted)
+			}
+			// A slot its finished pass kept would skip that cluster for good.
+			tc.run(s, ctx, func(*ClusterMetricResult) {})
+			if got := client.calls.Load(); got != 2 {
+				t.Errorf("after its pass ended the stuck cluster was asked %d times, want 2", got)
+			}
+		})
 	}
 }
 
