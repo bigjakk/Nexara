@@ -24,10 +24,13 @@ func ago(d time.Duration) pgtype.Timestamptz {
 // restore, ends it with guests not moved back); a step that has really run that
 // long still times out, and a resume from before the step began changes
 // nothing. A node that came back during the pause is seen as back: the uptime
-// check keeps the real time since the reboot.
+// check keeps the real time since the reboot. A reboot times out only a node
+// that is not back, so a late first look (the job's pass held up by another
+// node's drain) does not fail one that came back.
 func TestStepTimeouts_CountFromTheLastResume(t *testing.T) {
 	t.Parallel()
 	recently, never := ago(time.Minute), pgtype.Timestamptz{}
+	back := []string{"SetNodeRebootCompleted", "SetNodeHealthCheckPassed"}
 	for i, tt := range []struct {
 		step       string
 		resumed    pgtype.Timestamptz
@@ -40,8 +43,11 @@ func TestStepTimeouts_CountFromTheLastResume(t *testing.T) {
 		{"draining", ago(4 * time.Hour), 30 * time.Minute, false, nil},
 		{"upgrading", recently, 3 * time.Hour, false, nil},
 		{"upgrading", never, 3 * time.Hour, true, nil},
-		{"rebooting", recently, 3 * time.Hour, false, []string{"SetNodeRebootCompleted", "SetNodeHealthCheckPassed"}},
-		{"rebooting", never, 3 * time.Hour, true, nil},
+		{"rebooting", recently, 3 * time.Hour, false, back},
+		{"rebooting", never, 3 * time.Hour, false, back},
+		{"rebooting", recently, 20 * time.Minute, false, nil},
+		{"rebooting", never, 20 * time.Minute, true, nil},
+		{"rebooting, unreachable", never, 20 * time.Minute, true, nil},
 		{"restoring", recently, 3 * time.Hour, false, nil},
 		{"restoring", never, 3 * time.Hour, false, []string{"SetNodeRestoreCompleted"}},
 	} {
@@ -49,7 +55,8 @@ func TestStepTimeouts_CountFromTheLastResume(t *testing.T) {
 			t.Parallel()
 			d := &memberDB{t: t, accept: map[string]int64{
 				"SetNodeRestoreCompleted": 1, "SetNodeRebootCompleted": 1, "SetNodeHealthCheckPassed": 1}}
-			// Back up for half an hour, inside the three hours since the reboot.
+			// Up for half an hour: back from a reboot three hours ago, not yet
+			// from one 20 minutes ago.
 			o, client, _ := engineOn(t, d, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api2/json/nodes/pve-01/status" {
 					w.Header().Set("Content-Type", "application/json")
@@ -70,7 +77,10 @@ func TestStepTimeouts_CountFromTheLastResume(t *testing.T) {
 			case "upgrading":
 				node.UpgradeStartedAt = started
 				o.advanceUpgrading(ctx, client, job, node)
-			case "rebooting":
+			case "rebooting", "rebooting, unreachable":
+				if tt.step != "rebooting" {
+					node.NodeName = "pve-02" // the stub answers no status for it
+				}
 				node.RebootStartedAt = started
 				o.advanceRebooting(ctx, client, job, node)
 			case "restoring":

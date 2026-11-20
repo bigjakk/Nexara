@@ -1367,13 +1367,6 @@ func (o *Orchestrator) advanceDraining(ctx context.Context, client *proxmox.Clie
 }
 
 func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, node db.RollingUpdateNode) {
-	// Check if reboot timed out (10 minutes). Only the timeout discounts a
-	// pause: the uptime check below needs the real time since the reboot.
-	if node.RebootStartedAt.Valid && stepElapsed(job, node.RebootStartedAt.Time) > 10*time.Minute {
-		o.failNode(ctx, job, node, "reboot timed out after 10 minutes")
-		return
-	}
-
 	// Don't even probe for the first 30s — a Proxmox node usually takes 10-30s
 	// to start its actual shutdown sequence after `RebootNode` returns success,
 	// and during that window the API still answers with the *old* uptime.
@@ -1381,11 +1374,11 @@ func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Cli
 		return
 	}
 
-	// Try to get node status. Connection errors are expected (the node is down).
+	// Look before timing out. The reboot is stamped outside the tick (by the
+	// upgrade goroutine, or the confirm request), so the first look can come
+	// long after the node came back, and a timeout checked first failed it.
+	// Connection errors are expected (the node is down).
 	status, err := client.GetNodeStatus(ctx, node.NodeName)
-	if err != nil {
-		return
-	}
 
 	// The node only counts as "rebooted" when its uptime is shorter than the
 	// time elapsed since we issued the reboot. Otherwise we're seeing the
@@ -1393,9 +1386,17 @@ func (o *Orchestrator) advanceRebooting(ctx context.Context, client *proxmox.Cli
 	// A small skew buffer guards against clock drift between Nexara and the node.
 	const clockSkewBuffer = 10 * time.Second
 	elapsed := time.Since(node.RebootStartedAt.Time)
-	if time.Duration(status.Uptime)*time.Second >= elapsed+clockSkewBuffer {
-		o.logger.Debug("node still reporting pre-reboot uptime, waiting",
-			"node", node.NodeName, "uptime_s", status.Uptime, "elapsed_s", int64(elapsed.Seconds()))
+	if err != nil || time.Duration(status.Uptime)*time.Second >= elapsed+clockSkewBuffer {
+		// Not back after 10 minutes: timed out. Only the timeout discounts a
+		// pause: the uptime check needs the real time since the reboot.
+		if node.RebootStartedAt.Valid && stepElapsed(job, node.RebootStartedAt.Time) > 10*time.Minute {
+			o.failNode(ctx, job, node, "reboot timed out after 10 minutes")
+			return
+		}
+		if err == nil {
+			o.logger.Debug("node still reporting pre-reboot uptime, waiting",
+				"node", node.NodeName, "uptime_s", status.Uptime, "elapsed_s", int64(elapsed.Seconds()))
+		}
 		return
 	}
 
