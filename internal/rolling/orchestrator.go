@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,13 @@ type Orchestrator struct {
 	// waitForGuestState look, and settleWait waitForGuestState's bound
 	// (haSettleTimeout). Only tests set them.
 	pollEvery, settleWait time.Duration
+	// busyClusters holds the clusters a job pass or a cleanup release is
+	// running on (cluster ID → struct{}); see onCluster. It lives as long as
+	// the engine, not a leader term: the task waits are rooted in shutdownCtx
+	// and can outlive the term that started them.
+	busyClusters sync.Map
+	// passes counts what onCluster started, for tests to wait on.
+	passes sync.WaitGroup
 }
 
 // sshProbeTimeout bounds sshReady's login, which runs on the tick: Execute caps
@@ -107,8 +115,9 @@ func NewOrchestrator(shutdownCtx context.Context, queries *db.Queries, encryptio
 	}
 }
 
-// Tick is called on each scheduler interval. It advances all running jobs,
-// then retries the state release for terminal jobs that still hold something.
+// Tick is called on each scheduler interval. It starts a pass of each running
+// job, and the cleanup sweep's retried releases for terminal jobs that still
+// hold something, each on its cluster (onCluster), and waits for none of them.
 func (o *Orchestrator) Tick(ctx context.Context) {
 	jobs, err := o.queries.ListRunningRollingUpdateJobs(ctx)
 	if err != nil {
@@ -116,12 +125,47 @@ func (o *Orchestrator) Tick(ctx context.Context) {
 		return
 	}
 
-	for _, job := range jobs {
-		o.processJob(ctx, job)
+	for _, listed := range jobs {
+		o.onCluster(listed.ClusterID, func() {
+			// The listing can predate the end of the job's last pass: go on from
+			// the job as that pass left it (failed, say), not as it was listed.
+			job, err := o.queries.GetRollingUpdateJob(ctx, listed.ID)
+			if err != nil {
+				o.logger.Error("failed to re-read rolling update job", "job_id", listed.ID, "error", err)
+				return
+			}
+			if job.Status == "running" {
+				o.processJob(ctx, job)
+			}
+		})
 	}
 
 	o.sweepPendingCleanups(ctx)
 	o.expireUnstartedJobs(ctx)
+}
+
+// onCluster runs fn in a goroutine of its own, unless something onCluster
+// started for the cluster is still running, in which case it does nothing. A
+// pass can wait 30 minutes on one Proxmox task, and passes used to run one
+// after another, so one cluster's drain held back every other cluster's job.
+// Keyed by cluster, not by job: a cluster has one job at a time, and a job that
+// ended can still be winding down its last pass, or releasing what it held,
+// when the next one starts on the cluster.
+func (o *Orchestrator) onCluster(clusterID uuid.UUID, fn func()) {
+	if _, busy := o.busyClusters.LoadOrStore(clusterID, struct{}{}); busy {
+		o.logger.Debug("rolling update: cluster's last pass still running, skipped", "cluster_id", clusterID)
+		return
+	}
+	o.passes.Go(func() {
+		defer o.busyClusters.Delete(clusterID)
+		// Nothing above this goroutine would catch a panic: it would end the process.
+		defer func() {
+			if r := recover(); r != nil {
+				o.logger.Error("rolling update pass panicked", "cluster_id", clusterID, "panic", r)
+			}
+		}()
+		fn()
+	})
 }
 
 // unstartedJobTTL is how long a created job may wait to be started. A pending
@@ -982,9 +1026,10 @@ const upgradeHeartbeatStale = 3 * time.Minute
 // stepInProgress reports whether a drain or restore whose node row was last
 // written at updated may still be running, so the tick leaves it alone. Two
 // minutes of silence say it died with its container. A resume since that write
-// says it stopped for the pause: both loops run inside the tick and return at
-// their next status check, so nothing else is moving the node's guests, and
-// waiting out the two minutes only held the resumed drain still.
+// says it stopped for the pause: both loops run in the job's pass, which holds
+// its cluster (onCluster), and return at their next status check, so nothing
+// else is moving the node's guests, and waiting out the two minutes only held
+// the resumed drain still.
 func stepInProgress(job db.RollingUpdateJob, updated time.Time) bool {
 	if updated.IsZero() || (job.ResumedAt.Valid && job.ResumedAt.Time.After(updated)) {
 		return false
@@ -2013,7 +2058,8 @@ func cleanupBackoff(attempts int32) time.Duration {
 // still hold something. The inline release attempts (completion, failJob,
 // cancel) are one-shot — and the most common failure cause, an unreachable
 // cluster, tends to make those inline attempts fail too. This sweep is what
-// makes release eventual instead of best-effort.
+// makes release eventual instead of best-effort. Each release runs on its
+// job's cluster (onCluster), so an unreachable cluster delays no other's.
 func (o *Orchestrator) sweepPendingCleanups(ctx context.Context) {
 	jobs, err := o.queries.ListRollingUpdateJobsNeedingCleanup(ctx)
 	if err != nil {
@@ -2024,22 +2070,27 @@ func (o *Orchestrator) sweepPendingCleanups(ctx context.Context) {
 		if time.Since(job.UpdatedAt) < cleanupBackoff(job.CleanupAttempts) {
 			continue
 		}
-		attempts, err := o.queries.IncrementJobCleanupAttempts(ctx, job.ID)
-		if err != nil {
-			continue
-		}
-		released, didWork := o.releaseJobState(ctx, job.ID, false)
-		if !released {
-			o.logger.Warn("rolling update cleanup did not fully release job state; will retry",
-				"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
-			continue
-		}
-		if didWork {
-			o.logger.Info("released leftover rolling update state",
-				"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
-			o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cleanup_recovered",
-				map[string]string{"attempts": fmt.Sprintf("%d", attempts)})
-		}
+		o.onCluster(job.ClusterID, func() { o.retryRelease(ctx, job) })
+	}
+}
+
+// retryRelease is the sweep's attempt at releasing what a terminal job holds.
+func (o *Orchestrator) retryRelease(ctx context.Context, job db.RollingUpdateJob) {
+	attempts, err := o.queries.IncrementJobCleanupAttempts(ctx, job.ID)
+	if err != nil {
+		return
+	}
+	released, didWork := o.releaseJobState(ctx, job.ID, false)
+	if !released {
+		o.logger.Warn("rolling update cleanup did not fully release job state; will retry",
+			"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
+		return
+	}
+	if didWork {
+		o.logger.Info("released leftover rolling update state",
+			"job_id", job.ID, "cluster_id", job.ClusterID, "attempts", attempts)
+		o.auditLog(ctx, job.ClusterID, job.ID, "rolling_update_cleanup_recovered",
+			map[string]string{"attempts": fmt.Sprintf("%d", attempts)})
 	}
 }
 

@@ -51,7 +51,9 @@ type memberDB struct {
 	writes  []string
 	values  []string // "Name=first argument" for each accepted write, beside writes
 	reasons []string // its second argument when a string, beside writes
-	// rowFor answers each single-row query it names with that value's fields.
+	// rowFor answers each single-row query it names with that value's fields,
+	// or, for a func([]any) pgx.Row, with what it returns for the query's
+	// arguments.
 	rowFor map[string]any
 	// jobStatus, when set, answers GetRollingUpdateJob with a job in it.
 	jobStatus string
@@ -200,6 +202,9 @@ func (d *memberDB) Query(_ context.Context, sql string, args ...any) (pgx.Rows, 
 
 func (d *memberDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	if v, ok := d.rowFor[queryName(sql)]; ok {
+		if answer, ok := v.(func([]any) pgx.Row); ok {
+			return answer(args)
+		}
 		return structRow{v}
 	}
 	switch name := queryName(sql); {
@@ -255,6 +260,17 @@ func (r structRow) Scan(dest ...any) error {
 		reflect.ValueOf(d).Elem().Set(rv.Field(i))
 	}
 	return nil
+}
+
+// columnsOf returns the fields of v, a generated model, in order: a rowsFor row
+// of a SELECT * of its table.
+func columnsOf(v any) []any {
+	rv := reflect.ValueOf(v)
+	cols := make([]any, rv.NumField())
+	for i := range cols {
+		cols[i] = rv.Field(i).Interface()
+	}
+	return cols
 }
 
 // rowsOf returns the audit rows the engine wrote for resourceType.
