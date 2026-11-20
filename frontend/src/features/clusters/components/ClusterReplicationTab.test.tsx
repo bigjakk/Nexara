@@ -96,10 +96,7 @@ describe("ClusterReplicationTab — deleting a job", () => {
     ).toBeInTheDocument();
     // Without keep, Proxmox deletes the replicated volumes on the target.
     expect(dialog).toHaveTextContent(
-      "it deletes the copy of guest 102's disks that this job replicated to pve-03",
-    );
-    expect(dialog).toHaveTextContent(
-      "The replicated copy on pve-03 cannot be recovered.",
+      "Proxmox deletes the copy of guest 102's disks on pve-03, which cannot be recovered",
     );
     expect(writes).toEqual([]);
   });

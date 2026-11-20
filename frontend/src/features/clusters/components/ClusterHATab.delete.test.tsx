@@ -127,9 +127,9 @@ const SITES: Site[] = [
     button: "Delete resource vm:102",
     title: "Delete HA resource vm:102?",
     says: [
-      "Proxmox stops managing vm:102 with HA",
-      "if it is running, it keeps running where it is",
-      "take it out of every HA rule that lists it",
+      "vm:102 is no longer restarted after a failure",
+      "the guest itself is left as it is",
+      "take it out of its HA rules",
     ],
     sends: `DELETE ${BASE}/resources/vm%3A102`,
   },

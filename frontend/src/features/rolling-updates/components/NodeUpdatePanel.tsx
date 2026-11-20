@@ -201,39 +201,21 @@ export function NodeUpdatePanel({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Update {nodeName} in place?</AlertDialogTitle>
-            {/* Spelled out rather than summarised, because the difference from
-                the cluster-wide rolling update is the whole point and is not
-                visible from the button. Someone reaching for this on a
-                clustered node should be able to tell that they are skipping
-                the drain, not just choosing a shorter path to it. */}
+            {/* Says that it skips the drain: that is the difference from a
+                rolling update, and the button does not show it. */}
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm">
                 <p>
                   Runs <code>apt dist-upgrade</code> on {nodeName} over SSH,
                   applying {count} pending{" "}
-                  {count === 1 ? "package" : "packages"}.
+                  {count === 1 ? "package" : "packages"}.{" "}
+                  <strong>Guests stay running on this node</strong>; to move
+                  them to another node first, start a rolling update from
+                  Security instead.
                 </p>
                 <p>
-                  <strong>Guests stay running on this node.</strong> Nothing is
-                  migrated and no other node is involved, so this works on a
-                  single-node cluster — but the guests are exposed to whatever
-                  the upgrade restarts.
-                </p>
-                <p>
-                  A cluster-wide rolling update would instead drain this node
-                  first — migrating its guests away and handling HA rules — and
-                  only then upgrade it. If this node is part of a cluster and
-                  you want that, start a rolling update from Security instead.
-                </p>
-                <p>
-                  Either way, DRS and Proxmox&rsquo;s native auto-rebalancer are
-                  paused for the cluster while the update runs, and restored
-                  when it finishes.
-                </p>
-                <p>
-                  If the upgrade needs a reboot, the node is{" "}
-                  <strong>not</strong> rebooted while guests are running on it.
-                  It is flagged as needing one so you can schedule it.
+                  The node is not rebooted; if it needs a reboot, it is marked
+                  Reboot required.
                 </p>
               </div>
             </AlertDialogDescription>

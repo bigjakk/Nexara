@@ -1243,7 +1243,7 @@ export function ClusterHATab({ clusterId, pveVersion }: ClusterHATabProps) {
           return `Delete HA resource ${res.sid}${name ? ` (${name})` : ""}?`;
         }}
         description={(res) =>
-          `Proxmox stops managing ${res.sid} with HA as soon as you confirm: it is no longer restarted after a failure or recovered to another node when its node fails. The guest itself is left as it is — if it is running, it keeps running where it is. Recent Proxmox VE 9 releases also take it out of every HA rule that lists it and delete a rule it was the only resource of. To undo, add it to HA again.`
+          `${res.sid} is no longer restarted after a failure or recovered to another node when its node fails; the guest itself is left as it is. Recent Proxmox VE 9 releases also take it out of its HA rules and delete any rule left empty.`
         }
       />
       {/*

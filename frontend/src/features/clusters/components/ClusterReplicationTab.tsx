@@ -252,7 +252,7 @@ export function ClusterReplicationTab({
         }}
         title={(job) => `Delete replication job ${job.id}?`}
         description={(job) =>
-          `Proxmox marks the job for removal as soon as you confirm, and removes it in the background shortly after: it deletes the copy of guest ${String(job.guest)}'s disks that this job replicated to ${job.target}, and the job's replication snapshots on the source. The guest and its own disks are not touched. The replicated copy on ${job.target} cannot be recovered.`
+          `Proxmox deletes the copy of guest ${String(job.guest)}'s disks on ${job.target}, which cannot be recovered, and the job's replication snapshots. The guest and its own disks are not touched.`
         }
       />
 

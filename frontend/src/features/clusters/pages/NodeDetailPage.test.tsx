@@ -460,14 +460,14 @@ describe("NodeDetailPage Firewall tab — quick-add rules", () => {
     {
       button: "Add drop rule",
       title: `Drop all inbound traffic to ${NODE}?`,
-      says: "this can cut off access to the node",
+      says: "it can cut off access to the node",
       confirm: "Add drop rule",
       action: "DROP",
     },
     {
       button: "Add accept rule",
       title: `Accept all inbound traffic to ${NODE}?`,
-      says: "it lets every inbound connection to the node through",
+      says: "it lets every inbound connection through",
       confirm: "Add accept rule",
       action: "ACCEPT",
     },

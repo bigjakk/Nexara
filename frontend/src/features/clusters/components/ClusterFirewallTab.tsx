@@ -684,8 +684,8 @@ function IPSetEntriesCard({
           }
           description={(e) =>
             e.nomatch
-              ? `This is a nomatch entry: it excludes ${e.cidr} from the IP set ${setName}. Proxmox removes it at once, which lifts the exclusion — addresses in ${e.cidr} that another entry of the set covers start matching the set, and rules that use the set start applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again with nomatch.`
-              : `Proxmox removes ${e.cidr} from the IP set ${setName} at once; unless another entry of the set covers them, its addresses stop matching the set, and rules that use the set stop applying to them on the firewall service's next update, every 10 seconds. It cannot be undone: to get it back, add the entry again.`
+              ? `This nomatch entry excludes ${e.cidr} from ${setName}. Removing it lifts the exclusion: addresses in ${e.cidr} that another entry covers start matching the set and its rules.`
+              : `Unless another entry of the set covers them, addresses in ${e.cidr} stop matching ${setName} and the rules that use it.`
           }
           confirmLabel="Remove entry"
         />

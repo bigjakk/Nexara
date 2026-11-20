@@ -63,9 +63,9 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
         name: "Start the rolling update on 3 nodes?",
       }),
     ).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("Each node is drained first");
-    expect(dialog).toHaveTextContent("Then the node is rebooted.");
-    expect(dialog).toHaveTextContent("HA rules that name one of the node's");
+    expect(dialog).toHaveTextContent(
+      "Each node is drained, upgraded over SSH, rebooted, and given its guests back.",
+    );
     expect(onStart).not.toHaveBeenCalled();
     // Red means danger only: starting is not drawn as one, cancelling is.
     const start = within(dialog).getByRole("button", { name: "Start" });
@@ -75,9 +75,9 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
     expect(onStart).toHaveBeenCalledWith("j1");
   });
 
-  // Only the SSH path reads /var/run/reboot-required; a confirmed manual
-  // upgrade never marks a node Reboot required.
-  it("promises no Reboot required mark for a manual in-place job", async () => {
+  // A confirmed manual upgrade owes a reboot for a kernel as well
+  // (ConfirmUpgrade); in place it is deferred and the node marked.
+  it("says a manual in-place job marks a kernel update Reboot required", async () => {
     const { user } = renderTable({
       ...JOB,
       auto_upgrade: false,
@@ -87,8 +87,9 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
 
     await user.click(screen.getByRole("button", { name: "Start" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(dialog).toHaveTextContent("The node is not rebooted.");
-    expect(dialog).not.toHaveTextContent("Reboot required");
+    expect(dialog).toHaveTextContent(
+      "each node is upgraded by you and marked Reboot required if its updates include a kernel.",
+    );
   });
 
   it("says what a cancel leaves behind before it cancels a running job", async () => {
@@ -97,7 +98,7 @@ describe("RollingUpdateJobsTable — Start and Cancel ask first", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(
-      "an upgrade already running finishes, but the node is not rebooted",
+      "An upgrade under way finishes without a reboot",
     );
     expect(onCancel).not.toHaveBeenCalled();
     const cancel = within(dialog).getByRole("button", { name: "Cancel job" });

@@ -557,7 +557,7 @@ export function SSHCredentialsForm({ clusterId }: SSHCredentialsFormProps) {
           // cluster_ssh_credentials — the handler's re-home check notes the
           // pins outlive it.
           description={() =>
-            "The stored password or private key is deleted from Nexara and cannot be recovered; you would have to enter it again. Until you do, Nexara cannot run commands on this cluster's nodes over SSH: rolling updates cannot run automated apt upgrades (a running rolling update with automated upgrades fails when its next node starts, before that node is drained), and node maintenance mode and node sensor readings stop working. Pinned host keys are kept."
+            "The stored password or key is deleted and cannot be recovered. Until you enter it again, automated upgrades, maintenance mode and sensor readings stop working, and a running automated rolling update fails at its next node."
           }
         />
 

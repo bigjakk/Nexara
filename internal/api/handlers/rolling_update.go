@@ -347,7 +347,7 @@ func (h *RollingUpdateHandler) CreateJob(c fiber.Ctx, p *apischema.Params) error
 			// Sending the operator to a log that may be silent about their
 			// actual failure is worse than naming the likely cause.
 			return fiber.NewError(fiber.StatusConflict,
-				"A previous rolling update still holds cluster state (paused CRS auto-rebalance, Ceph's noout flag, disabled HA rules, or stopped guests) and it could not be released. Cleanup keeps retrying in the background, so a cluster that was briefly unreachable clears on its own. If it never clears, an HA rule is likely refusing to re-enable because another rule now conflicts with it — repair or delete that rule in Proxmox, or delete the stuck rule itself, and try again.")
+				"A previous rolling update still holds cluster state that could not be released yet; cleanup keeps retrying in the background. If it never clears, an HA rule is likely refusing to re-enable because another rule conflicts with it: fix or delete one of them in Proxmox, then try again.")
 		}
 	}
 

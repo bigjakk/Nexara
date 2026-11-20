@@ -178,7 +178,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
     await expectConfirmedDelete(user, {
       button: "Delete entry 192.0.2.0/24",
       heading: "Remove 192.0.2.0/24 from IP set set02?",
-      text: "Proxmox removes 192.0.2.0/24 from the IP set set02 at once; unless another entry of the set covers them, its addresses stop matching the set",
+      text: "Unless another entry of the set covers them, addresses in 192.0.2.0/24 stop matching set02 and the rules that use it.",
       confirm: "Remove entry",
       request: `DELETE ${FW}/ipset/set02/entries/192.0.2.0%2F24`,
       invariant: () => {
@@ -194,7 +194,7 @@ describe("ClusterFirewallTab — every delete asks first", () => {
     await expectConfirmedDelete(user, {
       button: "Delete entry 192.0.2.77",
       heading: "Remove !192.0.2.77 from IP set set02?",
-      text: "This is a nomatch entry: it excludes 192.0.2.77 from the IP set set02. Proxmox removes it at once, which lifts the exclusion — addresses in 192.0.2.77 that another entry of the set covers start matching the set, and rules that use the set start applying to them",
+      text: "This nomatch entry excludes 192.0.2.77 from set02. Removing it lifts the exclusion: addresses in 192.0.2.77 that another entry covers start matching the set and its rules.",
       confirm: "Remove entry",
       request: `DELETE ${FW}/ipset/set02/entries/192.0.2.77`,
       invariant: () => {

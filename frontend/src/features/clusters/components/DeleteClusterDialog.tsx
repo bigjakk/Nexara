@@ -128,12 +128,10 @@ export function DeleteClusterDialog({
                 </Label>
               </div>
               <p className="text-xs text-muted-foreground">
-                Leave this unchecked to keep them on the cluster. Nexara removes
-                only what it created for this cluster, and skips deleting the
-                user entirely if it holds any other API token — so a credential
-                you or another install added is never taken with it. If the
-                cluster is unreachable the deletion still goes ahead, and
-                anything left behind is recorded in the audit log.
+                Nexara removes only what it created, and keeps the user if it
+                holds any other token. If the cluster cannot be reached, the
+                deletion still goes ahead and what is left behind is noted in
+                the audit log.
               </p>
             </div>
           )}

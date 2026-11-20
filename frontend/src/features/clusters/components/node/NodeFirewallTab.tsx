@@ -236,8 +236,8 @@ export function FirewallTab({
         }
         description={(action) =>
           action === "DROP"
-            ? `Proxmox adds an enabled DROP rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. While the firewall is on for ${nodeName}, this can cut off access to the node — its web UI and API, SSH, and Nexara's own connection to it.`
-            : `Proxmox adds an enabled ACCEPT rule at the top of the rule list of node ${nodeName} that matches every inbound packet: any source, protocol and port. The firewall service applies it within about 10 seconds. Rules are checked from the top, so while the firewall is on for ${nodeName} it lets every inbound connection to the node through, whatever the rules below it and the inbound policy say. To undo it, delete the rule.`
+            ? `The rule goes first in ${nodeName}'s rule list. While the node's firewall is on, it can cut off access to the node, Nexara's own connection included.`
+            : `The rule goes first in ${nodeName}'s rule list, so while the node's firewall is on it lets every inbound connection through, whatever the rules below and the inbound policy say.`
         }
         confirmLabel={(action) =>
           action === "DROP" ? "Add drop rule" : "Add accept rule"

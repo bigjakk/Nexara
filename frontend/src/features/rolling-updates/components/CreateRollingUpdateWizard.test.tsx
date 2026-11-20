@@ -87,14 +87,10 @@ describe("CreateRollingUpdateWizard", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(await screen.findByRole("button", { name: "Next" }));
 
-    const steps = await screen.findByText(/Each node is drained first/);
-    expect(steps).toHaveTextContent(
-      "Nexara waits for the node to answer again",
-    );
+    const steps = await screen.findByText(/Each node is drained/);
+    expect(steps).toHaveTextContent("Nexara updates one node at a time");
     await user.click(screen.getByRole("switch", { name: "Start immediately" }));
-    expect(
-      screen.queryByText(/Each node is drained first/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Each node is drained/)).not.toBeInTheDocument();
   });
 
   // The automated upgrade is on by default, but the create is refused for a
