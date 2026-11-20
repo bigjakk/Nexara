@@ -91,6 +91,13 @@ type Querier interface {
 	// in flight, so a long snapshot never holds its row out of its next slot.
 	// The claim clears last_error and last_upid, which belong to the previous run:
 	// without that, a run being started would show beside the last run's error.
+	//
+	// busy_cluster_ids are the clusters this scheduler is still dispatching an
+	// earlier claim's runs on, and their rows are left for a later claim. Each
+	// cluster's runs are dispatched one after another, and the next claim does not
+	// wait for them, so on a cluster that stops answering a batch can outlast
+	// stale_seconds: a claim that took its unstarted rows again would run them
+	// twice. NULL or empty leaves nothing out.
 	ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error)
 	// Claims the config's sync lease for lease_seconds, when no sync holds one that is
 	// still running, and returns the config; no row when another sync holds it (or the

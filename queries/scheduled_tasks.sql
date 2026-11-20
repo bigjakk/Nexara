@@ -61,6 +61,13 @@ WHERE id = sqlc.arg('id')
 -- in flight, so a long snapshot never holds its row out of its next slot.
 -- The claim clears last_error and last_upid, which belong to the previous run:
 -- without that, a run being started would show beside the last run's error.
+--
+-- busy_cluster_ids are the clusters this scheduler is still dispatching an
+-- earlier claim's runs on, and their rows are left for a later claim. Each
+-- cluster's runs are dispatched one after another, and the next claim does not
+-- wait for them, so on a cluster that stops answering a batch can outlast
+-- stale_seconds: a claim that took its unstarted rows again would run them
+-- twice. NULL or empty leaves nothing out.
 WITH due AS (
     SELECT id FROM scheduled_tasks
     WHERE enabled = true
@@ -70,6 +77,8 @@ WITH due AS (
           OR last_run_at IS NULL
           OR last_run_at < now() - make_interval(secs => sqlc.arg('stale_seconds')::float)
       )
+      AND (sqlc.narg('busy_cluster_ids')::uuid[] IS NULL
+           OR cluster_id <> ALL(sqlc.narg('busy_cluster_ids')::uuid[]))
     FOR UPDATE SKIP LOCKED
 )
 UPDATE scheduled_tasks st

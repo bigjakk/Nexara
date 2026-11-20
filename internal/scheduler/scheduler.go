@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,8 +37,8 @@ type Scheduler struct {
 	encryptionKey string
 	taskRetention time.Duration
 	logger        *slog.Logger
-	drsEngine     *drs.Engine
-	drsExecutor   *drs.Executor
+	drsEngine     drsEvaluator
+	drsExecutor   drsMigrator
 	cveScanner    *scanner.Engine
 	alertEngine   *notifications.Engine
 	reportGen     *reports.Generator
@@ -46,7 +47,32 @@ type Scheduler struct {
 	guestTools    *guesttools.Engine
 	eventPub      *events.Publisher
 	cache         *proxmox.ClientCache // nil-safe; passed through to sub-engines
-	drsLastEval   map[uuid.UUID]time.Time
+
+	// drsLastEval is when this process last evaluated each cluster. drsMu
+	// guards it, because clusters are evaluated side by side.
+	drsMu       sync.Mutex
+	drsLastEval map[uuid.UUID]time.Time
+
+	// The clusters RunDRS, Run and RunVMImportReconcile have a pass running on.
+	drsPasses    clusterPasses
+	taskPasses   clusterPasses
+	importPasses clusterPasses
+
+	// newClient replaces createClient's cache-then-per-call build when set. nil
+	// in production: it is the seam that lets a test point the scheduler at an
+	// httptest Proxmox, as drs.Engine's is.
+	newClient func(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error)
+}
+
+// drsEvaluator and drsMigrator are what RunDRS uses of *drs.Engine and
+// *drs.Executor, behind interfaces so that its handling of each cluster can be
+// tested without one.
+type drsEvaluator interface {
+	Evaluate(ctx context.Context, clusterID uuid.UUID) (*drs.EvalResult, error)
+}
+
+type drsMigrator interface {
+	Execute(ctx context.Context, client *proxmox.Client, clusterID uuid.UUID, mode string, recommendations []drs.Recommendation) error
 }
 
 // Deps are the pre-built domain engines the scheduler ticks. They come from
@@ -107,6 +133,12 @@ func New(d Deps) *Scheduler {
 // claim ages out, the row becomes eligible again so the task isn't
 // stuck in 'running' forever. Set wider than typical task duration but
 // narrow enough that a crashed leader's tasks resume on the new leader.
+//
+// A batch can still outlast the stale window here, on a cluster that stops
+// answering, since its runs are dispatched one after another and each waits for
+// the client's timeout. What keeps a later claim off its unstarted rows is that
+// the claim leaves out every cluster with a batch still dispatching
+// (ClaimDueTasks' busy_cluster_ids).
 const (
 	taskClaimGuardSeconds = 600 // 10 minutes
 	taskClaimStaleSeconds = 600 // 10 minutes
@@ -121,12 +153,13 @@ type dueTaskClaimer interface {
 }
 
 // claimDueTasks invokes ClaimDueTasks with the standard guard/stale
-// constants. Extracted from Run() so tests can verify the params
-// without spinning up a live Postgres.
-func claimDueTasks(ctx context.Context, claimer dueTaskClaimer) ([]db.ScheduledTask, error) {
+// constants, leaving out the busy clusters. Extracted from Run() so tests can
+// verify the params without spinning up a live Postgres.
+func claimDueTasks(ctx context.Context, claimer dueTaskClaimer, busy []uuid.UUID) ([]db.ScheduledTask, error) {
 	return claimer.ClaimDueTasks(ctx, db.ClaimDueTasksParams{
-		GuardSeconds: taskClaimGuardSeconds,
-		StaleSeconds: taskClaimStaleSeconds,
+		GuardSeconds:   taskClaimGuardSeconds,
+		StaleSeconds:   taskClaimStaleSeconds,
+		BusyClusterIds: busy,
 	})
 }
 
@@ -135,6 +168,13 @@ func claimDueTasks(ctx context.Context, claimer dueTaskClaimer) ([]db.ScheduledT
 // next_run_at) so that the same task can't be picked up twice by
 // concurrent ticks or by overlapping scheduler instances during a
 // leader-takeover window.
+//
+// Each cluster's runs are dispatched in a goroutine of the cluster's own, one
+// after another, so runs due on a cluster that stops answering no longer hold
+// back another cluster's, which could push a scheduled reboot out of its
+// maintenance window. cmd/nexara starts the next pass without waiting for this
+// one, and its claim leaves out the clusters this one is still dispatching on.
+// Run returns when its own runs are dispatched.
 func (s *Scheduler) Run(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -152,7 +192,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 	// panic in the settle keeps due runs from starting.
 	s.RunScheduledTaskReconcile(ctx)
 
-	tasks, err := claimDueTasks(ctx, s.queries)
+	tasks, err := claimDueTasks(ctx, s.queries, s.taskPasses.busy())
 	if err != nil {
 		s.logger.Error("failed to claim due tasks", "error", err)
 		return
@@ -170,20 +210,33 @@ func (s *Scheduler) Run(ctx context.Context) {
 		byCluster[t.ClusterID] = append(byCluster[t.ClusterID], t)
 	}
 
+	var wg sync.WaitGroup
 	for clusterID, clusterTasks := range byCluster {
-		client, err := s.createClient(ctx, clusterID)
-		if err != nil {
-			s.logger.Error("failed to create proxmox client for cluster",
-				"cluster_id", clusterID, "error", err)
-			for _, t := range clusterTasks {
-				s.markFailed(ctx, t, fmt.Sprintf("create client: %v", err))
-			}
-			continue
-		}
+		// Joined rather than claimed: these rows are this pass's to run even
+		// if a pass that overlapped this one started on the cluster too, and
+		// the cluster counts as busy until both are done.
+		s.taskPasses.join(clusterID)
+		s.goClusterPass(&wg, &s.taskPasses, "scheduled_tasks", clusterID, func() {
+			s.dispatchClusterTasks(ctx, clusterID, clusterTasks)
+		})
+	}
+	wg.Wait()
+}
 
-		for _, t := range clusterTasks {
-			s.executeTask(ctx, client, t)
+// dispatchClusterTasks starts one cluster's claimed runs, one after another.
+func (s *Scheduler) dispatchClusterTasks(ctx context.Context, clusterID uuid.UUID, tasks []db.ScheduledTask) {
+	client, err := s.createClient(ctx, clusterID)
+	if err != nil {
+		s.logger.Error("failed to create proxmox client for cluster",
+			"cluster_id", clusterID, "error", err)
+		for _, t := range tasks {
+			s.markFailed(ctx, t, fmt.Sprintf("create client: %v", err))
 		}
+		return
+	}
+
+	for _, t := range tasks {
+		s.executeTask(ctx, client, t)
 	}
 }
 
@@ -193,8 +246,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 // ReconcileDispatchedScheduledTasks, has the rules).
 //
 // Run settles as well, before it claims; this tick exists for responsiveness.
-// Run ticks once a minute and skips a tick while a slow pass is still
-// dispatching, and a task ends whenever it ends. The only source is
+// Run ticks once a minute, and a task ends whenever it ends. The only source is
 // task_history, which the collector finalizes on its own sync tick, so this
 // reads the database and never Proxmox — one set-based UPDATE per tick, which
 // touches nothing while no run is waiting.
@@ -256,7 +308,17 @@ func (s *Scheduler) settleDispatchedRunsWith(ctx context.Context, settler dispat
 }
 
 // RunDRS evaluates DRS for all enabled clusters, respecting each cluster's
-// configured evaluation interval (eval_interval_seconds).
+// configured evaluation interval (eval_interval_seconds), and carries out what
+// each evaluation recommends.
+//
+// Each cluster is evaluated and migrated in a goroutine of its own, and a
+// cluster whose last pass is still running is left alone. Execute waits up to
+// 30 minutes for each migration it starts, as long again for one that HA
+// carries out, and a cluster that stops answering held each read of its
+// evaluation for the client's whole timeout: handled in turn, one cluster
+// migrating or hanging held back every other cluster's evaluation. cmd/nexara
+// starts the next pass without waiting for this one. RunDRS returns when the
+// clusters it started on are done.
 func (s *Scheduler) RunDRS(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -276,59 +338,92 @@ func (s *Scheduler) RunDRS(ctx context.Context) {
 
 	now := time.Now()
 
+	var wg sync.WaitGroup
 	for _, cfg := range configs {
-		lastEval, seen := s.drsLastEval[cfg.ClusterID]
-		if !drsShouldEvaluate(cfg, lastEval, seen, now) {
+		// Before the due check, so a cluster still busy with its last pass
+		// keeps its queued request, and its last evaluation time, for the
+		// pass after.
+		if !s.drsPasses.claim(cfg.ClusterID) {
 			continue
 		}
-
-		s.drsLastEval[cfg.ClusterID] = now
-
-		result, err := s.drsEngine.Evaluate(ctx, cfg.ClusterID)
-		if err != nil {
-			s.logger.Error("DRS evaluation failed",
-				"cluster_id", cfg.ClusterID, "error", err)
-			// Leave a queued request set so the next tick retries it, unless
-			// it has aged past its own interval — otherwise a cluster whose
-			// evaluation fails persistently would keep the bypass latched and
-			// re-evaluate every tick forever.
-			if cfg.EvalRequestedAt.Valid && now.Sub(cfg.EvalRequestedAt.Time) > drsEvalInterval(cfg) {
-				s.clearDRSEvalRequest(ctx, cfg)
+		s.goClusterPass(&wg, &s.drsPasses, "drs", cfg.ClusterID, func() {
+			if s.drsDue(cfg, now) {
+				s.runClusterDRS(ctx, cfg, now)
 			}
-			continue
+		})
+	}
+	wg.Wait()
+}
+
+// drsEvalTimeout bounds one cluster's evaluation, which only reads. The
+// leader's context has no deadline, and a cluster that stopped answering held
+// each of its reads for proxmox.CachedClientTimeout, one after another; a
+// healthy cluster's evaluation takes seconds. Twice that timeout, so one read
+// that takes the whole of it still leaves room for the rest.
+const drsEvalTimeout = 2 * proxmox.CachedClientTimeout
+
+// drsDue reports whether cfg's cluster is due an evaluation at now, and if it
+// is, records now as its last.
+func (s *Scheduler) drsDue(cfg db.DrsConfig, now time.Time) bool {
+	s.drsMu.Lock()
+	defer s.drsMu.Unlock()
+	lastEval, seen := s.drsLastEval[cfg.ClusterID]
+	if !drsShouldEvaluate(cfg, lastEval, seen, now) {
+		return false
+	}
+	s.drsLastEval[cfg.ClusterID] = now
+	return true
+}
+
+// runClusterDRS evaluates one cluster and executes what the evaluation
+// recommends.
+func (s *Scheduler) runClusterDRS(ctx context.Context, cfg db.DrsConfig, now time.Time) {
+	evalCtx, cancel := context.WithTimeout(ctx, drsEvalTimeout)
+	result, err := s.drsEngine.Evaluate(evalCtx, cfg.ClusterID)
+	cancel()
+	if err != nil {
+		s.logger.Error("DRS evaluation failed",
+			"cluster_id", cfg.ClusterID, "error", err)
+		// Leave a queued request set so the next tick retries it, unless
+		// it has aged past its own interval — otherwise a cluster whose
+		// evaluation fails persistently would keep the bypass latched and
+		// re-evaluate every tick forever.
+		if cfg.EvalRequestedAt.Valid && now.Sub(cfg.EvalRequestedAt.Time) > drsEvalInterval(cfg) {
+			s.clearDRSEvalRequest(ctx, cfg)
 		}
+		return
+	}
 
-		// Evaluation succeeded, so an operator's queued request has been
-		// honoured. Clear it against the timestamp we READ rather than now():
-		// a request stamped while this pass was running is newer, fails the
-		// `<=` guard, and survives to be serviced by the following tick.
-		s.clearDRSEvalRequest(ctx, cfg)
+	// Evaluation succeeded, so an operator's queued request has been
+	// honoured. Clear it against the timestamp we READ rather than now():
+	// a request stamped while this pass was running is newer, fails the
+	// `<=` guard, and survives to be serviced by the following tick.
+	s.clearDRSEvalRequest(ctx, cfg)
 
-		if result != nil && result.BlockedByNativeCRS {
-			s.logger.Info("DRS skipped: Proxmox native CRS auto-rebalance is active",
-				"cluster_id", cfg.ClusterID)
-			continue
-		}
+	if result != nil && result.BlockedByNativeCRS {
+		s.logger.Info("DRS skipped: Proxmox native CRS auto-rebalance is active",
+			"cluster_id", cfg.ClusterID)
+		return
+	}
 
-		if result == nil || len(result.Recommendations) == 0 {
-			continue
-		}
+	if result == nil || len(result.Recommendations) == 0 {
+		return
+	}
 
-		recommendations := result.Recommendations
-		s.logger.Info("DRS produced recommendations",
-			"cluster_id", cfg.ClusterID, "count", len(recommendations))
+	recommendations := result.Recommendations
+	s.logger.Info("DRS produced recommendations",
+		"cluster_id", cfg.ClusterID, "count", len(recommendations))
 
-		client, err := s.createClient(ctx, cfg.ClusterID)
-		if err != nil {
-			s.logger.Error("failed to create proxmox client for DRS",
-				"cluster_id", cfg.ClusterID, "error", err)
-			continue
-		}
+	client, err := s.createClient(ctx, cfg.ClusterID)
+	if err != nil {
+		s.logger.Error("failed to create proxmox client for DRS",
+			"cluster_id", cfg.ClusterID, "error", err)
+		return
+	}
 
-		if err := s.drsExecutor.Execute(ctx, client, cfg.ClusterID, cfg.Mode, recommendations); err != nil {
-			s.logger.Error("DRS execution failed",
-				"cluster_id", cfg.ClusterID, "error", err)
-		}
+	if err := s.drsExecutor.Execute(ctx, client, cfg.ClusterID, cfg.Mode, recommendations); err != nil {
+		s.logger.Error("DRS execution failed",
+			"cluster_id", cfg.ClusterID, "error", err)
 	}
 }
 
@@ -1167,6 +1262,9 @@ func (s *Scheduler) trackTask(ctx context.Context, p trackTaskParams) {
 // cache (Deps.Cache), falling back to a per-call build. The sub-engines get
 // the same cache wired directly in app.New, so nothing propagates it here.
 func (s *Scheduler) createClient(ctx context.Context, clusterID uuid.UUID) (*proxmox.Client, error) {
+	if s.newClient != nil {
+		return s.newClient(ctx, clusterID)
+	}
 	if s.cache != nil {
 		client, err := s.cache.Get(ctx, clusterID)
 		if err == nil {
@@ -1417,6 +1515,10 @@ func (s *Scheduler) RunRollingUpdates(ctx context.Context) {
 // the job to completed/failed once the create-with-import task reaches a terminal state.
 // This is what gives the import history a durable status across process restarts (the
 // dispatching API request returns as soon as the long disk conversion has started).
+//
+// Each cluster's jobs are read in a goroutine of the cluster's own, and a cluster whose last
+// pass is still reading is left alone, so a cluster that stops answering no longer holds back
+// another cluster's imports. cmd/nexara starts the next pass without waiting for this one.
 func (s *Scheduler) RunVMImportReconcile(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1439,28 +1541,39 @@ func (s *Scheduler) RunVMImportReconcile(ctx context.Context) {
 		return
 	}
 
-	clients := make(map[uuid.UUID]*proxmox.Client)
+	byCluster := make(map[uuid.UUID][]db.VmImportJob)
 	for _, job := range jobs {
-		client, seen := clients[job.ClusterID]
-		if !seen {
-			c, cerr := s.createClient(ctx, job.ClusterID)
-			if cerr != nil {
-				s.logger.Warn("vm import reconcile: create client failed", "cluster_id", job.ClusterID, "error", cerr)
-				clients[job.ClusterID] = nil
-				continue
-			}
-			client = c
-			clients[job.ClusterID] = c
-		}
-		if client == nil {
+		byCluster[job.ClusterID] = append(byCluster[job.ClusterID], job)
+	}
+
+	var wg sync.WaitGroup
+	for clusterID, clusterJobs := range byCluster {
+		if !s.importPasses.claim(clusterID) {
 			continue
 		}
-		s.reconcileImportJob(ctx, client, job)
+		s.goClusterPass(&wg, &s.importPasses, "vm_import_reconcile", clusterID, func() {
+			client, err := s.createClient(ctx, clusterID)
+			if err != nil {
+				s.logger.Warn("vm import reconcile: create client failed", "cluster_id", clusterID, "error", err)
+				return
+			}
+			for _, job := range clusterJobs {
+				s.reconcileImportJob(ctx, client, job)
+			}
+		})
 	}
+	wg.Wait()
 }
 
+// taskStatusTimeout bounds one read of an import's task status, a small read
+// that otherwise waited for the client's whole timeout on a cluster that
+// stopped answering.
+const taskStatusTimeout = 30 * time.Second
+
 func (s *Scheduler) reconcileImportJob(ctx context.Context, client *proxmox.Client, job db.VmImportJob) {
-	status, err := client.GetTaskStatus(ctx, job.TargetNode, job.Upid)
+	statusCtx, cancel := context.WithTimeout(ctx, taskStatusTimeout)
+	status, err := client.GetTaskStatus(statusCtx, job.TargetNode, job.Upid)
+	cancel()
 	if err != nil {
 		s.logger.Warn("vm import reconcile: task status failed", "job_id", job.ID, "upid", job.Upid, "error", err)
 		return

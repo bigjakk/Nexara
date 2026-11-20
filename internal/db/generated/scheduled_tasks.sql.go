@@ -23,6 +23,8 @@ WITH due AS (
           OR last_run_at IS NULL
           OR last_run_at < now() - make_interval(secs => $2::float)
       )
+      AND ($3::uuid[] IS NULL
+           OR cluster_id <> ALL($3::uuid[]))
     FOR UPDATE SKIP LOCKED
 )
 UPDATE scheduled_tasks st
@@ -38,8 +40,9 @@ RETURNING st.id, st.cluster_id, st.resource_type, st.resource_id, st.node, st.ac
 `
 
 type ClaimDueTasksParams struct {
-	GuardSeconds float64 `json:"guard_seconds"`
-	StaleSeconds float64 `json:"stale_seconds"`
+	GuardSeconds   float64     `json:"guard_seconds"`
+	StaleSeconds   float64     `json:"stale_seconds"`
+	BusyClusterIds []uuid.UUID `json:"busy_cluster_ids"`
 }
 
 // Atomically claims due tasks so concurrent schedulers (e.g. during leader
@@ -60,8 +63,15 @@ type ClaimDueTasksParams struct {
 // in flight, so a long snapshot never holds its row out of its next slot.
 // The claim clears last_error and last_upid, which belong to the previous run:
 // without that, a run being started would show beside the last run's error.
+//
+// busy_cluster_ids are the clusters this scheduler is still dispatching an
+// earlier claim's runs on, and their rows are left for a later claim. Each
+// cluster's runs are dispatched one after another, and the next claim does not
+// wait for them, so on a cluster that stops answering a batch can outlast
+// stale_seconds: a claim that took its unstarted rows again would run them
+// twice. NULL or empty leaves nothing out.
 func (q *Queries) ClaimDueTasks(ctx context.Context, arg ClaimDueTasksParams) ([]ScheduledTask, error) {
-	rows, err := q.db.Query(ctx, claimDueTasks, arg.GuardSeconds, arg.StaleSeconds)
+	rows, err := q.db.Query(ctx, claimDueTasks, arg.GuardSeconds, arg.StaleSeconds, arg.BusyClusterIds)
 	if err != nil {
 		return nil, err
 	}

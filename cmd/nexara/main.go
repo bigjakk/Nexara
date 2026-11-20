@@ -926,16 +926,21 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			name  string
 			every time.Duration
 			run   func(context.Context)
+			// perCluster marks an engine that handles each cluster in a
+			// goroutine of its own and leaves alone a cluster whose last pass
+			// is still running. Its tick does not wait for the last pass:
+			// waiting would hold every cluster back for the slowest again.
+			perCluster bool
 			// note annotates the startup log where the interval alone is
 			// misleading.
 			note string
 		}{
-			{name: "scheduled_tasks", every: 60 * time.Second, run: sched.Run},
+			{name: "scheduled_tasks", every: 60 * time.Second, run: sched.Run, perCluster: true},
 			// The run's other half: a dispatched snapshot or reboot is settled
 			// from its task_history row once the collector has seen the task
 			// end. Database only, so it can tick faster than the dispatch.
 			{name: "scheduled_tasks_reconcile", every: 15 * time.Second, run: sched.RunScheduledTaskReconcile},
-			{name: "drs", every: 60 * time.Second, run: sched.RunDRS},
+			{name: "drs", every: 60 * time.Second, run: sched.RunDRS, perCluster: true},
 			{
 				name: "cve_scanning", every: scheduler.CVEScanTick, run: sched.RunCVEScanning,
 				note: "per-cluster schedule, default 24h",
@@ -950,7 +955,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 			// cluster to delete, not a day's worth.
 			{name: "cve_scan_retention", every: 1 * time.Hour, run: sched.RunCVEScanRetention},
 			{name: "rolling_updates", every: 15 * time.Second, run: sched.RunRollingUpdates},
-			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile},
+			{name: "vm_import_reconcile", every: 15 * time.Second, run: sched.RunVMImportReconcile, perCluster: true},
 			{name: "migration_job_reconcile", every: 60 * time.Second, run: func(ctx context.Context) {
 				if err := migrationSweep.ReconcileLapsed(ctx); err != nil {
 					logger.Warn("migration: could not end the jobs no instance follows", "error", err)
@@ -997,9 +1002,14 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		// drain or DRS migration can block ~30 min per task wait) cannot
 		// starve the others — most critically alert evaluation, which matters
 		// most during exactly those windows. The per-engine in-flight guard
-		// makes overlapping ticks skip, not queue. Panic recovery lives inside
-		// each Run* method.
-		engine := func(name string, run func(context.Context)) func() {
+		// makes overlapping ticks skip, not queue. A perCluster engine has
+		// that guard per cluster instead, inside the engine, so its tick
+		// starts a pass whatever the last one is doing. Panic recovery lives
+		// inside each Run* method.
+		engine := func(name string, perCluster bool, run func(context.Context)) func() {
+			if perCluster {
+				return func() { go run(ctx) }
+			}
 			var inFlight atomic.Bool
 			return func() {
 				if !inFlight.CompareAndSwap(false, true) {
@@ -1014,7 +1024,7 @@ func runScheduler(ctx context.Context, cfg *config.Config, application *app.App,
 		}
 
 		for _, e := range engines {
-			run := engine(e.name, e.run)
+			run := engine(e.name, e.perCluster, e.run)
 			run() // initial pass, before the first tick comes round
 			go func() {
 				ticker := time.NewTicker(e.every)

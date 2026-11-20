@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -367,10 +370,13 @@ func scheduleStatusUnion(t *testing.T) []string {
 }
 
 // queryOrderRecorder is a db.DBTX that records the sqlc name of every statement
-// in the order it arrives, answers each Query with no rows, fails the
-// statements named in failing, and panics on those named in panicking.
+// in the order it arrives, answers each Query with the rows given for its name
+// (none by default), fails the statements named in failing, and panics on those
+// named in panicking. Safe for the goroutines a pass starts per cluster.
 type queryOrderRecorder struct {
+	mu        sync.Mutex
 	names     []string
+	rows      map[string][]any
 	failing   map[string]error
 	panicking map[string]string
 }
@@ -380,6 +386,8 @@ func (r *queryOrderRecorder) note(sql string) string {
 	if m := queryNameRe.FindStringSubmatch(sql); m != nil {
 		name = m[1]
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.names = append(r.names, name)
 	return name
 }
@@ -399,25 +407,67 @@ func (r *queryOrderRecorder) Query(_ context.Context, sql string, _ ...any) (pgx
 	if err := r.failing[name]; err != nil {
 		return nil, err
 	}
-	return noRows{}, nil
+	return &structRows{rows: r.rows[name]}, nil
 }
 
 func (r *queryOrderRecorder) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 	panic("unexpected query row: " + r.note(sql))
 }
 
-// noRows is a result set with nothing in it.
-type noRows struct{}
+// count is how many times the statement named name arrived.
+func (r *queryOrderRecorder) count(name string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, got := range r.names {
+		if got == name {
+			n++
+		}
+	}
+	return n
+}
 
-func (noRows) Close()                                       {}
-func (noRows) Err() error                                   { return nil }
-func (noRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
-func (noRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (noRows) Next() bool                                   { return false }
-func (noRows) Scan(...any) error                            { return nil }
-func (noRows) Values() ([]any, error)                       { return nil, nil }
-func (noRows) RawValues() [][]byte                          { return nil }
-func (noRows) Conn() *pgx.Conn                              { return nil }
+// structRows is a result set replaying sqlc row structs, each field assigned to
+// the destination in its position, the order generated Scan passes them in.
+// Empty, it is a result with nothing in it.
+type structRows struct {
+	rows []any
+	i    int
+	err  error
+}
+
+func (r *structRows) Next() bool {
+	if r.err != nil || r.i >= len(r.rows) {
+		return false
+	}
+	r.i++
+	return true
+}
+
+func (r *structRows) Scan(dest ...any) error {
+	row := reflect.ValueOf(r.rows[r.i-1])
+	if row.NumField() != len(dest) {
+		r.err = fmt.Errorf("scan got %d destinations for a %s of %d fields", len(dest), row.Type(), row.NumField())
+		return r.err
+	}
+	for i, d := range dest {
+		ptr := reflect.ValueOf(d)
+		if ptr.Kind() != reflect.Pointer || ptr.Elem().Type() != row.Field(i).Type() {
+			r.err = fmt.Errorf("scan destination %d is %T, want *%s", i, d, row.Field(i).Type())
+			return r.err
+		}
+		ptr.Elem().Set(row.Field(i))
+	}
+	return nil
+}
+
+func (r *structRows) Err() error                                 { return r.err }
+func (*structRows) Close()                                       {}
+func (*structRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
+func (*structRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
+func (*structRows) Values() ([]any, error)                       { return nil, nil }
+func (*structRows) RawValues() [][]byte                          { return nil }
+func (*structRows) Conn() *pgx.Conn                              { return nil }
 
 // TestRun_SettlesBeforeItClaims pins where Run settles dispatched runs: first,
 // and whatever that settle's outcome.

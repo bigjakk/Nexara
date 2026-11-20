@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,7 +49,8 @@ func TestClaimDueTasks_PassesGuardAndStaleConstants(t *testing.T) {
 	t.Parallel()
 
 	claimer := &fakeClaimer{}
-	if _, err := claimDueTasks(context.Background(), claimer); err != nil {
+	busy := []uuid.UUID{uuid.New()}
+	if _, err := claimDueTasks(context.Background(), claimer, busy); err != nil {
 		t.Fatalf("claimDueTasks: unexpected error: %v", err)
 	}
 
@@ -61,6 +63,9 @@ func TestClaimDueTasks_PassesGuardAndStaleConstants(t *testing.T) {
 	if claimer.gotArg.StaleSeconds != taskClaimStaleSeconds {
 		t.Errorf("StaleSeconds = %v, want %v", claimer.gotArg.StaleSeconds, taskClaimStaleSeconds)
 	}
+	if !slices.Equal(claimer.gotArg.BusyClusterIds, busy) {
+		t.Errorf("BusyClusterIds = %v, want %v", claimer.gotArg.BusyClusterIds, busy)
+	}
 }
 
 func TestClaimDueTasks_PropagatesError(t *testing.T) {
@@ -69,7 +74,7 @@ func TestClaimDueTasks_PropagatesError(t *testing.T) {
 	wantErr := errors.New("db unreachable")
 	claimer := &fakeClaimer{err: wantErr}
 
-	rows, err := claimDueTasks(context.Background(), claimer)
+	rows, err := claimDueTasks(context.Background(), claimer, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
 	}
@@ -159,10 +164,22 @@ func newPVEStub(t *testing.T) (*httptest.Server, *[]string) {
 // task_history and audit rows trackTask writes for it.
 func newPVEStubAnswering(t *testing.T, status int, body string) (*httptest.Server, *[]string) {
 	t.Helper()
+	return newPVEStubFunc(t, func(*http.Request) (int, string) { return status, body })
+}
+
+// newPVEStubFunc is newPVEStub answering each request with what answer returns
+// for it. The form is read before answer runs, so a request that answer holds
+// still sees its client hang up.
+func newPVEStubFunc(t *testing.T, answer func(*http.Request) (int, string)) (*httptest.Server, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
 	var seen []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
+		mu.Lock()
 		seen = append(seen, r.Method+" "+r.RequestURI+" snapname="+r.PostForm.Get("snapname"))
+		mu.Unlock()
+		status, body := answer(r)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
@@ -287,14 +304,20 @@ func TestExecuteSnapshot_ASecondRunWithATypedNameTakesANewName(t *testing.T) {
 // taskRunRecorder is a db.DBTX that stands in for the database while the
 // scheduler runs a task. It records every UPDATE of a scheduled_tasks row —
 // which sqlc query sent it and the value bound to each column — takes the two
-// inserts trackTask makes for a task a run started, and answers anything else
-// with an error.
+// inserts trackTask makes for a task a run started, answers Run's settle with
+// nothing and its claims from claims, and answers anything else with an error.
+// Safe for the goroutines Run starts per cluster.
 //
 // err keeps the reason for a refusal: finishTaskRun only logs a failed write,
 // to a logger the test discards, so without it every refusal would read as a
 // bare "recorded 0 times".
 type taskRunRecorder struct {
-	writes []runWrite
+	mu sync.Mutex
+	// claims answers ClaimDueTasks, one entry per claim and none after them;
+	// claimedOut is the clusters each claim was told to leave out.
+	claims     [][]db.ScheduledTask
+	claimedOut [][]uuid.UUID
+	writes     []runWrite
 	// historyInserts counts InsertTaskHistory calls — trackTask recording the
 	// task a run started, which is what the reconcile later reads.
 	historyInserts int
@@ -326,6 +349,8 @@ var (
 )
 
 func (r *taskRunRecorder) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	switch {
 	case strings.Contains(sql, "INSERT INTO audit_log"):
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -363,12 +388,35 @@ func parseRunWrite(sql string, args []any) (runWrite, error) {
 	return w, nil
 }
 
-func (r *taskRunRecorder) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+func (r *taskRunRecorder) Query(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case strings.Contains(sql, "-- name: ReconcileDispatchedScheduledTasks "):
+		return &structRows{}, nil
+	case strings.Contains(sql, "-- name: ClaimDueTasks "):
+		var out []uuid.UUID
+		for _, a := range args {
+			if ids, ok := a.([]uuid.UUID); ok {
+				out = ids
+			}
+		}
+		r.claimedOut = append(r.claimedOut, out)
+		var rows []any
+		if n := len(r.claimedOut); n <= len(r.claims) {
+			for _, t := range r.claims[n-1] {
+				rows = append(rows, t)
+			}
+		}
+		return &structRows{rows: rows}, nil
+	}
 	r.err = fmt.Errorf("unexpected query: %s", sql)
 	return nil, r.err
 }
 
 func (r *taskRunRecorder) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if strings.Contains(sql, "INSERT INTO task_history") {
 		r.historyInserts++
 		return insertedRow{}
