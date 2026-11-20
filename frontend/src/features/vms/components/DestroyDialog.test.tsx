@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "@/test/test-utils";
 import { apiClient } from "@/lib/api-client";
 import { DestroyDialog } from "./DestroyDialog";
@@ -41,6 +42,47 @@ describe("DestroyDialog", () => {
       await screen.findByText("Task failed: VM is locked (backup)"),
     ).toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  // A guest menu opens this from any page, and a finished destroy sent every
+  // one of them to the inventory: only the destroyed guest's own page goes.
+  it.each([
+    ["the guest's own page", "/inventory/qemu/c1/vm-1", "/inventory"],
+    ["another page", "/storage/c1/s1", "/storage/c1/s1"],
+    [
+      "another guest's page",
+      "/inventory/qemu/c1/vm-2",
+      "/inventory/qemu/c1/vm-2",
+    ],
+  ])("a destroy from %s (%s) ends on %s", async (_, from, to) => {
+    const upid = "UPID:pve-01:00000001:00000002:00000003:qmdestroy:101:x:";
+    vi.spyOn(apiClient, "delete").mockResolvedValue({ upid, status: "OK" });
+    vi.spyOn(apiClient, "get").mockResolvedValue({
+      upid,
+      status: "stopped",
+      exit_status: "OK",
+    });
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "*",
+          element: (
+            <DestroyDialog {...defaultProps} onOpenChange={onOpenChange} />
+          ),
+        },
+      ],
+      { initialEntries: [from] },
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<RouterProvider router={router} />, { router: false });
+    await user.type(screen.getByPlaceholderText("my-test-vm"), "my-test-vm");
+    await user.click(screen.getByRole("button", { name: /^destroy$/i }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(router.state.location.pathname).toBe(to);
   });
 
   it("renders dialog with confirmation prompt", () => {

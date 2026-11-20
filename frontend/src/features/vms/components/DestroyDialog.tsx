@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useMatch, useNavigate } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -36,6 +36,12 @@ export function DestroyDialog({
 }: DestroyDialogProps) {
   const { t } = useTranslation("vms");
   const navigate = useNavigate();
+  // A guest menu opens this from anywhere: only the destroyed guest's own page
+  // is left behind with nothing to show.
+  const guestPage = useMatch("/inventory/:kind/:clusterId/:vmId");
+  const onGuestPage =
+    guestPage?.params.clusterId === clusterId &&
+    guestPage.params.vmId === resourceId;
   const destroyMutation = useDestroyVM(true);
   const settle = useSaveOutcome(open ? resourceId : null);
   const [upid, setUpid] = useState<string | null>(null);
@@ -86,7 +92,7 @@ export function DestroyDialog({
               // stay, rather than leave for the inventory as if it had gone.
               if (!success) return;
               handleClose();
-              void navigate("/inventory");
+              if (onGuestPage) void navigate("/inventory");
             }}
             description={`Destroy ${resourceName}`}
           />

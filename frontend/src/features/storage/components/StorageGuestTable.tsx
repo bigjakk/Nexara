@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, MoreVertical } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -12,14 +12,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenuItem } from "@/components/ui/context-menu";
 import { useClusterNodes } from "@/features/clusters/api/cluster-queries";
 import { StatusBadge } from "@/features/inventory/components/StatusBadge";
+import { VMContextMenu } from "@/features/vms/components/VMContextMenu";
 import { usePermissions } from "@/hooks/usePermissions";
 import { apiClient } from "@/lib/api-client";
 import { apiPath } from "@/lib/api-path";
@@ -52,6 +48,24 @@ interface GuestRow {
   template: boolean;
   volumes: StorageContentItem[];
   totalBytes: number;
+}
+
+/**
+ * Opens a row's guest menu from its actions button, as a right click there
+ * would: a Radix context menu opens on a contextmenu event and nothing else.
+ * At the button's lower left: the menu opens beside it, above or below as it
+ * fits, and never over it.
+ */
+function openRowMenu(button: HTMLElement) {
+  const rect = button.getBoundingClientRect();
+  button.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left,
+      clientY: rect.bottom + 4,
+    }),
+  );
 }
 
 export function StorageGuestTable({
@@ -255,122 +269,165 @@ export function StorageGuestTable({
               Disks
             </TableHead>
             <TableHead className="text-right">Total size</TableHead>
-            <TableHead className="w-20" />
+            <TableHead className="w-10 sm:w-20">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((row) => (
-            <ContextMenu key={`${row.guestKind}:${String(row.vmid)}`}>
-              {/* Migrate is the menu's one item. */}
-              <ContextMenuTrigger asChild disabled={!canMove(row.guestKind)}>
-                <TableRow
-                  data-state={
-                    selectedVmids.has(row.vmid) ? "selected" : undefined
-                  }
-                  className="cursor-default"
-                >
-                  <TableCell>
+          {rows.map((row) => {
+            const key = `${row.guestKind}:${String(row.vmid)}`;
+            const tableRow = (
+              <TableRow
+                key={key}
+                data-state={
+                  selectedVmids.has(row.vmid) ? "selected" : undefined
+                }
+                className="cursor-default"
+              >
+                <TableCell>
+                  {canMove(row.guestKind) && (
+                    <Checkbox
+                      checked={selectedVmids.has(row.vmid)}
+                      onCheckedChange={() => {
+                        toggleRow(row.vmid);
+                      }}
+                      aria-label={`Select ${row.name}`}
+                    />
+                  )}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2 font-medium">
+                    <span>{row.name}</span>
+                    {row.template && (
+                      <Badge variant="secondary" className="text-xs">
+                        Template
+                      </Badge>
+                    )}
+                  </div>
+                  {/* A phone has no room for these as columns. */}
+                  <div className="text-[12.5px] text-muted-foreground sm:hidden">
+                    {row.guestKind === "ct" ? "CT" : "VM"} {row.vmid},{" "}
+                    {row.volumes.length === 1
+                      ? "1 disk"
+                      : `${String(row.volumes.length)} disks`}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  {row.status ? (
+                    <StatusBadge status={row.status} runState={row.runState} />
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="hidden tabular-nums text-muted-foreground sm:table-cell">
+                  {row.vmid}
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground sm:table-cell">
+                  {row.guestKind === "ct" ? "CT" : "VM"}
+                </TableCell>
+                <TableCell className="hidden text-muted-foreground md:table-cell">
+                  {row.nodeName || "—"}
+                </TableCell>
+                <TableCell className="hidden text-right tabular-nums lg:table-cell">
+                  {row.cpuCount > 0 ? row.cpuCount : "—"}
+                </TableCell>
+                <TableCell className="hidden whitespace-nowrap text-right tabular-nums lg:table-cell">
+                  {row.memTotal > 0 ? formatBytes(row.memTotal) : "—"}
+                </TableCell>
+                <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-muted-foreground lg:table-cell">
+                  {formatUptime(row.uptime, "—")}
+                </TableCell>
+                <TableCell className="hidden text-right tabular-nums sm:table-cell">
+                  {row.volumes.length}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-right tabular-nums">
+                  {formatBytes(row.totalBytes)}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center justify-end gap-0.5">
+                    {/* A phone has room for one button: the menu's, which
+                        leads with this. */}
                     {canMove(row.guestKind) && (
-                      <Checkbox
-                        checked={selectedVmids.has(row.vmid)}
-                        onCheckedChange={() => {
-                          toggleRow(row.vmid);
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="hidden h-7 w-7 sm:inline-flex"
+                        title={
+                          canMigrate
+                            ? `Migrate ${String(row.volumes.length)} ${row.volumes.length === 1 ? "disk" : "disks"} to another storage`
+                            : "No compatible target storage available"
+                        }
+                        disabled={!canMigrate || !row.guestId}
+                        onClick={() => {
+                          migrateRow(row);
                         }}
-                        aria-label={`Select ${row.name}`}
-                      />
+                      >
+                        <ArrowRightLeft className="h-4 w-4" />
+                      </Button>
                     )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2 font-medium">
-                      <span>{row.name}</span>
-                      {row.template && (
-                        <Badge variant="secondary" className="text-xs">
-                          Template
-                        </Badge>
-                      )}
-                    </div>
-                    {/* A phone has no room for these as columns. */}
-                    <div className="text-[12.5px] text-muted-foreground sm:hidden">
-                      {row.guestKind === "ct" ? "CT" : "VM"} {row.vmid},{" "}
-                      {row.volumes.length === 1
-                        ? "1 disk"
-                        : `${String(row.volumes.length)} disks`}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {row.status ? (
-                      <StatusBadge
-                        status={row.status}
-                        runState={row.runState}
-                      />
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
+                    {/* The menu a right click opens, as a mouse can see it and
+                        a tap can reach it; a row with no guest has none. */}
+                    {row.guestId && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        aria-label={`Actions for ${row.name}`}
+                        aria-haspopup="menu"
+                        onClick={(e) => {
+                          openRowMenu(e.currentTarget);
+                        }}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
                     )}
-                  </TableCell>
-                  <TableCell className="hidden tabular-nums text-muted-foreground sm:table-cell">
-                    {row.vmid}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground sm:table-cell">
-                    {row.guestKind === "ct" ? "CT" : "VM"}
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground md:table-cell">
-                    {row.nodeName || "—"}
-                  </TableCell>
-                  <TableCell className="hidden text-right tabular-nums lg:table-cell">
-                    {row.cpuCount > 0 ? row.cpuCount : "—"}
-                  </TableCell>
-                  <TableCell className="hidden whitespace-nowrap text-right tabular-nums lg:table-cell">
-                    {row.memTotal > 0 ? formatBytes(row.memTotal) : "—"}
-                  </TableCell>
-                  <TableCell className="hidden whitespace-nowrap text-right tabular-nums text-muted-foreground lg:table-cell">
-                    {formatUptime(row.uptime, "—")}
-                  </TableCell>
-                  <TableCell className="hidden text-right tabular-nums sm:table-cell">
-                    {row.volumes.length}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-right tabular-nums">
-                    {formatBytes(row.totalBytes)}
-                  </TableCell>
-                  <TableCell>
-                    {canMove(row.guestKind) && (
-                      <div className="flex items-center justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title={
-                            canMigrate
-                              ? `Migrate ${String(row.volumes.length)} ${row.volumes.length === 1 ? "disk" : "disks"} to another storage`
-                              : "No compatible target storage available"
-                          }
-                          disabled={!canMigrate || !row.guestId}
-                          onClick={() => {
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+            // The guest's own menu, as the tree has it, led by moving its disks
+            // off this store. A volume no guest in the inventory owns has no
+            // guest to act on.
+            if (!row.guestId) return tableRow;
+            return (
+              <VMContextMenu
+                key={key}
+                target={{
+                  clusterId,
+                  resourceId: row.guestId,
+                  vmid: row.vmid,
+                  name: row.name,
+                  kind: row.guestKind,
+                  status: row.status,
+                  runState: row.runState,
+                  currentNode: row.nodeName,
+                  template: row.template,
+                }}
+                pageItems={
+                  canMove(row.guestKind)
+                    ? [
+                        <ContextMenuItem
+                          key="migrate-disks"
+                          onSelect={() => {
                             migrateRow(row);
                           }}
+                          disabled={!canMigrate}
                         >
-                          <ArrowRightLeft className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuItem
-                  onSelect={() => {
-                    migrateRow(row);
-                  }}
-                  disabled={!canMigrate || !row.guestId}
-                >
-                  <ArrowRightLeft className="mr-2 h-4 w-4" />
-                  Migrate{" "}
-                  {row.volumes.length === 1
-                    ? "disk"
-                    : `${String(row.volumes.length)} disks`}
-                </ContextMenuItem>
-              </ContextMenuContent>
-            </ContextMenu>
-          ))}
+                          <ArrowRightLeft className="mr-2 h-4 w-4" />
+                          Migrate{" "}
+                          {row.volumes.length === 1
+                            ? "disk"
+                            : `${String(row.volumes.length)} disks`}
+                        </ContextMenuItem>,
+                      ]
+                    : []
+                }
+              >
+                {tableRow}
+              </VMContextMenu>
+            );
+          })}
         </TableBody>
       </Table>
 

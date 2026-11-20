@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactElement, type ReactNode } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -45,12 +45,16 @@ interface VMContextMenuProps {
   /** Called when any menu action is chosen — lets hosts (e.g. the command
    * palette) close themselves before the action's dialog opens. */
   onAction?: (() => void) | undefined;
+  /** The host page's own actions on the guest, as the first group: a storage
+   * page's Guests leads with moving the guest's disks off that store. */
+  pageItems?: readonly ReactElement[] | undefined;
 }
 
 export function VMContextMenu({
   target,
   children,
   onAction,
+  pageItems = [],
 }: VMContextMenuProps) {
   const {
     openSnapshot,
@@ -69,7 +73,11 @@ export function VMContextMenu({
   const { canConsole, hasPermission } = usePermissions();
 
   const normalizedStatus = target.status.toLowerCase();
-  const consoleAllowed = canConsole(target.kind === "ct" ? "container" : "vm");
+  // A console and a migration start from the guest's node: a host that cannot
+  // tell it (a role refused the node list) offers neither.
+  const nodeKnown = target.currentNode !== "";
+  const consoleAllowed =
+    nodeKnown && canConsole(target.kind === "ct" ? "container" : "vm");
 
   const allowed = useGuestActionAllowed();
   const visibleLifecycle = lifecycleActions.filter(
@@ -81,7 +89,8 @@ export function VMContextMenu({
   const visibleManagement = managementActions.filter(
     (a) =>
       a.showWhen(normalizedStatus, target.kind, target.template) &&
-      allowed(a.action, target.kind),
+      allowed(a.action, target.kind) &&
+      (a.action !== "migrate" || nodeKnown),
   );
 
   function handleLifecycleAction(
@@ -168,6 +177,7 @@ export function VMContextMenu({
   // what is done to a guest most days, then the rarer ones, and Destroy last
   // behind a rule of its own. An empty group takes its separator with it.
   const groups = [
+    [...pageItems],
     normalizedStatus === "running" && consoleAllowed
       ? [
           <ContextMenuItem key="console" onClick={handleOpenConsole}>
