@@ -20,6 +20,15 @@ func HAMigrationRequestStart(upid string) (int64, bool) {
 	return start, err == nil
 }
 
+// HAStateRequest reports whether upid is a task that only asks the HA manager
+// to stop or start a guest. For an HA-managed guest Proxmox answers a shutdown,
+// stop or start with an hastop or hastart task, which queues the request and
+// ends OK within a second; HA acts on it on its next round.
+func HAStateRequest(upid string) bool {
+	parts := strings.Split(upid, ":")
+	return len(parts) >= 7 && (parts[5] == "hastop" || parts[5] == "hastart")
+}
+
 // AwaitHAMigration waits for the migration the HA manager starts for vmid after
 // an hamigrate that started at since, and returns its UPID. It reads node's task
 // list from since every interval until a qmigrate or vzmigrate for the guest is

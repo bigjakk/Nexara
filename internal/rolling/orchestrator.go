@@ -67,6 +67,10 @@ type Orchestrator struct {
 	sshProbe func(context.Context, sshpkg.Config) error
 	// cephConfirm holds each job's first clean Ceph reading; see cephConfirm.
 	cephConfirm *cephConfirm
+	// pollEvery, when set, replaces how often waitForTask and
+	// waitForGuestState look, and settleWait waitForGuestState's bound
+	// (haSettleTimeout). Only tests set them.
+	pollEvery, settleWait time.Duration
 }
 
 // sshProbeTimeout bounds sshReady's login, which runs on the tick: Execute caps
@@ -635,46 +639,11 @@ func (o *Orchestrator) startNode(ctx context.Context, client *proxmox.Client, jo
 				return
 			}
 
-			var upid string
-			var shutErr error
-			switch guest.Type {
-			case "qemu":
-				upid, shutErr = client.ShutdownVM(ctx, node.NodeName, guest.VMID)
-			case "lxc":
-				upid, shutErr = client.ShutdownCT(ctx, node.NodeName, guest.VMID)
-			}
-			if shutErr != nil {
-				o.failNode(ctx, job, node, fmt.Sprintf("shutdown passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
+			if halt, failure := o.stopPassthroughGuest(ctx, client, job, node.NodeName, guest); halt {
 				return
-			}
-			o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "shutdown", "", true)
-
-			status := o.waitForTask(ctx, client, node.NodeName, upid)
-			if status == "interrupted" {
-				o.logger.Info("drain interrupted by shutdown during passthrough shutdown; next leader will resume",
-					"node", node.NodeName, "vmid", guest.VMID)
+			} else if failure != "" {
+				o.failNode(ctx, job, node, failure)
 				return
-			}
-			if status != "completed" {
-				// Graceful shutdown failed — force stop.
-				o.logger.Warn("graceful shutdown failed, force stopping passthrough guest",
-					"vmid", guest.VMID, "status", status)
-				switch guest.Type {
-				case "qemu":
-					upid, shutErr = client.StopVM(ctx, node.NodeName, guest.VMID)
-				case "lxc":
-					upid, shutErr = client.StopCT(ctx, node.NodeName, guest.VMID)
-				}
-				if shutErr != nil {
-					o.failNode(ctx, job, node, fmt.Sprintf("force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
-					return
-				}
-				o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "stop", "", true)
-				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
-					o.logger.Info("drain interrupted by shutdown during passthrough force-stop; next leader will resume",
-						"node", node.NodeName, "vmid", guest.VMID)
-					return
-				}
 			}
 
 			o.logger.Info("passthrough guest shut down, will restart after update",
@@ -882,42 +851,11 @@ func (o *Orchestrator) resumeDrain(ctx context.Context, client *proxmox.Client, 
 				o.failNode(ctx, job, node, fmt.Sprintf("resume drain — record passthrough shutdown of %s %d: %v", guest.Type, guest.VMID, err))
 				return
 			}
-			var upid string
-			var shutErr error
-			switch guest.Type {
-			case "qemu":
-				upid, shutErr = client.ShutdownVM(ctx, node.NodeName, guest.VMID)
-			case "lxc":
-				upid, shutErr = client.ShutdownCT(ctx, node.NodeName, guest.VMID)
-			}
-			if shutErr != nil {
-				o.failNode(ctx, job, node, fmt.Sprintf("resume drain — shutdown passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
+			if halt, failure := o.stopPassthroughGuest(ctx, client, job, node.NodeName, guest); halt {
 				return
-			}
-			o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "shutdown", "", true)
-			status := o.waitForTask(ctx, client, node.NodeName, upid)
-			if status == "interrupted" {
-				o.logger.Info("resume drain interrupted by shutdown during passthrough shutdown; next leader will resume",
-					"node", node.NodeName, "vmid", guest.VMID)
+			} else if failure != "" {
+				o.failNode(ctx, job, node, "resume drain — "+failure)
 				return
-			}
-			if status != "completed" {
-				switch guest.Type {
-				case "qemu":
-					upid, shutErr = client.StopVM(ctx, node.NodeName, guest.VMID)
-				case "lxc":
-					upid, shutErr = client.StopCT(ctx, node.NodeName, guest.VMID)
-				}
-				if shutErr != nil {
-					o.failNode(ctx, job, node, fmt.Sprintf("resume drain — force stop passthrough %s %d: %v", guest.Type, guest.VMID, shutErr))
-					return
-				}
-				o.recordGuestTask(ctx, job, node.NodeName, guest, upid, "stop", "", true)
-				if forceStatus := o.waitForTask(ctx, client, node.NodeName, upid); forceStatus == "interrupted" {
-					o.logger.Info("resume drain interrupted by shutdown during passthrough force-stop; next leader will resume",
-						"node", node.NodeName, "vmid", guest.VMID)
-					return
-				}
 			}
 			continue
 		}
@@ -2704,11 +2642,18 @@ func (o *Orchestrator) restartStoppedPassthrough(ctx context.Context, client *pr
 		}
 
 		taskStatus := o.waitForTask(ctx, client, node.NodeName, upid)
+		if taskStatus == "completed" && proxmox.HAStateRequest(upid) {
+			// An HA-managed guest's start task (hastart) only queues the start.
+			taskStatus = o.waitForGuestState(ctx, client, node.NodeName, guest, "running")
+		}
 		if taskStatus == "interrupted" {
 			pending = append(pending, guest)
 			pending = append(pending, list[i+1:]...)
 			o.persistStoppedPassthrough(ctx, node.ID, pending)
 			return len(pending), "interrupted"
+		}
+		if taskStatus == "gone" {
+			continue // Gone from the node while it started — nothing to undo.
 		}
 		if taskStatus != "completed" {
 			o.logger.Warn("passthrough guest start failed", "vmid", guest.VMID, "status", taskStatus)
@@ -2928,9 +2873,10 @@ const taskWaitTimeout = 30 * time.Minute
 // pruneRunningAfter is how long after a job's terminal transition the
 // cleanup sweep may treat a running passthrough guest as "not ours to
 // restart" and prune it from the record. It must comfortably exceed
-// taskWaitTimeout: a cancelled drain goroutine can keep winding down its
-// in-flight shutdown task for up to one full task wait after the job goes
-// terminal, and pruning during that window could drop a guest our own drain
+// taskWaitTimeout + haSettleTimeout: a cancelled drain goroutine can keep
+// winding down its in-flight shutdown for up to one task wait and one HA
+// settle after the job goes terminal (it sends no forced stop once the job is
+// cancelled), and pruning during that window could drop a guest our own drain
 // is about to stop — leaking it powered off with no record.
 const pruneRunningAfter = 2 * taskWaitTimeout
 
@@ -3061,7 +3007,7 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, taskWaitTimeout)
 	defer cancel()
 
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(o.every(5 * time.Second))
 	defer ticker.Stop()
 
 	for {
@@ -3102,6 +3048,124 @@ func (o *Orchestrator) waitForTask(_ context.Context, client *proxmox.Client, no
 			}
 		}
 	}
+}
+
+// every is how often a wait polls: d, unless a test set pollEvery.
+func (o *Orchestrator) every(d time.Duration) time.Duration {
+	if o.pollEvery > 0 {
+		return o.pollEvery
+	}
+	return d
+}
+
+// haSettleTimeout bounds how long waitForGuestState waits for a guest to reach
+// the state a finished shutdown or start task asked for. For an HA-managed
+// guest that task (hastop, hastart) only queues the request: HA acts on its
+// next round, 10-20 s later, and gives a shutdown 60 s before forcing a VM off.
+const haSettleTimeout = 5 * time.Minute
+
+// waitForGuestState polls the guest on nodeName until its status is want, and
+// looks once at the start, so a guest already there costs one listing. It
+// returns "completed" when it is, "gone" when the guest is no longer on the
+// node, "timeout" after haSettleTimeout and "interrupted" on shutdown.
+func (o *Orchestrator) waitForGuestState(_ context.Context, client *proxmox.Client, nodeName string, guest GuestSnapshot, want string) string {
+	bound := haSettleTimeout
+	if o.settleWait > 0 {
+		bound = o.settleWait
+	}
+	pollCtx, cancel := context.WithTimeout(o.shutdownCtx, bound)
+	defer cancel()
+	ticker := time.NewTicker(o.every(3 * time.Second))
+	defer ticker.Stop()
+
+	var last string
+	for {
+		status, found, err := o.guestStatusOnNode(pollCtx, client, nodeName, guest)
+		switch {
+		case err == nil && !found:
+			return "gone"
+		case err == nil && status == want:
+			return "completed"
+		case err == nil:
+			last = status
+		}
+		select {
+		case <-pollCtx.Done():
+			if o.shutdownCtx.Err() != nil {
+				return "interrupted"
+			}
+			o.logger.Warn("guest did not reach the state its task asked for",
+				"vmid", guest.VMID, "type", guest.Type, "node", nodeName, "want", want, "status", last)
+			return "timeout"
+		case <-ticker.C:
+		}
+	}
+}
+
+// stopPassthroughGuest shuts a passthrough guest down where it is, forcing it
+// off when the shutdown does not stop it, and returns once it no longer runs
+// there. halt means the drain must return now (the engine is shutting down, or
+// the job was paused or cancelled; it logs which); failure, when set, is the
+// reason to fail the node with.
+//
+// After an HA-managed guest's shutdown it waits for the guest, not the task:
+// that task is an hastop, which only queues the request, and taking its end for
+// the shutdown failed the drain's own empty-node check with the guest still up.
+// Any other completed task is taken at its word, as it always was.
+func (o *Orchestrator) stopPassthroughGuest(ctx context.Context, client *proxmox.Client, job db.RollingUpdateJob, nodeName string, guest GuestSnapshot) (halt bool, failure string) {
+	interrupted := func() (bool, string) {
+		o.logger.Info("drain interrupted by shutdown while stopping a passthrough guest; next leader will resume",
+			"node", nodeName, "vmid", guest.VMID)
+		return true, ""
+	}
+	for _, verb := range []string{"shutdown", "stop"} {
+		var upid string
+		var err error
+		switch {
+		case guest.Type == "qemu" && verb == "shutdown":
+			upid, err = client.ShutdownVM(ctx, nodeName, guest.VMID)
+		case guest.Type == "qemu":
+			upid, err = client.StopVM(ctx, nodeName, guest.VMID)
+		case verb == "shutdown":
+			upid, err = client.ShutdownCT(ctx, nodeName, guest.VMID)
+		default:
+			upid, err = client.StopCT(ctx, nodeName, guest.VMID)
+		}
+		if err != nil {
+			label := map[string]string{"shutdown": "shutdown", "stop": "force stop"}[verb]
+			return false, fmt.Sprintf("%s passthrough %s %d: %v", label, guest.Type, guest.VMID, err)
+		}
+		o.recordGuestTask(ctx, job, nodeName, guest, upid, verb, "", true)
+
+		status := o.waitForTask(ctx, client, nodeName, upid)
+		switch {
+		case status == "interrupted":
+			return interrupted()
+		case status == "completed" && proxmox.HAStateRequest(upid):
+			status = o.waitForGuestState(ctx, client, nodeName, guest, "stopped")
+		case status != "completed":
+			// A failed task can still have stopped the guest: look once.
+			if now, found, lerr := o.guestStatusOnNode(ctx, client, nodeName, guest); lerr == nil && (!found || now == "stopped") {
+				status = "completed"
+			}
+		}
+		switch status {
+		case "interrupted":
+			return interrupted()
+		case "completed", "gone":
+			return false, ""
+		}
+		if verb == "shutdown" {
+			if o.isJobCancelled(ctx, job.ID) {
+				o.logger.Info("job paused or cancelled, not forcing the passthrough guest off",
+					"node", nodeName, "vmid", guest.VMID)
+				return true, ""
+			}
+			o.logger.Warn("graceful shutdown failed, force stopping passthrough guest",
+				"vmid", guest.VMID, "status", status)
+		}
+	}
+	return false, fmt.Sprintf("passthrough %s %d still runs after a shutdown and a forced stop", guest.Type, guest.VMID)
 }
 
 // migrateMaxAttempts bounds how many times a drain migration is retried when
