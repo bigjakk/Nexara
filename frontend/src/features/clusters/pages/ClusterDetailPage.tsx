@@ -906,7 +906,7 @@ function ConnectionPanel({ cluster }: { cluster: ClusterResponse }) {
             : "Checked against trusted CAs"}
         </DetailField>
         <DetailField label="Sync interval">
-          Every {String(cluster.sync_interval_seconds)} s
+          Every {String(cluster.full_sync_interval_seconds)} s
         </DetailField>
         <DetailField label="Added">
           <DateTime value={cluster.created_at} />

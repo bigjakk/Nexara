@@ -11,6 +11,7 @@ function cluster(id: string, name: string): ClusterResponse {
     token_id: "t",
     tls_fingerprint: "",
     sync_interval_seconds: 60,
+    full_sync_interval_seconds: 10,
     is_active: true,
     status: "online",
     pve_version: "9.2",

@@ -49,6 +49,7 @@ function cluster(id: string, name: string, host: string): ClusterResponse {
     token_id: "nexara@pve!token",
     tls_fingerprint: "",
     sync_interval_seconds: 60,
+    full_sync_interval_seconds: 10,
     is_active: true,
     status: "online",
     pve_version: "",

@@ -102,7 +102,12 @@ beforeEach(() => {
 describe("ClusterDetailPage", () => {
   it("renders cluster name, nodes, and tab triggers", () => {
     mockUseCluster.mockReturnValue({
-      data: makeCluster({ id: "test-cluster-id", name: "Test Cluster" }),
+      data: makeCluster({
+        id: "test-cluster-id",
+        name: "Test Cluster",
+        sync_interval_seconds: 30,
+        full_sync_interval_seconds: 10,
+      }),
       isLoading: false,
       error: null,
     });
@@ -141,6 +146,9 @@ describe("ClusterDetailPage", () => {
     expect(screen.getByText("10d 0h")).toBeInTheDocument();
     // The Nodes panel's note is computed from the nodes listed.
     expect(screen.getByText("1 node on 8.1.3")).toBeInTheDocument();
+    // The collector's real cadence, not the stored value that only sizes a
+    // sync's timeout (which this card used to show).
+    expect(screen.getByText("Every 10 s")).toBeInTheDocument();
 
     // Tab triggers should be present
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();

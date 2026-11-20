@@ -601,10 +601,14 @@ func (s *Server) SetNutPollInterval(d time.Duration) {
 }
 
 // SetNodeSyncInterval is METRICS_COLLECT_INTERVAL: how often a full sync
-// refreshes the node rows the UPS routes judge node status by.
+// refreshes the node rows the UPS routes judge node status by, and the
+// cadence the cluster responses report.
 func (s *Server) SetNodeSyncInterval(d time.Duration) {
 	if s.nutHandler != nil {
 		s.nutHandler.SetNodeSyncInterval(d)
+	}
+	if s.clusterHandler != nil {
+		s.clusterHandler.SetFullSyncInterval(d)
 	}
 }
 

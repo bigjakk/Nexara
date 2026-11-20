@@ -43,6 +43,7 @@ function makeCluster(issues: HealthIssue[]): ClusterResponse {
     token_id: "root@pam!nexara",
     tls_fingerprint: "aabbccddeeff0011",
     sync_interval_seconds: 30,
+    full_sync_interval_seconds: 10,
     is_active: true,
     status: "online",
     pve_version: "9.2.11",

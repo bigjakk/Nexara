@@ -11,6 +11,7 @@ export function makeCluster(
     token_id: "user@pam!token",
     tls_fingerprint: "",
     sync_interval_seconds: 30,
+    full_sync_interval_seconds: 10,
     is_active: true,
     status: "online",
     pve_version: "",

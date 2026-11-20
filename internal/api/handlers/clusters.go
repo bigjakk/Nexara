@@ -48,6 +48,9 @@ type ClusterHandler struct {
 	// rbac holds the permission cache that removing a cluster has to clear for the
 	// users who held an assignment scoped to it.
 	rbac *auth.RBACEngine
+	// fullSyncInterval is METRICS_COLLECT_INTERVAL, how often the collector
+	// runs a full sync of every cluster; the cluster responses report it.
+	fullSyncInterval time.Duration
 }
 
 // NewClusterHandler creates a new cluster handler.
@@ -57,6 +60,15 @@ func NewClusterHandler(queries *db.Queries, encryptionKey string, eventPub *even
 		encryptionKey: encryptionKey,
 		eventPub:      eventPub,
 		rbac:          rbac,
+		// The config default, until the server passes the configured value.
+		fullSyncInterval: 30 * time.Second,
+	}
+}
+
+// SetFullSyncInterval is METRICS_COLLECT_INTERVAL, the full sync's cadence.
+func (h *ClusterHandler) SetFullSyncInterval(d time.Duration) {
+	if d > 0 {
+		h.fullSyncInterval = d
 	}
 }
 
@@ -160,17 +172,21 @@ func updateClusterRequestFromParams(p *apischema.Params) updateClusterRequest {
 }
 
 type clusterResponse struct {
-	ID                  uuid.UUID `json:"id"`
-	Name                string    `json:"name"`
-	APIURL              string    `json:"api_url"`
-	TokenID             string    `json:"token_id"`
-	TLSFingerprint      string    `json:"tls_fingerprint"`
-	SyncIntervalSeconds int32     `json:"sync_interval_seconds"`
-	IsActive            bool      `json:"is_active"`
-	Status              string    `json:"status"`
-	PVEVersion          string    `json:"pve_version"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	APIURL         string    `json:"api_url"`
+	TokenID        string    `json:"token_id"`
+	TLSFingerprint string    `json:"tls_fingerprint"`
+	// SyncIntervalSeconds is the stored per-cluster value, which only sizes a
+	// sync pass's timeout. FullSyncIntervalSeconds is how often the collector
+	// actually runs one (METRICS_COLLECT_INTERVAL, the same for every cluster).
+	SyncIntervalSeconds     int32     `json:"sync_interval_seconds"`
+	FullSyncIntervalSeconds int32     `json:"full_sync_interval_seconds"`
+	IsActive                bool      `json:"is_active"`
+	Status                  string    `json:"status"`
+	PVEVersion              string    `json:"pve_version"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 	// CredentialSource is "manual" or "bootstrap". The UI reads it to decide
 	// whether deleting the cluster can offer to revoke the Proxmox-side
 	// credential — an offer that is only ever valid for one Nexara created.
@@ -222,20 +238,21 @@ func computeClusterStatus(c db.Cluster, nsi nodeStatusInfo) string {
 	return "online"
 }
 
-func toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
+func (h *ClusterHandler) toClusterResponse(c db.Cluster, nsi nodeStatusInfo) clusterResponse {
 	return clusterResponse{
-		ID:                  c.ID,
-		Name:                c.Name,
-		APIURL:              c.ApiUrl,
-		TokenID:             c.TokenID,
-		TLSFingerprint:      c.TlsFingerprint,
-		SyncIntervalSeconds: c.SyncIntervalSeconds,
-		IsActive:            c.IsActive,
-		Status:              computeClusterStatus(c, nsi),
-		PVEVersion:          c.PveVersion,
-		CreatedAt:           c.CreatedAt,
-		UpdatedAt:           c.UpdatedAt,
-		CredentialSource:    c.CredentialSource,
+		ID:                      c.ID,
+		Name:                    c.Name,
+		APIURL:                  c.ApiUrl,
+		TokenID:                 c.TokenID,
+		TLSFingerprint:          c.TlsFingerprint,
+		SyncIntervalSeconds:     c.SyncIntervalSeconds,
+		FullSyncIntervalSeconds: safeconv.Int32(int(h.fullSyncInterval / time.Second)),
+		IsActive:                c.IsActive,
+		Status:                  computeClusterStatus(c, nsi),
+		PVEVersion:              c.PveVersion,
+		CreatedAt:               c.CreatedAt,
+		UpdatedAt:               c.UpdatedAt,
+		CredentialSource:        c.CredentialSource,
 	}
 }
 
@@ -399,7 +416,7 @@ func (h *ClusterHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	resp := createClusterResponse{
-		Cluster:      toClusterResponse(cluster, nodeStatusInfo{}),
+		Cluster:      h.toClusterResponse(cluster, nodeStatusInfo{}),
 		Connectivity: testResult.Result,
 	}
 	if cred.Source == credentialSourceBootstrap {
@@ -438,7 +455,7 @@ func (h *ClusterHandler) List(c fiber.Ctx, _ *apischema.Params) error {
 		if !access.PermitsCluster(cl.ID) {
 			continue
 		}
-		cr := toClusterResponse(cl, nsiMap[cl.ID])
+		cr := h.toClusterResponse(cl, nsiMap[cl.ID])
 		cr.Issues = issuesMap[cl.ID]
 		resp = append(resp, cr)
 	}
@@ -471,7 +488,7 @@ func (h *ClusterHandler) Get(c fiber.Ctx, p *apischema.Params) error {
 		}
 	}
 
-	cr := toClusterResponse(cluster, nsi)
+	cr := h.toClusterResponse(cluster, nsi)
 	cr.Issues = buildAllClusterIssues(c.Context(), h.queries)[id]
 	return c.JSON(cr)
 }
@@ -725,7 +742,7 @@ func (h *ClusterHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 	}
 
 	return c.JSON(updateClusterResponse{
-		Cluster:      toClusterResponse(cluster, updateNsi),
+		Cluster:      h.toClusterResponse(cluster, updateNsi),
 		Connectivity: connectivity.Result,
 	})
 }

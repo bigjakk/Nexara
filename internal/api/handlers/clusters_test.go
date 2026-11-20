@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
+	db "github.com/bigjakk/nexara/internal/db/generated"
 )
 
 // testEncryptionKey is a valid 32-byte hex key for tests.
@@ -339,5 +341,19 @@ func TestClusterUpdate_EmptyTokenSecretRejected(t *testing.T) {
 	raw, _ := io.ReadAll(resp.Body)
 	if !bytes.Contains(raw, []byte("token_secret must not be empty")) {
 		t.Errorf("body %s does not explain the empty token_secret", raw)
+	}
+}
+
+// The cluster card showed sync_interval_seconds as the sync cadence, but that
+// stored value only sizes a pass's timeout; the cadence is the server's.
+func TestClusterResponse_ReportsConfiguredFullSyncInterval(t *testing.T) {
+	t.Parallel()
+	h := NewClusterHandler(nil, testEncryptionKey, nil, nil)
+	h.SetFullSyncInterval(10 * time.Second)
+
+	got := h.toClusterResponse(db.Cluster{SyncIntervalSeconds: 30}, nodeStatusInfo{})
+	if got.FullSyncIntervalSeconds != 10 || got.SyncIntervalSeconds != 30 {
+		t.Errorf("full_sync_interval_seconds = %d, sync_interval_seconds = %d; want 10 and 30",
+			got.FullSyncIntervalSeconds, got.SyncIntervalSeconds)
 	}
 }

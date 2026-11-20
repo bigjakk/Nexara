@@ -746,7 +746,10 @@ export interface ClusterResponse {
   api_url: string;
   token_id: string;
   tls_fingerprint: string;
+  /** Stored per cluster; it only sizes a sync pass's timeout. */
   sync_interval_seconds: number;
+  /** How often the collector runs a full sync (METRICS_COLLECT_INTERVAL). */
+  full_sync_interval_seconds: number;
   is_active: boolean;
   status: "online" | "degraded" | "offline" | "inactive" | "unknown";
   pve_version: string;
