@@ -29,15 +29,16 @@ describe("ConsolePage", () => {
     ]);
   });
 
-  // New console lists guests only: a role with no guest console got an empty
-  // picker, and the page told it to open one.
+  // New console lists what the role may open: a role with no console at all
+  // got an empty picker, and the page told it to open one.
   it.each([
     [
-      ["console:vm"],
+      ["console:node", "console:vm"],
       "Open one here, or from a guest's or a node's own page.",
       true,
     ],
-    [["console:node"], "Open one from a node's own page.", false],
+    [["console:vm"], "Open one here, or from a guest's own page.", true],
+    [["console:node"], "Open one here, or from a node's own page.", true],
     [["view:vm"], "Your role cannot open a console.", false],
   ])("with %j says %s", async (permissions, text, picker) => {
     grantPermissions(...permissions);

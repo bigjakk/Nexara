@@ -43,9 +43,10 @@ export function ConsolePage() {
   );
   const { data: clusters } = useClusters();
   const hasClusters = (clusters?.length ?? 0) > 0;
-  // What the empty state may offer: a guest's console here, a node's shell on
-  // its own page, or neither.
+  // What the empty state may offer: a node's shell, a guest's console, both
+  // or neither.
   const { canConsole } = usePermissions();
+  const canNodeConsole = canConsole("node");
   const canGuestConsole = canConsole("vm") || canConsole("container");
 
   useEffect(() => {
@@ -77,11 +78,13 @@ export function ConsolePage() {
           icon={TerminalSquare}
           title={t("consolePage.noConsoleIsOpen")}
           description={
-            canGuestConsole
+            canNodeConsole && canGuestConsole
               ? t("consolePage.openOneHereOrFrom")
-              : canConsole("node")
-                ? t("consolePage.openOneFromANode")
-                : t("consolePage.noConsolePermission")
+              : canNodeConsole
+                ? t("consolePage.openOneHereOrFromANode")
+                : canGuestConsole
+                  ? t("consolePage.openOneHereOrFromAGuest")
+                  : t("consolePage.noConsolePermission")
           }
           action={<QuickConnect />}
         />

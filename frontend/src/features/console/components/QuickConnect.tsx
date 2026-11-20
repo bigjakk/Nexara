@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { Monitor, TerminalSquare, Plus } from "lucide-react";
+import { Monitor, TerminalSquare, Terminal, Plus, Search } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,13 @@ import { guestState } from "@/lib/guest-state";
 import { openConsole } from "../lib/open-console";
 import { useTranslation } from "react-i18next";
 
+interface NodeEntry {
+  clusterId: string;
+  clusterName: string;
+  nodeName: string;
+  status: string;
+}
+
 interface VMEntry {
   clusterId: string;
   clusterName: string;
@@ -33,6 +41,11 @@ interface VMEntry {
   resourceId: string;
 }
 
+/** Whether any of `fields` contains the (trimmed, case-folded) query. */
+function matches(query: string, fields: string[]): boolean {
+  return query === "" || fields.some((f) => f.toLowerCase().includes(query));
+}
+
 export function QuickConnect({
   appearance = "primary",
 }: {
@@ -44,10 +57,13 @@ export function QuickConnect({
 }) {
   const { t } = useTranslation("console");
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const { canConsole } = usePermissions();
+  const canNode = canConsole("node");
+  const canGuest = canConsole("vm") || canConsole("container");
 
   const { data: clusters } = useClusters();
-  const clusterIds = clusters?.map((c) => c.id) ?? [];
+  const multiCluster = (clusters?.length ?? 0) > 1;
 
   const nodeQueries = useQueries({
     queries: (clusters ?? []).map((cluster) => ({
@@ -65,13 +81,14 @@ export function QuickConnect({
       queryKey: ["clusters", cluster.id, "vms"],
       queryFn: () =>
         apiClient.list<VMResponse>(apiPath`/api/v1/clusters/${cluster.id}/vms`),
-      enabled: open,
+      enabled: open && canGuest,
     })),
   });
 
-  const vmList = useMemo(() => {
-    if (!clusters) return [];
+  const { nodeList, vmList } = useMemo(() => {
+    const nodeEntries: NodeEntry[] = [];
     const entries: VMEntry[] = [];
+    if (!clusters) return { nodeList: nodeEntries, vmList: entries };
 
     for (let i = 0; i < clusters.length; i++) {
       const cluster = clusters[i];
@@ -82,6 +99,14 @@ export function QuickConnect({
       const nodeMap = new Map<string, string>();
       for (const node of nodes) {
         nodeMap.set(node.id, node.name);
+        if (canNode) {
+          nodeEntries.push({
+            clusterId: cluster.id,
+            clusterName: cluster.name,
+            nodeName: node.name,
+            status: node.status.toLowerCase(),
+          });
+        }
       }
 
       for (const vm of vms) {
@@ -103,8 +128,36 @@ export function QuickConnect({
       }
     }
 
-    return entries.sort((a, b) => a.vmid - b.vmid);
-  }, [clusters, nodeQueries, vmQueries, canConsole]);
+    nodeEntries.sort(
+      (a, b) =>
+        a.clusterName.localeCompare(b.clusterName) ||
+        a.nodeName.localeCompare(b.nodeName, undefined, { numeric: true }),
+    );
+    entries.sort((a, b) => a.vmid - b.vmid);
+    return { nodeList: nodeEntries, vmList: entries };
+  }, [clusters, nodeQueries, vmQueries, canConsole, canNode]);
+
+  const query = search.trim().toLowerCase();
+  const shownNodes = nodeList.filter((n) =>
+    matches(query, [n.nodeName, n.clusterName]),
+  );
+  const shownGuests = vmList.filter((vm) =>
+    matches(query, [vm.name, String(vm.vmid), vm.nodeName, vm.clusterName]),
+  );
+  const nothingToList = nodeList.length === 0 && vmList.length === 0;
+
+  function setDialogOpen(next: boolean) {
+    setOpen(next);
+    if (!next) setSearch("");
+  }
+
+  function openNode(node: NodeEntry, keys: ConsoleClickKeys) {
+    openConsole(
+      { clusterID: node.clusterId, node: node.nodeName, type: "node_shell" },
+      keys,
+    );
+    setDialogOpen(false);
+  }
 
   function openGuest(
     vm: VMEntry,
@@ -130,12 +183,17 @@ export function QuickConnect({
       },
       keys,
     );
-    setOpen(false);
+    setDialogOpen(false);
   }
 
-  // Every console it opens is a guest's: without console on either kind its
-  // list would be empty.
-  if (!canConsole("vm") && !canConsole("container")) return null;
+  // Without console on a node or on either guest kind its list would be empty.
+  if (!canNode && !canGuest) return null;
+
+  const sectionHeading = (label: string) => (
+    <li className="sticky top-0 z-10 border-t bg-popover py-1 pl-6 pr-4 first:border-t-0 text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground">
+      {label}
+    </li>
+  );
 
   return (
     <>
@@ -147,7 +205,7 @@ export function QuickConnect({
           aria-label={t("quickConnect.newConsole")}
           title={t("quickConnect.newConsole")}
           onClick={() => {
-            setOpen(true);
+            setDialogOpen(true);
           }}
         >
           <Plus className="h-4 w-4" />
@@ -157,7 +215,7 @@ export function QuickConnect({
           size="sm"
           className="gap-1.5"
           onClick={() => {
-            setOpen(true);
+            setDialogOpen(true);
           }}
         >
           <Plus className="h-4 w-4" />
@@ -165,80 +223,152 @@ export function QuickConnect({
         </Button>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg gap-3">
           <DialogHeader>
             <DialogTitle>{t("quickConnect.openAConsole")}</DialogTitle>
             <DialogDescription>
-              {t("quickConnect.chooseARunningGuestTo")}
+              {canNode && canGuest
+                ? t("quickConnect.chooseANodeOrGuest")
+                : canNode
+                  ? t("quickConnect.chooseANode")
+                  : t("quickConnect.chooseARunningGuestTo")}
             </DialogDescription>
           </DialogHeader>
 
-          {vmList.length === 0 ? (
+          {nothingToList ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("quickConnect.noVMsOrContainersFound")}
+              {canNode && canGuest
+                ? t("quickConnect.noNodesOrGuestsFound")
+                : canNode
+                  ? t("quickConnect.noNodesFound")
+                  : t("quickConnect.noVMsOrContainersFound")}
             </p>
           ) : (
-            <ul className="-mx-6 max-h-80 divide-y overflow-y-auto border-y">
-              {vmList.map((vm) => {
-                const isRunning = vm.status === "running";
-                const isVM = vm.type === "qemu";
+            <>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  aria-label={t("quickConnect.search")}
+                  placeholder={t("quickConnect.searchPlaceholder")}
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                  }}
+                  className="pl-9"
+                />
+              </div>
 
-                return (
-                  <li
-                    key={`${vm.clusterId}-${String(vm.vmid)}`}
-                    className="flex items-center gap-3 py-1.5 pl-6 pr-4"
-                  >
-                    <StatusIcon status={vm.state} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {vm.name}
-                        </span>
-                        <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground">
-                          {String(vm.vmid)}
-                        </span>
-                      </div>
-                      {clusterIds.length > 1 && (
-                        <span className="block truncate text-[12.5px] text-muted-foreground">
-                          {vm.clusterName} / {vm.nodeName}
-                        </span>
-                      )}
-                    </div>
-
-                    {isVM ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
-                        disabled={!isRunning}
-                        title={t("quickConnect.vncConsole")}
-                        onClick={(e) => {
-                          openGuest(vm, "vnc", e);
-                        }}
-                      >
-                        <Monitor className="h-3.5 w-3.5" />
-                        {t("quickConnect.vnc")}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
-                        disabled={!isRunning}
-                        title={t("quickConnect.containerAttach")}
-                        onClick={(e) => {
-                          openGuest(vm, "attach", e);
-                        }}
-                      >
-                        <TerminalSquare className="h-3.5 w-3.5" />
-                        {t("quickConnect.attach")}
-                      </Button>
-                    )}
+              {/* A fixed height, so the dialog does not jump as the list narrows. */}
+              <ul className="-mx-6 h-80 overflow-y-auto border-y">
+                {shownNodes.length === 0 && shownGuests.length === 0 && (
+                  <li className="py-6 text-center text-sm text-muted-foreground">
+                    {t("quickConnect.nothingMatches")}
                   </li>
-                );
-              })}
-            </ul>
+                )}
+
+                {shownNodes.length > 0 && (
+                  <>
+                    {sectionHeading(t("quickConnect.nodes"))}
+                    {shownNodes.map((node) => (
+                      <li
+                        key={`${node.clusterId}-${node.nodeName}`}
+                        className="flex items-center gap-3 border-t py-1.5 pl-6 pr-4 first:border-t-0"
+                      >
+                        <StatusIcon status={node.status} />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium">
+                            {node.nodeName}
+                          </span>
+                          {multiCluster && (
+                            <span className="block truncate text-[12.5px] text-muted-foreground">
+                              {node.clusterName}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
+                          disabled={node.status !== "online"}
+                          title={t("quickConnect.nodeShell")}
+                          onClick={(e) => {
+                            openNode(node, e);
+                          }}
+                        >
+                          <Terminal className="h-3.5 w-3.5" />
+                          {t("quickConnect.shell")}
+                        </Button>
+                      </li>
+                    ))}
+                  </>
+                )}
+
+                {shownGuests.length > 0 && (
+                  <>
+                    {canNode && sectionHeading(t("quickConnect.guests"))}
+                    {shownGuests.map((vm) => {
+                      const isRunning = vm.status === "running";
+                      const isVM = vm.type === "qemu";
+
+                      return (
+                        <li
+                          key={`${vm.clusterId}-${String(vm.vmid)}`}
+                          className="flex items-center gap-3 border-t py-1.5 pl-6 pr-4 first:border-t-0"
+                        >
+                          <StatusIcon status={vm.state} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline gap-2">
+                              <span className="truncate text-sm font-medium">
+                                {vm.name}
+                              </span>
+                              <span className="shrink-0 text-[12.5px] tabular-nums text-muted-foreground">
+                                {String(vm.vmid)}
+                              </span>
+                            </div>
+                            {multiCluster && (
+                              <span className="block truncate text-[12.5px] text-muted-foreground">
+                                {vm.clusterName} / {vm.nodeName}
+                              </span>
+                            )}
+                          </div>
+
+                          {isVM ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
+                              disabled={!isRunning}
+                              title={t("quickConnect.vncConsole")}
+                              onClick={(e) => {
+                                openGuest(vm, "vnc", e);
+                              }}
+                            >
+                              <Monitor className="h-3.5 w-3.5" />
+                              {t("quickConnect.vnc")}
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 shrink-0 gap-1.5 px-2 text-[12.5px]"
+                              disabled={!isRunning}
+                              title={t("quickConnect.containerAttach")}
+                              onClick={(e) => {
+                                openGuest(vm, "attach", e);
+                              }}
+                            >
+                              <TerminalSquare className="h-3.5 w-3.5" />
+                              {t("quickConnect.attach")}
+                            </Button>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </>
+                )}
+              </ul>
+            </>
           )}
         </DialogContent>
       </Dialog>
