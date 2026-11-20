@@ -80,7 +80,7 @@ func (a *apiClient) applyAuth(req *http.Request) {
 
 // newAPIClient creates an apiClient with TLS and auth configured.
 // authPrefix is "PVEAPIToken" for PVE or "PBSAPIToken" for PBS. dialTimeout
-// is buildHTTPClient's: zero for every client but the cache's PVE ones.
+// is buildHTTPClient's: zero for every client but the cache's.
 func newAPIClient(cfg ClientConfig, authPrefix string, dialTimeout time.Duration) (*apiClient, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("proxmox: BaseURL is required")

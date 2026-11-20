@@ -200,6 +200,30 @@ func TestClientCache_PBSHitReturnsSameInstance(t *testing.T) {
 	}
 }
 
+// A cached PBS client bounds its connect as a cached PVE one does
+// (cachedDialTimeout): unbounded, a PBS that went silent held each call of its
+// sync for the kernel's connect timeout, about two minutes.
+func TestClientCache_PBSDialIsBounded(t *testing.T) {
+	t.Parallel()
+	silentListener(t, "127.0.0.6:8007")
+	q := newFakeQueries()
+	server := makeTestPBSServer(t, "https://127.0.0.6:8007")
+	q.setPBS(server)
+	cache := NewClientCache(q, testCacheEncryptionKey, nil, quietLogger())
+	cache.dialTimeout = 200 * time.Millisecond
+	t.Cleanup(cache.Close)
+
+	client, err := cache.GetPBS(context.Background(), server.ID)
+	if err != nil {
+		t.Fatalf("GetPBS: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // 50x the bound
+	defer cancel()
+	if _, err := client.GetDatastores(ctx); err == nil || ctx.Err() != nil {
+		t.Errorf("GetDatastores = %v, the caller's deadline %v; want the dial to give up first", err, ctx.Err())
+	}
+}
+
 // TestClientCache_InvalidateForcesRebuild — after Invalidate the next Get
 // rebuilds, hitting the DB again and (importantly) returning a fresh client
 // instance. Prevents accidental "Invalidate is a no-op" regressions.

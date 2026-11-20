@@ -349,6 +349,7 @@ type Syncer struct {
 	lastSyncFailure      map[uuid.UUID]time.Time // rate-limits the error-level sync-failure report
 	fastSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAllResources pass is running
 	fullSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAll pass is running
+	pbsSyncInFlight      sync.Map                // PBS server ID → struct{}: whose SyncAllPBS pass is running
 	snapshotSyncInFlight atomic.Bool             // re-entrancy guard for SyncAllGuestSnapshots
 	smbiosSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestSmbios
 	osTypeSyncInFlight   atomic.Bool             // re-entrancy guard for SyncAllGuestOSTypes
@@ -1534,7 +1535,8 @@ func appendOSDSnapshots(dst []cephOSDMetricSnapshot, clusterID uuid.UUID, node *
 
 // pbsServerSyncTimeout bounds one PBS server's turn in SyncAllPBS, as
 // clusterSyncTimeout bounds a cluster's: generous for a large datastore's
-// snapshot listing, but finite.
+// snapshot listing, but finite, as a server still in its turn is skipped by
+// the passes after it.
 //
 // It is at least twice proxmox.CachedClientTimeout, the bound on one call to
 // the PBS: a snapshot listing allowed to take that long must leave room for the
@@ -1554,45 +1556,70 @@ func pbsServerDeadline(interval time.Duration) time.Duration {
 // server's deadline (pbsServerSyncTimeout).
 func (s *Syncer) SetPBSInterval(d time.Duration) { s.pbsInterval = d }
 
-// SyncAllPBS syncs all active PBS servers and returns collected metric results.
-func (s *Syncer) SyncAllPBS(ctx context.Context) []*PBSMetricResult {
+// SyncAllPBS syncs every active PBS server and hands each one's metric result
+// to emit as soon as that server is done, so emit may run concurrently, once
+// per server that synced. It returns when the servers it started are done.
+//
+// Servers sync in parallel, each under its own deadline, and a server whose
+// last pass is still running is skipped: the caller starts a pass every tick
+// without waiting for this one, so a server that does not answer holds back
+// only itself (they once synced in turn, and one that hung held every server
+// after it, and their datastore metrics, for its whole deadline).
+func (s *Syncer) SyncAllPBS(ctx context.Context, emit func(*PBSMetricResult)) {
+	// Callers run it in a goroutine of its own, so nothing above would catch it.
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("PBS sync pass panicked", "panic", r)
+		}
+	}()
 	servers, err := s.queries.ListActivePBSServers(ctx)
 	if err != nil {
 		s.logger.Error("failed to list active PBS servers", "error", err)
-		return nil
+		return
 	}
 
 	timeout := cmp.Or(s.pbsServerTimeout, pbsServerDeadline(s.pbsInterval))
-	var results []*PBSMetricResult
+	var wg sync.WaitGroup
 	for _, server := range servers {
-		s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
-		// Each server under its own deadline: one that does not answer would
-		// otherwise hold every server after it, and the pass, for as long as
-		// its connection stays open.
-		serverCtx, cancel := context.WithTimeout(ctx, timeout)
-		result, err := s.syncPBSServer(serverCtx, server)
-		if errors.Is(serverCtx.Err(), context.DeadlineExceeded) {
-			s.logger.Warn("PBS server sync ran out of its deadline; what it had not read yet waits for the next pass",
-				"pbs_id", server.ID, "name", server.Name, "deadline", timeout)
-		}
-		cancel()
-		if err != nil {
-			s.logger.Error("failed to sync PBS server",
-				"pbs_id", server.ID,
-				"name", server.Name,
-				"error", err,
-			)
+		if _, running := s.pbsSyncInFlight.LoadOrStore(server.ID, struct{}{}); running {
 			continue
 		}
-		if result != nil {
-			results = append(results, result)
-		}
+		wg.Add(1)
+		go func(server db.PbsServer) {
+			defer wg.Done()
+			defer s.pbsSyncInFlight.Delete(server.ID)
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("PBS server sync panicked",
+						"pbs_id", server.ID, "name", server.Name, "panic", r)
+				}
+			}()
+
+			s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
+			serverCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			result, err := s.syncPBSServer(serverCtx, server)
+			if errors.Is(serverCtx.Err(), context.DeadlineExceeded) {
+				s.logger.Warn("PBS server sync ran out of its deadline; what it had not read yet waits for the next pass",
+					"pbs_id", server.ID, "name", server.Name, "deadline", timeout)
+			}
+			if err != nil {
+				s.logger.Error("failed to sync PBS server",
+					"pbs_id", server.ID,
+					"name", server.Name,
+					"error", err,
+				)
+				return
+			}
+			if result != nil {
+				emit(result)
+			}
+		}(server)
 	}
+	wg.Wait()
 	// The PBS jobs edited on the PBS itself, which the triggers on the job
 	// tables recorded as this pass wrote them (migrations/000126).
 	s.classifyGlobalObjectChanges(ctx)
-
-	return results
 }
 
 // syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.

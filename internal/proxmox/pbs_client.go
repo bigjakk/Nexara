@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // PBSClient communicates with a single Proxmox Backup Server.
@@ -15,7 +16,13 @@ type PBSClient struct {
 
 // NewPBSClient creates a PBSClient from the given config.
 func NewPBSClient(cfg ClientConfig) (*PBSClient, error) {
-	ac, err := newAPIClient(cfg, "PBSAPIToken", 0)
+	return newPBSClient(cfg, 0)
+}
+
+// newPBSClient is NewPBSClient with buildHTTPClient's dialTimeout, which only
+// ClientCache sets.
+func newPBSClient(cfg ClientConfig, dialTimeout time.Duration) (*PBSClient, error) {
+	ac, err := newAPIClient(cfg, "PBSAPIToken", dialTimeout)
 	if err != nil {
 		return nil, err
 	}

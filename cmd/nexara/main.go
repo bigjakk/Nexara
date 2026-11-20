@@ -830,20 +830,28 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 		// waits out its dial — cannot stretch the interval between PVE samples.
 		// Floored at 30s: every pass upserts each datastore's snapshot rows and
 		// publishes a pbs_change event that every open tab refetches on, and
-		// datastore usage moves far slower than guest I/O.
+		// datastore usage moves far slower than guest I/O. Each tick starts a
+		// pass without waiting for the last, as the full sync's do: SyncAllPBS
+		// skips a server still in its last pass, so one that hangs delays no
+		// other server, and each server's metrics are written as it finishes.
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					logger.Error("PBS sync loop panicked", "panic", r)
 				}
 			}()
-			mc.ProcessPBSResults(ctx, syncer.SyncAllPBS(ctx))
+			pbsSync := func() {
+				syncer.SyncAllPBS(ctx, func(r *collector.PBSMetricResult) {
+					mc.ProcessPBSResults(ctx, []*collector.PBSMetricResult{r})
+				})
+			}
+			go pbsSync() // the initial sync, at once
 			pbsTicker := time.NewTicker(pbsInterval)
 			defer pbsTicker.Stop()
 			for {
 				select {
 				case <-pbsTicker.C:
-					mc.ProcessPBSResults(ctx, syncer.SyncAllPBS(ctx))
+					go pbsSync()
 				case <-ctx.Done():
 					return
 				}

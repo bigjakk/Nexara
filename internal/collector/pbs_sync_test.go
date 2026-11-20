@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,8 +22,8 @@ import (
 type pbsFakeClient struct {
 	PBSProxmoxClient
 	datastoresErr, syncErr, verifyErr error
-	snapshotsErrFor                   string // the datastore whose snapshots cannot be listed
-	hang                              bool   // a snapshot listing answers only when its context ends
+	snapshotsErrFor                   string        // the datastore whose snapshots cannot be listed
+	hang                              chan struct{} // when set, a snapshot listing answers once it is closed, or fails when its context ends
 }
 
 func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatastoreStatus, error) {
@@ -34,9 +35,12 @@ func (c *pbsFakeClient) GetDatastores(context.Context) ([]proxmox.PBSDatastore, 
 }
 
 func (c *pbsFakeClient) GetSnapshots(ctx context.Context, store string) ([]proxmox.PBSSnapshot, error) {
-	if c.hang {
-		<-ctx.Done()
-		return nil, ctx.Err()
+	if c.hang != nil {
+		select {
+		case <-c.hang:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 	if store == c.snapshotsErrFor {
 		return nil, errors.New("no answer")
@@ -130,16 +134,16 @@ func TestSyncPBSServerPrunesOnlyAfterAWholeListing(t *testing.T) {
 func TestSyncAllPBSClassifiesGlobalChanges(t *testing.T) {
 	t.Parallel()
 	mq := &mockQueries{}
-	(&Syncer{queries: mq, logger: testLogger()}).SyncAllPBS(context.Background())
+	(&Syncer{queries: mq, logger: testLogger()}).SyncAllPBS(context.Background(), func(*PBSMetricResult) {})
 	if mq.classifyGlobalObs != 1 {
 		t.Fatalf("classified %d times, want once", mq.classifyGlobalObs)
 	}
 }
 
-// One PBS server whose snapshot listing does not answer holds the pass only for
-// its own turn: the server after it is still synced, and its own jobs, read
-// before the slow listings, are written. Without a deadline per server the pass
-// would wait on it for as long as its connection stays open.
+// A PBS server whose snapshot listing does not answer ends its turn at its
+// deadline, and its jobs, read before the slow listings, are written. Without
+// the deadline its turn, which the next passes skip it for, would last as long
+// as its connection stays open.
 func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 	t.Parallel()
 	secret, err := crypto.Encrypt("secret-token-value", testEncryptionKey)
@@ -147,31 +151,84 @@ func TestSyncAllPBSBoundsEachServersTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	hung := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.20:8007", TokenSecretEncrypted: secret}
-	next := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.21:8007", TokenSecretEncrypted: secret}
-	mq := &mockQueries{pbsServers: []db.PbsServer{hung, next}}
+	mq := &mockQueries{pbsServers: []db.PbsServer{hung}}
 	s := &Syncer{
 		queries:          mq,
 		encryptionKey:    testEncryptionKey,
 		pbsServerTimeout: 50 * time.Millisecond,
-		pbsClientFactory: func(url, _, _, _ string) (PBSProxmoxClient, error) {
-			return &pbsFakeClient{hang: url == hung.ApiUrl}, nil
+		pbsClientFactory: func(string, string, string, string) (PBSProxmoxClient, error) {
+			return &pbsFakeClient{hang: make(chan struct{})}, nil
 		},
 		logger: testLogger(),
 	}
-	done := make(chan []*PBSMetricResult, 1)
-	go func() { done <- s.SyncAllPBS(context.Background()) }()
+	done := make(chan struct{})
+	go func() {
+		s.SyncAllPBS(context.Background(), func(*PBSMetricResult) {})
+		close(done)
+	}()
 	select {
-	case results := <-done:
-		synced := make([]uuid.UUID, 0, len(results))
-		for _, r := range results {
-			synced = append(synced, r.PBSServerID)
-		}
-		if !slices.Contains(synced, next.ID) || !slices.Contains(mq.pbsSyncJobsFor, hung.ID) {
-			t.Errorf("synced %v, sync jobs written for %v; want the server after the hung one synced and "+
-				"the hung one's jobs written", synced, mq.pbsSyncJobsFor)
+	case <-done:
+		if !slices.Contains(mq.pbsSyncJobsFor, hung.ID) {
+			t.Errorf("sync jobs written for %v, want the hung server's", mq.pbsSyncJobsFor)
 		}
 	case <-time.After(30 * time.Second): // 600x the turn: only a pass with no deadline gets here
 		t.Fatal("the pass never got past a server that did not answer")
+	}
+}
+
+// A PBS server that does not answer holds back no other: each syncs on its own
+// and hands its result over as it finishes, and a pass started while one is
+// still in its last skips it. They synced in turn, so one that hung held every
+// server after it, and their datastore metrics, for its whole deadline.
+func TestSyncAllPBS_AHungServerHoldsBackNoOther(t *testing.T) {
+	t.Parallel()
+	secret, err := crypto.Encrypt("secret-token-value", testEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hung := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.20:8007", TokenSecretEncrypted: secret}
+	healthy := db.PbsServer{ID: uuid.New(), ApiUrl: "https://192.0.2.21:8007", TokenSecretEncrypted: secret}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var hungPasses atomic.Int32
+	s := &Syncer{
+		queries:       &mockQueries{pbsServers: []db.PbsServer{hung, healthy}},
+		encryptionKey: testEncryptionKey,
+		pbsClientFactory: func(url, _, _, _ string) (PBSProxmoxClient, error) {
+			if url == hung.ApiUrl && hungPasses.Add(1) == 1 {
+				close(entered)
+				return &pbsFakeClient{hang: release}, nil // only its first pass hangs
+			}
+			return &pbsFakeClient{}, nil
+		},
+		logger: testLogger(),
+	}
+	emitted := make(chan uuid.UUID, 8)
+	emit := func(r *PBSMetricResult) { emitted <- r.PBSServerID }
+
+	firstDone := make(chan struct{})
+	go func() {
+		s.SyncAllPBS(context.Background(), emit)
+		close(firstDone)
+	}()
+	select {
+	case id := <-emitted:
+		if id != healthy.ID {
+			t.Fatalf("handed over %v, want the healthy server's result while the other hung", id)
+		}
+	case <-time.After(30 * time.Second): // only a result held back by the hung server waits this long
+		t.Fatal("no result handed over while a server hung")
+	}
+	<-entered
+	s.SyncAllPBS(context.Background(), emit)
+	if got := hungPasses.Load(); got != 1 {
+		t.Fatalf("a pass started while the hung server was in its last synced it %d times, want it skipped", got)
+	}
+	close(release)
+	<-firstDone
+	// A slot its finished pass kept would skip that server for good.
+	s.SyncAllPBS(context.Background(), emit)
+	if got := hungPasses.Load(); got != 2 {
+		t.Errorf("after its pass ended the hung server was synced %d times, want 2", got)
 	}
 }
 

@@ -120,7 +120,9 @@ type mockQueries struct {
 	nodePressureNewest  map[uuid.UUID]time.Time
 	nodePressureInserts []db.InsertNodePressureParams
 
-	// PBS jobs: a sync job upsert's answer, and the prunes asked for.
+	// PBS jobs: a sync job upsert's answer, and the prunes asked for. pbsMu
+	// guards what the PBS pass writes, as its servers sync concurrently.
+	pbsMu                   sync.Mutex
 	pbsSyncJobUpsertErr     error
 	pbsSyncJobPrunes        int
 	pbsVerifyJobPrunes      int
@@ -532,6 +534,8 @@ func (m *mockQueries) UpsertPBSSnapshot(_ context.Context, arg db.UpsertPBSSnaps
 }
 
 func (m *mockQueries) UpsertPBSSyncJob(_ context.Context, arg db.UpsertPBSSyncJobParams) (db.PbsSyncJob, error) {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.pbsSyncJobsFor = append(m.pbsSyncJobsFor, arg.PbsServerID)
 	return db.PbsSyncJob{}, m.pbsSyncJobUpsertErr
 }
@@ -541,17 +545,23 @@ func (m *mockQueries) UpsertPBSVerifyJob(_ context.Context, _ db.UpsertPBSVerify
 }
 
 func (m *mockQueries) DeleteStalePBSSnapshots(_ context.Context, arg db.DeleteStalePBSSnapshotsParams) error {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.pbsSnapshotPrunes = append(m.pbsSnapshotPrunes, fmt.Sprintf("unlistable %v kept %s", arg.Unlistable, arg.Kept))
 	return nil
 }
 
 func (m *mockQueries) DeleteStalePBSSyncJobs(_ context.Context, arg db.DeleteStalePBSSyncJobsParams) error {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.pbsSyncJobPrunes++
 	m.pbsSyncJobKept = arg.Kept
 	return nil
 }
 
 func (m *mockQueries) DeleteStalePBSVerifyJobs(_ context.Context, _ db.DeleteStalePBSVerifyJobsParams) error {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.pbsVerifyJobPrunes++
 	return nil
 }
@@ -699,6 +709,8 @@ func (m *mockQueries) ClassifyObservedChanges(_ context.Context, arg db.Classify
 }
 
 func (m *mockQueries) ClassifyGlobalObjectChanges(_ context.Context, _ db.ClassifyGlobalObjectChangesParams) (int64, error) {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.classifyGlobalObs++
 	return 0, nil
 }
@@ -711,6 +723,8 @@ func (m *mockQueries) ShowUnclassifiedObservedChanges(context.Context, time.Time
 }
 
 func (m *mockQueries) MarkPBSJobBaseline(_ context.Context, arg db.MarkPBSJobBaselineParams) error {
+	m.pbsMu.Lock()
+	defer m.pbsMu.Unlock()
 	m.pbsJobBaselines = append(m.pbsJobBaselines, arg)
 	return nil
 }

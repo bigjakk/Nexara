@@ -50,15 +50,16 @@ const cacheTTL = 10 * time.Minute
 // 60s fallback timeout instead, which made it three times too small.
 const CachedClientTimeout = 5 * time.Minute
 
-// cachedDialTimeout bounds the TCP connect of a cached PVE client, apart from
-// CachedClientTimeout, which bounds the whole request. Without it a member
+// cachedDialTimeout bounds the TCP connect of a cached PVE or PBS client, apart
+// from CachedClientTimeout, which bounds the whole request. Without it a member
 // that went silent (powered off, or rebooting behind a router, so SYNs go
 // unanswered) held each request for the kernel's connect timeout, about two
 // minutes, or until the caller's own deadline, which surfaces as a context
-// error rather than a failed dial, so the failover below never fired. A
-// Proxmox node on a reachable network answers a connect in milliseconds; ten
-// seconds leaves room for a slow WAN link. It bounds the connect only: TLS,
-// the request and the answer keep CachedClientTimeout.
+// error rather than a failed dial, so the failover below never fired; a silent
+// PBS held each call of its sync the same way. A Proxmox node on a reachable
+// network answers a connect in milliseconds; ten seconds leaves room for a slow
+// WAN link. It bounds the connect only: TLS, the request and the answer keep
+// CachedClientTimeout.
 const cachedDialTimeout = 10 * time.Second
 
 // unreachableWindow is how long an endpoint that could not be connected to is
@@ -398,13 +399,13 @@ func (c *ClientCache) GetPBS(ctx context.Context, pbsID uuid.UUID) (*PBSClient, 
 		if err != nil {
 			return nil, fmt.Errorf("decrypt pbs server %s credentials: %w", pbsID, err)
 		}
-		client, err := NewPBSClient(ClientConfig{
+		client, err := newPBSClient(ClientConfig{
 			BaseURL:        server.ApiUrl,
 			TokenID:        server.TokenID,
 			TokenSecret:    tokenSecret,
 			TLSFingerprint: server.TlsFingerprint,
 			Timeout:        CachedClientTimeout,
-		})
+		}, c.dialTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("create pbs client for server %s: %w", pbsID, err)
 		}
