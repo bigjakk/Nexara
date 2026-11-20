@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
 	"strings"
@@ -16,10 +17,62 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/bigjakk/nexara/internal/crypto"
 	"github.com/bigjakk/nexara/internal/proxmox"
 
 	db "github.com/bigjakk/nexara/internal/db/generated"
 )
+
+// TestReleaseJobState_SaysWhatIsStillHeld: the refusal of a job created while
+// a previous one still holds something says what. It blamed an HA rule
+// conflict even when all that was held was a passthrough guest the release
+// was waiting on, and it names that remedy only while an HA rule is held.
+func TestReleaseJobState_SaysWhatIsStillHeld(t *testing.T) {
+	t.Parallel()
+	const key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	secret, err := crypto.Encrypt("secret", key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// VM 122 runs, and Proxmox refuses to re-enable any HA rule.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api2/json/nodes", "/api2/json/nodes/pve-01/lxc":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		case "/api2/json/nodes/pve-01/qemu":
+			_, _ = w.Write([]byte(`{"data":[{"vmid":122,"status":"running"}]}`))
+		default:
+			http.Error(w, "refused", http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	const guestHeld = "A previous rolling update on this cluster still holds the passthrough guests it shut down (qemu 122). Cleanup keeps retrying in the background."
+	for _, tc := range []struct{ name, rules, want string }{
+		{"a guest whose stop may not be over", `[]`, guestHeld},
+		{"and an HA rule", `[{"rule":"keep-apart","type":"resource-affinity"}]`,
+			"A previous rolling update on this cluster still holds the HA rules it disabled (keep-apart) and the passthrough guests it shut down (qemu 122). " +
+				"Cleanup keeps retrying in the background; if Proxmox will not re-enable an HA rule because another rule conflicts with it, fix or delete one of them."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			job := db.RollingUpdateJob{ID: uuid.New(), ClusterID: uuid.New(), Status: "failed", CleanupPending: true,
+				CompletedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}, DisabledHaRules: []byte(tc.rules)}
+			node := db.RollingUpdateNode{ID: uuid.New(), JobID: job.ID, NodeName: "pve-01", Step: "failed",
+				StoppedPassthroughJson: []byte(`[{"vmid":122,"type":"qemu","passthrough":true}]`)}
+			d := &memberDB{t: t, audits: true, accept: map[string]int64{"SetJobDisabledHARules": 1},
+				rowFor: map[string]any{"GetRollingUpdateJob": job,
+					"GetCluster": db.Cluster{ID: job.ClusterID, ApiUrl: srv.URL, TokenID: "nexara@pve!api", TokenSecretEncrypted: secret}},
+				rowsFor: map[string][][]any{"ListRollingUpdateNodes": {columnsOf(node)}}}
+			o, _, _ := engineOn(t, d, nil)
+			o.encryptionKey = key
+
+			if got, _ := o.ReleaseJobState(context.Background(), job.ID); got != tc.want {
+				t.Errorf("ReleaseJobState says %q,\nwant %q", got, tc.want)
+			}
+		})
+	}
+}
 
 func TestCleanupBackoff(t *testing.T) {
 	tests := []struct {
@@ -534,8 +587,8 @@ func TestNoout_WiredIntoTheJob(t *testing.T) {
 			rowFor:  map[string]any{"GetRollingUpdateJob": db.RollingUpdateJob{ID: jobID, Status: "cancelled", CephNooutState: nooutHeld}},
 			rowsFor: map[string][][]any{"ListRollingUpdateNodes": {}}}
 		o, _, _ := engineOn(t, d, nil)
-		if released, didWork := o.releaseJobState(context.Background(), jobID, true); released || !didWork {
-			t.Errorf("releaseJobState = %v, %v; want false, true", released, didWork)
+		if h, didWork := o.releaseJobState(context.Background(), jobID, true); h.none() || !didWork {
+			t.Errorf("releaseJobState = %v, %v; want something held, true", h.items, didWork)
 		}
 	})
 }

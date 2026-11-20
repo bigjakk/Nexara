@@ -13,6 +13,15 @@ type GuestSnapshot struct {
 	Type        string `json:"type"` // "qemu" or "lxc"
 	Status      string `json:"status"`
 	Passthrough bool   `json:"passthrough,omitempty"` // PCI/USB passthrough — cannot live-migrate
+	// StopFinished is set only in a node's stopped-passthrough record, once the
+	// drain's shutdown of the guest is over: no stop of its own can still turn
+	// the guest off later. See restartStoppedPassthrough.
+	StopFinished bool `json:"stop_finished,omitempty"`
+}
+
+// sameGuest reports whether g is the same guest as s.
+func (s GuestSnapshot) sameGuest(g GuestSnapshot) bool {
+	return g.VMID == s.VMID && g.Type == s.Type
 }
 
 // DisabledHARule tracks an HA rule that was temporarily disabled during drain.

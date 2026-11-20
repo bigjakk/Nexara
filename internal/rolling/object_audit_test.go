@@ -89,10 +89,10 @@ func TestRollingUpdateFilesTheObjectsItChanges(t *testing.T) {
 	t.Run("rules restored, one refused and kept", func(t *testing.T) {
 		t.Parallel()
 		o, client, d := setup(t, "refused-rule")
-		ok := o.releaseRuleRecord(ctx, client, job, rules, "", true, func([]DisabledHARule) bool { return true })
+		kept := o.releaseRuleRecord(ctx, client, job, rules, "", true, func([]DisabledHARule) bool { return true })
 		got := d.rowsOf("ha_rule")
-		if ok || len(got) != 1 || got[0].resourceID != "ok-rule" || got[0].details["disable"] != float64(0) {
-			t.Errorf("released = %v, ha_rule rows = %+v, want one update with disable=0 for ok-rule only", ok, got)
+		if len(kept) != 1 || len(got) != 1 || got[0].resourceID != "ok-rule" || got[0].details["disable"] != float64(0) {
+			t.Errorf("kept %v, ha_rule rows = %+v, want refused-rule kept, one update with disable=0 for ok-rule only", kept, got)
 		}
 	})
 

@@ -50,7 +50,7 @@ type memberDB struct {
 	accept  map[string]int64
 	writes  []string
 	values  []string // "Name=first argument" for each accepted write, beside writes
-	reasons []string // its second argument when a string, beside writes
+	reasons []string // its second argument when a string or bytes, beside writes
 	// rowFor answers each single-row query it names with that value's fields,
 	// or, for a func([]any) pgx.Row, with what it returns for the query's
 	// arguments.
@@ -155,6 +155,9 @@ func (d *memberDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Comm
 		}
 		d.values = append(d.values, fmt.Sprintf("%s=%v", name, first))
 		reason, _ := second.(string)
+		if b, ok := second.([]byte); ok {
+			reason = string(b)
+		}
 		d.reasons = append(d.reasons, reason)
 		d.mu.Unlock()
 		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
