@@ -59,6 +59,17 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 	fetchFailed := false
 	listed = make([]string, 0, len(nodes))
 	for _, node := range nodes {
+		// Hold the cluster watermark back (below) for a node whose tasks are
+		// not read: the healthy nodes' maxStartTime would otherwise advance
+		// `since` past tasks that started on THIS node before the new
+		// watermark, and the since-filter would skip them forever once the
+		// node recovers. One the listing reports offline is not asked at all
+		// (askableNodes).
+		if node.Status == "offline" {
+			fetchFailed = true
+			offline = append(offline, node.Node)
+			continue
+		}
 		tasks, err := client.GetNodeTasks(ctx, node.Node, since, 500)
 		if err != nil {
 			s.logger.Warn("task sync: failed to get tasks",
@@ -66,14 +77,7 @@ func (s *Syncer) syncTasks(ctx context.Context, client ProxmoxClient, cluster db
 				"node", node.Node,
 				"error", err,
 			)
-			// Hold the cluster watermark back (below): the healthy nodes'
-			// maxStartTime would otherwise advance `since` past tasks that
-			// started on THIS node before the new watermark, and the
-			// since-filter would skip them forever once the node recovers.
 			fetchFailed = true
-			if node.Status == "offline" {
-				offline = append(offline, node.Node)
-			}
 			continue
 		}
 

@@ -51,6 +51,9 @@ func runningRow(upid string, started time.Time) db.TaskHistory {
 	}
 }
 
+// memberNodesOnline is memberCluster's nodes, both listed online.
+var memberNodesOnline = map[string]bool{"pve1": true, "pve2": true}
+
 // memberCluster is a cluster whose nodes include the "pve1" runningRow puts
 // every task on, so the reconcile's membership check lets it be polled, and
 // "pve2".
@@ -73,7 +76,7 @@ func TestReconcileRunningTasks(t *testing.T) {
 		}}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+		s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 		if len(q.reconcileCalls) != 1 {
 			t.Fatalf("expected 1 reconcile call, got %d", len(q.reconcileCalls))
@@ -95,7 +98,7 @@ func TestReconcileRunningTasks(t *testing.T) {
 		}}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+		s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 		if len(q.reconcileCalls) != 1 || q.reconcileCalls[0].Status != "failed" {
 			t.Fatalf("expected one failed reconcile, got %+v", q.reconcileCalls)
@@ -110,7 +113,7 @@ func TestReconcileRunningTasks(t *testing.T) {
 		}}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+		s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 		if len(q.reconcileCalls) != 0 {
 			t.Fatalf("expected no reconcile calls for a running task, got %d", len(q.reconcileCalls))
@@ -123,7 +126,7 @@ func TestReconcileRunningTasks(t *testing.T) {
 		client := &reconcileFakeClient{errs: map[string]error{"UPID:pve1:transient": errors.New("503 service unavailable")}}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+		s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 		if len(q.reconcileCalls) != 0 {
 			t.Fatalf("expected no reconcile within grace window, got %d", len(q.reconcileCalls))
@@ -137,7 +140,7 @@ func TestReconcileRunningTasks(t *testing.T) {
 		client := &reconcileFakeClient{errs: map[string]error{"UPID:pve1:vanished": errors.New("task not found")}}
 		s := &Syncer{queries: q, logger: testLogger()}
 
-		s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+		s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 		if len(q.reconcileCalls) != 1 || q.reconcileCalls[0].Status != "failed" {
 			t.Fatalf("expected vanished task marked failed, got %+v", q.reconcileCalls)
@@ -179,7 +182,7 @@ func TestReconcileRunningTasks_FinishedAtIsTheTasksOwnEnd(t *testing.T) {
 	s := &Syncer{queries: q, logger: testLogger()}
 	before := time.Now()
 
-	s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+	s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 	got := map[string]time.Time{}
 	for _, c := range q.reconcileCalls {
@@ -213,7 +216,7 @@ func TestReconcileRunningTasks_AsksTheNodeTheUPIDNames(t *testing.T) {
 	}
 	s := &Syncer{queries: q, logger: testLogger()}
 
-	s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+	s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 	if len(q.reconcileCalls) != 1 || q.reconcileCalls[0].Status != "completed" {
 		t.Fatalf("reconciled %+v, want one completed", q.reconcileCalls)
@@ -254,7 +257,7 @@ func TestReconcileRunningTasks_NeverPollsANodeTheClusterDoesNotHold(t *testing.T
 			client := &countingReconcileClient{}
 			s := &Syncer{queries: q, logger: testLogger()}
 
-			s.reconcileRunningTasks(context.Background(), client, memberCluster(q))
+			s.reconcileRunningTasks(context.Background(), client, memberCluster(q), memberNodesOnline)
 
 			if client.calls != 0 {
 				t.Errorf("GetTaskStatus was called %d times for a node the cluster does not hold", client.calls)

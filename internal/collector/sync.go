@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -682,6 +683,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	}
 
 	storageAdded := false
+	askable := askableNodes(nodes)
 	// Node IDs whose VM+container sync completed without error this cycle.
 	// Only these nodes are eligible for stale-VM pruning — see the
 	// DeleteStaleVMsForNodes call below.
@@ -732,9 +734,9 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// Collect storage-replication job status.
 	s.syncReplication(ctx, client, cluster.ID)
 
-	// Sync Ceph data once per cluster using the first online node.
-	if len(nodes) > 0 {
-		cephResult := s.syncCeph(ctx, client, cluster.ID, nodes[0].Node)
+	// Sync Ceph data once per cluster using the first node not offline.
+	if i := slices.IndexFunc(nodes, func(n proxmox.NodeListEntry) bool { return askable[n.Node] }); i >= 0 {
+		cephResult := s.syncCeph(ctx, client, cluster.ID, nodes[i].Node)
 		if cephResult != nil {
 			result.CephCluster = cephResult.CephCluster
 			result.CephOSDs = cephResult.CephOSDs
@@ -876,7 +878,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// and flip to completed/failed. Kept separate from syncTasks because
 	// GetNodeTasks(since=…) filters by start-time and would never re-list a long
 	// task after it finishes (watermark blind spot).
-	s.reconcileRunningTasks(ctx, client, cluster)
+	s.reconcileRunningTasks(ctx, client, cluster, askable)
 
 	// Read the logs of the backup jobs that have finished, for which guests
 	// each backed up. Before classifying on purpose: a change a job may have
@@ -890,7 +892,7 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	// too long for theirs. Every pass, even one that listed no node.
 	s.classifyStatusChanges(ctx, cluster, listedNodes, offlineNodes)
 	s.classifyObjectChanges(ctx, cluster, listedNodes)
-	taskLogs, realmFields := s.readRealmSyncs(ctx, client, cluster)
+	taskLogs, realmFields := s.readRealmSyncs(ctx, client, cluster, askable)
 	s.classifyObservedChanges(ctx, cluster, everyOnlineNodeListed(nodes, listedNodes), taskLogs, realmFields)
 
 	// Only notify the frontend when inventory data actually changed
@@ -904,8 +906,25 @@ func (s *Syncer) SyncCluster(ctx context.Context, cluster db.Cluster) (*ClusterM
 	return result, nil
 }
 
-// syncNode syncs a single node and all its resources (VMs, containers, storage)
-// and returns collected metric snapshots.
+// askableNodes is the set of the nodes a pass calls by name (/nodes/{node}/…):
+// those the listing names and does not report offline. pveproxy forwards such
+// a call to the node, and on one that is down each call waits out the forward,
+// about 3 s when the host is off and up to pveproxy's 30 s when the forward
+// hangs; a full pass made some ten such calls per node, so one node that was
+// down could run its cluster's whole pass out of its deadline. A node listed
+// "unknown" is still asked: corosync has it and only its status daemon is not
+// reporting, so its pveproxy usually answers, and on a host that is not
+// clustered it is the API's own node.
+func askableNodes(nodes []proxmox.NodeListEntry) map[string]bool {
+	askable := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		if n.Status != "offline" {
+			askable[n.Node] = true
+		}
+	}
+	return askable
+}
+
 // parseNodeHAState extracts per-node HA state (e.g. "online", "maintenance",
 // "fence") from the HA manager-status response. Returns an empty map when HA
 // isn't configured or the response shape is unexpected.
@@ -927,7 +946,13 @@ func parseNodeHAState(raw map[string]json.RawMessage) map[string]string {
 	return out
 }
 
+// syncNode syncs a single node and all its resources (VMs, containers, storage)
+// and returns collected metric snapshots.
 func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID uuid.UUID, node proxmox.NodeListEntry, vmExtra map[int32]vmExtraFields, nodeHAState map[string]string) (*nodeCollectionResult, error) {
+	if node.Status == "offline" {
+		return s.syncListedNode(ctx, clusterID, node, nodeHAState)
+	}
+
 	// Fetch detailed node status for PVE version, CPU info, and metrics.
 	var pveVersion string
 	var cpuCount int32
@@ -1216,6 +1241,37 @@ func (s *Syncer) syncNode(ctx context.Context, client ProxmoxClient, clusterID u
 		VMMetrics:    allVMSnapshots,
 		StorageAdded: storageAdded,
 		SyncOK:       vmErr == nil && ctErr == nil,
+	}, nil
+}
+
+// syncListedNode writes a node the listing reports offline from the listing
+// alone, as syncNode did when every call to the node failed, and asks it
+// nothing (askableNodes). Its guests and hardware are left as they are: only a
+// read of the node prunes them.
+func (s *Syncer) syncListedNode(ctx context.Context, clusterID uuid.UUID, node proxmox.NodeListEntry, nodeHAState map[string]string) (*nodeCollectionResult, error) {
+	dbNode, err := s.queries.UpsertNode(ctx, db.UpsertNodeParams{
+		ClusterID:      clusterID,
+		Name:           node.Node,
+		Status:         node.Status,
+		CpuCount:       safeconv.Int32(node.MaxCPU),
+		MemTotal:       node.MaxMem,
+		DiskTotal:      node.MaxDisk,
+		SslFingerprint: node.SSLFingerprint,
+		Uptime:         node.Uptime,
+		HaState:        nodeHAState[node.Node],
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upsert node %s: %w", node.Node, err)
+	}
+	return &nodeCollectionResult{
+		Node: dbNode.ID,
+		NodeMetric: nodeMetricSnapshot{
+			NodeID:         dbNode.ID,
+			CPUUsage:       node.CPU,
+			MemUsed:        node.Mem,
+			MemTotal:       node.MaxMem,
+			DiskUnreported: true, // no guest was read
+		},
 	}, nil
 }
 

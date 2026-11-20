@@ -27,6 +27,10 @@ const staleTaskGrace = 24 * time.Hour
 // states, are pinned here by TestScheduleReconcileWordsTheCollectorsGiveUp.
 const vanishedExitStatus = "vanished"
 
+// errNodeNotAsked stands in for the status of a task on a node the pass does
+// not ask (askableNodes).
+var errNodeNotAsked = errors.New("node offline or not listed")
+
 // reconcileRunningTasks updates task_history rows still marked "running" by
 // polling each task's live status from Proxmox. The working set is small (the
 // running tasks on the cluster — Nexara-dispatched plus the external PVE-native
@@ -42,7 +46,12 @@ const vanishedExitStatus = "vanished"
 // exclusion lives in that query and nowhere else — see its comment in
 // queries/tasks.sql for why, and for what this pass gives up by not seeing
 // those rows.
-func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster) {
+//
+// Nor is a task polled whose node is not among the askable ones, those the
+// pass's listing names and does not report offline (askableNodes): Proxmox
+// cannot report on it until the node is back, so it waits, and ages out like
+// any task Proxmox cannot report on.
+func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient, cluster db.Cluster, askable map[string]bool) {
 	rows, err := s.queries.ListRunningTaskHistoryByCluster(ctx, cluster.ID)
 	if err != nil {
 		s.logger.Warn("task reconcile: failed to list running tasks",
@@ -74,6 +83,9 @@ func (s *Syncer) reconcileRunningTasks(ctx context.Context, client ProxmoxClient
 			s.logger.Warn("task reconcile: node membership lookup failed",
 				"cluster_id", cluster.ID, "upid", row.Upid, "error", lookupErr.Err)
 			continue
+		}
+		if err == nil && !askable[node] {
+			err = errNodeNotAsked
 		}
 		var st *proxmox.TaskStatus
 		if err == nil {

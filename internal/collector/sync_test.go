@@ -1494,6 +1494,80 @@ func TestSyncPasses_AStuckClusterHoldsBackNoOther(t *testing.T) {
 	}
 }
 
+// A pass asks nothing of a node the listing reports offline: pveproxy forwards
+// each /nodes/{node}/… call to it, and on a node that is down each waited out
+// the forward, enough to run the pass out of its deadline. Its row is still
+// written from the listing, Ceph is read from another node and its unread tasks
+// hold the watermark back; a node listed "unknown", usually up, is still read.
+func TestSyncCluster_AsksNothingOfAnOfflineNode(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	asked := map[string][]string{}
+	record := func(node string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked[node] = append(asked[node], r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}
+	srv := newTestServer(t, map[string]http.HandlerFunc{
+		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeListEntry{{Node: "pve-02", Status: "offline", MaxCPU: 8},
+				{Node: "pve-01", Status: "online"}, {Node: "pve-03", Status: "unknown"}})
+		},
+		"/api2/json/nodes/pve-02/": record("pve-02"),
+		"/api2/json/nodes/pve-03/": record("pve-03"),
+		"/api2/json/nodes/pve-03/tasks": func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked["pve-03"] = append(asked["pve-03"], r.URL.Path)
+			jsonResponse(w, []proxmox.NodeTask{}) // so only the offline node holds the watermark back
+		},
+		"/api2/json/nodes/pve-01/ceph/status": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, proxmox.CephStatus{Health: proxmox.CephHealth{Status: "HEALTH_OK"}})
+		},
+		"/api2/json/nodes/pve-01/tasks": func(w http.ResponseWriter, _ *http.Request) {
+			jsonResponse(w, []proxmox.NodeTask{{UPID: "UPID:pve-01:00000001:00000001:00000001:qmstart:100:root@pam:",
+				Type: "qmstart", ID: "100", User: "root@pam", Status: "OK", StartTime: time.Now().Unix()}})
+		},
+	})
+	defer srv.Close()
+	mq := newMockQueries()
+	unknownTask := "UPID:pve-03:00000004:00000004:00000004:qmstart:102:root@pam:"
+	mq.runningTasks = []db.TaskHistory{runningRow("UPID:pve-02:00000002:00000002:00000002:qmstart:101:root@pam:", time.Now()),
+		runningRow(unknownTask, time.Now())}
+	mq.realmSyncTasks = []db.ListRealmSyncTasksRow{{Node: "pve-02", Status: "completed",
+		Upid: "UPID:pve-02:00000003:00000003:00000003:auth-realm-sync:realm01:root@pam:"}}
+	s := newTestSyncer(mq)
+	s.objectObserveInterval = time.Hour // so realm syncs' logs are read
+
+	result, err := s.SyncCluster(context.Background(), makeCluster(t, srv.URL))
+	if err != nil {
+		t.Fatalf("SyncCluster: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(asked["pve-02"]) != 0 {
+		t.Errorf("asked the offline node %v", asked["pve-02"])
+	}
+	for _, read := range []string{"/status", "/tasks", "/tasks/" + unknownTask + "/status"} {
+		if !slices.Contains(asked["pve-03"], "/api2/json/nodes/pve-03"+read) {
+			t.Errorf("asked the node listed unknown %v, want its %s read", asked["pve-03"], read)
+		}
+	}
+	if i := slices.IndexFunc(mq.upsertNodeCalls, func(p db.UpsertNodeParams) bool { return p.Name == "pve-02" }); i < 0 ||
+		mq.upsertNodeCalls[i].Status != "offline" || mq.upsertNodeCalls[i].CpuCount != 8 {
+		t.Errorf("node rows written %+v, want the offline node's from the listing", mq.upsertNodeCalls)
+	}
+	if result.CephCluster == nil {
+		t.Error("no Ceph reading, want one from a node not offline")
+	}
+	if len(mq.upsertTaskSyncCalls) != 0 {
+		t.Errorf("task watermark advanced to %+v past the offline node's unread tasks", mq.upsertTaskSyncCalls)
+	}
+}
+
 func TestSyncCluster_MetricSnapshots(t *testing.T) {
 	srv := newTestServer(t, map[string]http.HandlerFunc{
 		"/api2/json/nodes": func(w http.ResponseWriter, _ *http.Request) {

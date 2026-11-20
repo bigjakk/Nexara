@@ -120,7 +120,7 @@ func TestRealmSyncLogs(t *testing.T) {
 	}}, syncAttributes: map[string]string{"ldap01": "email=mail,enable=accountActive; keys=sshPublicKey firstname=givenName"}}
 	s := &Syncer{queries: mq, logger: testLogger()}
 	cluster := db.Cluster{ID: uuid.New()}
-	if logs, fields := s.readRealmSyncs(context.Background(), client, cluster); string(logs)+string(fields) != "{}{}" ||
+	if logs, fields := s.readRealmSyncs(context.Background(), client, cluster, map[string]bool{"pve-01": true}); string(logs)+string(fields) != "{}{}" ||
 		client.realmReads+client.logReads != 0 {
 		t.Fatalf("with the observer off: %s %s, %d reads, want nothing read", logs, fields, client.realmReads+client.logReads)
 	}
@@ -136,7 +136,7 @@ func TestRealmSyncLogs(t *testing.T) {
 		{map[string]realmSyncLog{done: whole, early: whole}, 12},
 		{map[string]realmSyncLog{done: whole, early: whole}, 16},
 	} {
-		logs, fields := s.readRealmSyncs(context.Background(), client, cluster)
+		logs, fields := s.readRealmSyncs(context.Background(), client, cluster, map[string]bool{"pve-01": true})
 		var got map[string]realmSyncLog
 		if err := json.Unmarshal(logs, &got); err != nil || !reflect.DeepEqual(got, want.logs) {
 			t.Fatalf("pass %d: %+v (%v), want %+v", pass, got, err, want.logs)

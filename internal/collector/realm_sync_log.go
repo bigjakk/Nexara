@@ -119,10 +119,11 @@ type realmRead struct {
 // realmSyncFields, read once an observer interval (s.realmSyncRealms; one that
 // cannot be read maps none). A sync still running names nothing yet: its log
 // ends only once it wrote user.cfg, and one read before that is read again. A
-// log that cannot be read spends none of the pass's reads. With the observer
-// off there is nothing of it to classify, and nothing is read. Nothing read is
-// "{}".
-func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, cluster db.Cluster) (taskLogs, realmFields json.RawMessage) {
+// log that cannot be read spends none of the pass's reads, and one on a node
+// the pass does not ask (askableNodes) is not read until it does. With the
+// observer off there is nothing of it to classify, and nothing is read.
+// Nothing read is "{}".
+func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, cluster db.Cluster, askable map[string]bool) (taskLogs, realmFields json.RawMessage) {
 	none := json.RawMessage(`{}`)
 	if s.objectObserveInterval <= 0 {
 		return none, none
@@ -164,7 +165,7 @@ func (s *Syncer) readRealmSyncs(ctx context.Context, client ProxmoxClient, clust
 		listed[prefix+t.Upid] = true
 		read, ok := s.realmSyncLogs.Load(prefix + t.Upid)
 		if !ok {
-			if reads == realmSyncLogsPerPass || ctx.Err() != nil {
+			if reads == realmSyncLogsPerPass || ctx.Err() != nil || !askable[t.Node] {
 				continue
 			}
 			lines, cut, err := readTaskLogLines(ctx, client, t.Node, t.Upid, realmSyncLogMaxPages)
