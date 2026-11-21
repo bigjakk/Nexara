@@ -516,6 +516,7 @@ func runCollector(ctx context.Context, cfg *config.Config, application *app.App,
 	syncer.SetPBSInterval(pbsInterval)
 
 	runWithLeaderRetry(ctx, application.Pool, "collector", logger, func(ctx context.Context) {
+		syncer.ForgetOutages()
 		logger.Info("collector started",
 			"metrics_interval", cfg.MetricsCollectInterval,
 			"pbs_interval", pbsInterval,

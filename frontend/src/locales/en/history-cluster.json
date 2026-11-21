@@ -21,9 +21,11 @@
   "empty": "Nothing has been recorded for this cluster yet.",
   "actions": {
     "sync_failed": "Sync failed",
+    "sync_restored": "Sync restored",
     "tls_fingerprint_mismatch": "TLS fingerprint mismatch",
     "tls_fingerprint_verified": "TLS fingerprint verified",
     "cluster_endpoint_failover": "Endpoint failover",
+    "cluster_endpoint_restored": "Endpoint restored",
     "cluster_created": "Cluster added",
     "cluster_updated": "Cluster updated"
   }

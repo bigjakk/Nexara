@@ -485,6 +485,17 @@ func (c *ClientCache) endpointUnreachable(clusterID uuid.UUID, client *Client, h
 	}
 }
 
+// HeldUnreachable returns the lowercased hosts of clusterID that a cached
+// client failed to connect to within the last unreachableWindow: the members
+// the cache is routing around now. Nil-safe.
+func (c *ClientCache) HeldUnreachable(clusterID uuid.UUID) map[string]bool {
+	if c == nil {
+		return nil
+	}
+	held, _ := c.heldUnreachable(clusterID)
+	return held
+}
+
 // heldUnreachable returns the hosts of clusterID still held unreachable, and
 // when the first of those holds lapses (zero when there are none). Lapsed
 // holds are forgotten.

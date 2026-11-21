@@ -50,6 +50,9 @@ func TestClusterPageHistoryCategories(t *testing.T) {
 		kind                             HistoryKind
 		entry, action, typ, worker, want string
 	}{
+		// The cluster's own History files an outage's end beside its start.
+		{ClusterHistory(), "audit", "sync_restored", "cluster", "", "sync"},
+		{ClusterHistory(), "audit", "cluster_endpoint_restored", "cluster", "", "sync"},
 		// A tab: by type, the arm and disarm by theirs.
 		{HAHistory(), "audit", "created", "ha_group", "", "groups"},
 		{HAHistory(), "audit", "arm_ha", "ha", "", "arming"},

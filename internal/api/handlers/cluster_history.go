@@ -22,8 +22,8 @@ func ClusterHistory() HistoryKind {
 		// Every change seen in Proxmox filed under the cluster, each type
 		// under its own view, as every audit row filed under it is read.
 		ObservedTypes: clusterObservedTypes(),
-		// An unreachable cluster files a sync failure every pass, five minutes
-		// apart; a quarter of an hour without one ends the run.
+		// An unreachable cluster once filed a sync failure every five minutes
+		// (now once per outage); a quarter of an hour without one ends a run.
 		Collapse: []HistoryCollapse{
 			{ResourceType: "cluster", Action: "sync_failed", Gap: 15 * time.Minute},
 			{ResourceType: "cluster", Action: "tls_fingerprint_mismatch", Gap: 15 * time.Minute},
@@ -65,7 +65,8 @@ var clusterHistoryRules = []HistoryRule{
 	{Category: "backup", Field: HistoryFieldEntry, Equals: []string{"backup"}},
 	{Category: "guests", Field: HistoryFieldEntry, Equals: []string{"status"}},
 	{Category: "sync", Field: HistoryFieldAction, Equals: []string{
-		"sync_failed", "tls_fingerprint_mismatch", "cluster_endpoint_failover", "tls_fingerprint_verified"}},
+		"sync_failed", "tls_fingerprint_mismatch", "cluster_endpoint_failover", "tls_fingerprint_verified",
+		"sync_restored", "cluster_endpoint_restored"}},
 	{Category: "backup", Field: HistoryFieldResourceType, Equals: []string{
 		"backup", "backup_job", "pbs_server", "veeam_server", "veeam_job", "veeam_session"}},
 	{Category: "backup", Field: HistoryFieldWorker, Equals: []string{"vzdump", "qmrestore", "vzrestore"}},

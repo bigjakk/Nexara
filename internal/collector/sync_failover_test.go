@@ -191,6 +191,7 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 		if _, _, ok := s.failoverCluster(context.Background(), cluster, mismatch); !ok {
 			t.Fatal("expected failover to succeed")
 		}
+		s.syncSucceeded(context.Background(), cluster)
 
 		if len(q.auditLogs) != 1 {
 			t.Fatalf("expected exactly one audit entry, got %d", len(q.auditLogs))
@@ -205,10 +206,16 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "FP2"},
 		}}
 		s := newSyncer(q)
+		clock := newFakeClock()
+		s.outages.now = clock.now
 		cluster := makeCluster(t, "https://10.0.0.1:8006/")
 
-		if _, _, ok := s.failoverCluster(context.Background(), cluster, proxmox.ErrConnectionFailed); !ok {
-			t.Fatal("expected failover to succeed")
+		for range 2 { // told once it has lasted outageClearAfter
+			if _, _, ok := s.failoverCluster(context.Background(), cluster, proxmox.ErrConnectionFailed); !ok {
+				t.Fatal("expected failover to succeed")
+			}
+			s.syncSucceeded(context.Background(), cluster)
+			clock.add(outageClearAfter)
 		}
 
 		if len(q.auditLogs) != 1 {
@@ -226,10 +233,14 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "FP2"},
 		}}
 		s := newSyncer(q)
+		clock := newFakeClock()
+		s.outages.now = clock.now
 		cluster := makeCluster(t, "https://10.0.0.1:8006/")
 
 		for range 5 {
 			s.failoverCluster(context.Background(), cluster, proxmox.ErrConnectionFailed)
+			s.syncSucceeded(context.Background(), cluster)
+			clock.add(outageClearAfter)
 		}
 
 		if len(q.auditLogs) != 1 {
@@ -238,10 +249,8 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 	})
 
 	t.Run("a real failure is not swallowed by a preceding failover", func(t *testing.T) {
-		// Failover is reported first because it happens in the successful
-		// branch. A single shared budget would let "we routed around it"
-		// silence the more serious "the sync failed" arriving moments later —
-		// exactly backwards.
+		// A pass that fails over and still fails tells the failure: the
+		// failover is told only when its pass succeeds.
 		q := &mockQueries{nodesByCluster: []db.Node{
 			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "FP2"},
 		}}
@@ -251,11 +260,8 @@ func TestFailoverClusterReportsToAuditLog(t *testing.T) {
 		s.failoverCluster(context.Background(), cluster, proxmox.ErrConnectionFailed)
 		s.reportSyncError(context.Background(), cluster, proxmox.ErrConnectionFailed)
 
-		if len(q.auditLogs) != 2 {
-			t.Fatalf("expected both reports, got %d", len(q.auditLogs))
-		}
-		if q.auditLogs[1].Action != "sync_failed" {
-			t.Errorf("second action = %q, want sync_failed", q.auditLogs[1].Action)
+		if len(q.auditLogs) != 1 || q.auditLogs[0].Action != "sync_failed" {
+			t.Fatalf("expected the failure alone, got %+v", q.auditLogs)
 		}
 	})
 
@@ -297,6 +303,7 @@ func TestReportEndpointSubstitution(t *testing.T) {
 		cluster.TlsFingerprint = pinned
 
 		s.reportEndpointSubstitution(context.Background(), cluster)
+		s.syncSucceeded(context.Background(), cluster)
 		if len(q.auditLogs) != 0 {
 			t.Fatalf("reported a healthy cluster: %+v", q.auditLogs)
 		}
@@ -312,6 +319,7 @@ func TestReportEndpointSubstitution(t *testing.T) {
 		cluster.TlsFingerprint = pinned
 
 		s.reportEndpointSubstitution(context.Background(), cluster)
+		s.syncSucceeded(context.Background(), cluster)
 		if len(q.auditLogs) != 1 {
 			t.Fatalf("expected one entry, got %d", len(q.auditLogs))
 		}
@@ -326,10 +334,16 @@ func TestReportEndpointSubstitution(t *testing.T) {
 			{Name: "pve2", Address: "10.0.0.2", SslFingerprint: "FP2", Status: "online"},
 		}}
 		s := newSyncer(q)
+		clock := newFakeClock()
+		s.outages.now = clock.now
 		cluster := makeCluster(t, "https://10.0.0.1:8006/")
 		cluster.TlsFingerprint = pinned
 
-		s.reportEndpointSubstitution(context.Background(), cluster)
+		for range 2 { // told once it has lasted outageClearAfter
+			s.reportEndpointSubstitution(context.Background(), cluster)
+			s.syncSucceeded(context.Background(), cluster)
+			clock.add(outageClearAfter)
+		}
 		if len(q.auditLogs) != 1 {
 			t.Fatalf("expected one entry, got %d", len(q.auditLogs))
 		}
@@ -354,6 +368,7 @@ func TestReportEndpointSubstitution(t *testing.T) {
 		cluster.TlsFingerprint = pinned
 
 		s.reportEndpointSubstitution(context.Background(), cluster)
+		s.syncSucceeded(context.Background(), cluster)
 		if len(q.auditLogs) != 0 {
 			t.Fatalf("reported a proxy-fronted endpoint: %+v", q.auditLogs)
 		}

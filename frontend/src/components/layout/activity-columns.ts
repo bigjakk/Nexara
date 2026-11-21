@@ -397,8 +397,8 @@ export type ActivityFilter = "all" | "errors" | "other";
  * An error, to the drawer's count and filter: whatever the Level column calls
  * one. So a failed task, and a row with no task behind it, such as a TLS
  * mismatch or a failed sync. A cluster that is down, or that Nexara reaches
- * through another node, adds one of those every 5 minutes, and the count climbs
- * with it; that is what the drawer then holds.
+ * through another node, adds one such row when that starts; the row saying it
+ * is over reads as info.
  */
 export function isErrorActivity(row: ActivityRowData): boolean {
   return row.severity === "error";

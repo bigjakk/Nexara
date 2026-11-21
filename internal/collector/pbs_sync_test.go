@@ -21,13 +21,13 @@ import (
 // snapshot each and one job of each type, or the listing's error.
 type pbsFakeClient struct {
 	PBSProxmoxClient
-	datastoresErr, syncErr, verifyErr error
-	snapshotsErrFor                   string        // the datastore whose snapshots cannot be listed
-	hang                              chan struct{} // when set, a snapshot listing answers once it is closed, or fails when its context ends
+	statusErr, datastoresErr, syncErr, verifyErr error
+	snapshotsErrFor                              string        // the datastore whose snapshots cannot be listed
+	hang                                         chan struct{} // when set, a snapshot listing answers once it is closed, or fails when its context ends
 }
 
 func (c *pbsFakeClient) GetDatastoreStatus(context.Context) ([]proxmox.PBSDatastoreStatus, error) {
-	return nil, nil
+	return nil, c.statusErr
 }
 
 func (c *pbsFakeClient) GetDatastores(context.Context) ([]proxmox.PBSDatastore, error) {

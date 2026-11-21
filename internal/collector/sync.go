@@ -344,9 +344,8 @@ type Syncer struct {
 	eventPub             eventPublisher
 	alertNotifier        alertResolveNotifier // sends a resolved alert's "resolved"; nil sends none
 	logger               *slog.Logger
-	lastSyncErrorMu      sync.Mutex
-	lastSyncError        map[uuid.UUID]time.Time // rate-limits the endpoint-failover report
-	lastSyncFailure      map[uuid.UUID]time.Time // rate-limits the error-level sync-failure report
+	outages              outages                 // each cluster's current outage, told once (outage.go)
+	pbsOutages           outages                 // each PBS server's, for the server log only
 	fastSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAllResources pass is running
 	fullSyncInFlight     sync.Map                // cluster ID → struct{}: whose SyncAll pass is running
 	pbsSyncInFlight      sync.Map                // PBS server ID → struct{}: whose SyncAllPBS pass is running
@@ -1595,7 +1594,7 @@ func (s *Syncer) SyncAllPBS(ctx context.Context, emit func(*PBSMetricResult)) {
 				}
 			}()
 
-			s.logger.Info("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
+			s.logger.Debug("syncing PBS server", "pbs_id", server.ID, "name", server.Name)
 			serverCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 			result, err := s.syncPBSServer(serverCtx, server)
@@ -1604,12 +1603,13 @@ func (s *Syncer) SyncAllPBS(ctx context.Context, emit func(*PBSMetricResult)) {
 					"pbs_id", server.ID, "name", server.Name, "deadline", timeout)
 			}
 			if err != nil {
-				s.logger.Error("failed to sync PBS server",
-					"pbs_id", server.ID,
-					"name", server.Name,
-					"error", err,
-				)
+				s.pbsSyncFailed(server, err)
 				return
+			}
+			if o, over := s.pbsOutages.cleared(server.ID); over {
+				s.pbsOutages.close(server.ID)
+				s.logger.Info("PBS server sync restored", "pbs_id", server.ID, "name", server.Name,
+					"lasted", o.clear.Sub(o.since).Round(time.Second).String())
 			}
 			if result != nil {
 				emit(result)
@@ -1620,6 +1620,23 @@ func (s *Syncer) SyncAllPBS(ctx context.Context, emit func(*PBSMetricResult)) {
 	// The PBS jobs edited on the PBS itself, which the triggers on the job
 	// tables recorded as this pass wrote them (migrations/000126).
 	s.classifyGlobalObjectChanges(ctx)
+}
+
+// pbsSyncFailed logs a failed pass of server once per outage, then every
+// outageReminder; PBS failures file no audit entry.
+func (s *Syncer) pbsSyncFailed(server db.PbsServer, err error) {
+	s.pbsOutages.fail(server.ID)
+	if s.pbsOutages.due(server.ID, "failed", true) {
+		s.pbsOutages.told(server.ID, "failed", true)
+		s.logger.Warn("PBS server sync failing", "pbs_id", server.ID, "name", server.Name, "error", err)
+		return
+	}
+	if lasting, due := s.pbsOutages.remind(server.ID); due {
+		s.logger.Warn("PBS server still failing to sync", "pbs_id", server.ID, "name", server.Name,
+			"for", lasting.Round(time.Second).String(), "error", err)
+		return
+	}
+	s.logger.Debug("PBS server sync failed", "pbs_id", server.ID, "name", server.Name, "error", err)
 }
 
 // syncPBSServer syncs a single PBS server: datastores, snapshots, sync jobs, verify jobs.
@@ -1635,11 +1652,32 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		CollectedAt: now,
 	}
 
+	// A server that cannot be reached fails every read the same way: two reads
+	// in a row that could not connect end the pass, which pbsSyncFailed logs as
+	// an outage. One alone (a slow datastore timing out) logs at debug and is
+	// read again next pass.
+	unanswered := 0
+	unreachable := func(msg string, err error) bool {
+		switch {
+		case err == nil:
+			unanswered = 0
+		case errors.Is(err, proxmox.ErrConnectionFailed):
+			unanswered++
+			s.logger.Debug(msg, "pbs_id", server.ID, "error", err)
+		default:
+			unanswered = 0
+			s.logger.Warn(msg, "pbs_id", server.ID, "error", err)
+		}
+		return unanswered >= 2
+	}
+
 	// Sync datastore status (metrics).
 	dsStatus, err := client.GetDatastoreStatus(ctx)
-	if err != nil {
-		s.logger.Warn("failed to get PBS datastore status", "pbs_id", server.ID, "error", err)
-	} else {
+	if unreachable("failed to get PBS datastore status", err) {
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
+	}
+	statusListed := err == nil
+	if err == nil {
 		s.logger.Debug("PBS datastore status", "pbs_id", server.ID, "count", len(dsStatus))
 		for _, ds := range dsStatus {
 			result.DatastoreMetrics = append(result.DatastoreMetrics, pbsDatastoreMetricSnapshot{
@@ -1659,11 +1697,12 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	// is written. A listing that failed prunes nothing: without that, a PBS
 	// unreachable for longer than the grace lost every job row.
 	syncJobs, err := client.GetSyncJobs(ctx)
+	if unreachable("failed to get PBS sync jobs", err) {
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
+	}
 	syncListed := err == nil
 	syncKept := []string{}
-	if err != nil {
-		s.logger.Warn("failed to get PBS sync jobs", "pbs_id", server.ID, "error", err)
-	} else {
+	if err == nil {
 		s.logger.Debug("PBS sync jobs", "pbs_id", server.ID, "count", len(syncJobs))
 		for _, job := range syncJobs {
 			_, uErr := s.queries.UpsertPBSSyncJob(ctx, db.UpsertPBSSyncJobParams{
@@ -1686,11 +1725,12 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 
 	// Sync verify jobs, pruned and marked on the same conditions.
 	verifyJobs, err := client.GetVerifyJobs(ctx)
+	if unreachable("failed to get PBS verify jobs", err) {
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
+	}
 	verifyListed := err == nil
 	verifyKept := []string{}
-	if err != nil {
-		s.logger.Warn("failed to get PBS verify jobs", "pbs_id", server.ID, "error", err)
-	} else {
+	if err == nil {
 		s.logger.Debug("PBS verify jobs", "pbs_id", server.ID, "count", len(verifyJobs))
 		for _, job := range verifyJobs {
 			_, uErr := s.queries.UpsertPBSVerifyJob(ctx, db.UpsertPBSVerifyJobParams{
@@ -1718,12 +1758,13 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 	// unreachable for longer than the grace lost every snapshot row, and a
 	// datastore that did not answer lost its own.
 	datastores, err := client.GetDatastores(ctx)
+	if unreachable("failed to get PBS datastores", err) {
+		return nil, fmt.Errorf("sync PBS %s: %w", server.ID, err)
+	}
 	datastoresListed := err == nil
 	var unlistable []string
 	kept := []pbsSnapshotKey{}
-	if err != nil {
-		s.logger.Warn("failed to get PBS datastores", "pbs_id", server.ID, "error", err)
-	} else {
+	if err == nil {
 		s.logger.Debug("PBS datastores", "pbs_id", server.ID, "count", len(datastores))
 		for _, ds := range datastores {
 			snaps, err := client.GetSnapshots(ctx, ds.Name)
@@ -1766,8 +1807,10 @@ func (s *Syncer) syncPBSServer(ctx context.Context, server db.PbsServer) (*PBSMe
 		}
 	}
 
-	// Warn if PBS returned no data at all — likely a token permissions issue.
-	if len(dsStatus) == 0 && len(datastores) == 0 && len(syncJobs) == 0 && len(verifyJobs) == 0 {
+	// Warn if every listing answered with nothing — likely a token permissions
+	// issue. Listings that failed say nothing about permissions.
+	if statusListed && datastoresListed && syncListed && verifyListed &&
+		len(dsStatus) == 0 && len(datastores) == 0 && len(syncJobs) == 0 && len(verifyJobs) == 0 {
 		s.logger.Warn("PBS server returned no data — check API token permissions (ACLs)",
 			"pbs_id", server.ID,
 			"name", server.Name,
@@ -1940,17 +1983,12 @@ func (s *Syncer) SyncAll(ctx context.Context, emit func(*ClusterMetricResult)) {
 			syncCtx, cancel := context.WithTimeout(ctx, clusterSyncTimeout(cluster))
 			defer cancel()
 
-			s.logger.Info("syncing cluster", "cluster_id", cluster.ID, "name", cluster.Name)
+			s.logger.Debug("syncing cluster", "cluster_id", cluster.ID, "name", cluster.Name)
 			result, err := s.SyncCluster(syncCtx, cluster)
 			if err != nil {
-				s.logger.Error("failed to sync cluster",
-					"cluster_id", cluster.ID,
-					"name", cluster.Name,
-					"error", err,
-				)
 				// Report with the parent ctx so a timed-out syncCtx doesn't
 				// also suppress the audit entry.
-				s.reportSyncError(ctx, cluster, err)
+				s.syncFailed(ctx, cluster, err)
 				// Record failure for every known node so the health monitor
 				// can mark them offline after the threshold is reached.
 				if s.healthMonitor != nil {
@@ -1962,6 +2000,7 @@ func (s *Syncer) SyncAll(ctx context.Context, emit func(*ClusterMetricResult)) {
 				}
 				return
 			}
+			s.syncSucceeded(ctx, cluster)
 			emit(result)
 		}(cluster)
 	}
@@ -1979,35 +2018,93 @@ func clusterSyncTimeout(cluster db.Cluster) time.Duration {
 	return timeout
 }
 
-// syncReportAllowed reports whether this cluster is due another audit entry,
-// and records the attempt when it is. One report per cluster per 5 minutes,
-// shared by the sync-failure and failover paths so a primary that is both
-// unreachable and flapping cannot flood the audit log from two directions.
-//
-// The budget is per severity rather than flat. Failover is reported first —
-// it happens inside the successful branch — so a single shared budget would
-// let "we routed around it" swallow a genuine sync failure arriving later in
-// the same window, silencing the more serious of the two. A failure may
-// therefore always follow a failover; the reverse is still suppressed.
-func (s *Syncer) syncReportAllowed(clusterID uuid.UUID, severe bool) bool {
-	s.lastSyncErrorMu.Lock()
-	defer s.lastSyncErrorMu.Unlock()
-	if s.lastSyncError == nil {
-		s.lastSyncError = make(map[uuid.UUID]time.Time)
-	}
-	if s.lastSyncFailure == nil {
-		s.lastSyncFailure = make(map[uuid.UUID]time.Time)
-	}
+// ForgetOutages forgets every outage told so far. A leader term starts with
+// it: what the last term told may have ended under another leader.
+func (s *Syncer) ForgetOutages() {
+	s.outages.reset()
+	s.pbsOutages.reset()
+}
 
-	budget := s.lastSyncError
-	if severe {
-		budget = s.lastSyncFailure
+// syncFailed records a failed pass of cluster. The Activity feed hears of the
+// outage on its second failed pass in a row (one is a blip), at once when the
+// endpoint serves a certificate other than the pinned one, and again only when
+// it changes; the server log says so then, and every outageReminder.
+func (s *Syncer) syncFailed(ctx context.Context, cluster db.Cluster, err error) {
+	n := s.outages.fail(cluster.ID)
+	if n < 2 && endpointFailureAction(err, "sync_failed") == "sync_failed" {
+		s.logger.Warn("cluster sync failed; reported if the next pass fails too",
+			"cluster_id", cluster.ID, "name", cluster.Name, "error", err)
+		return
 	}
-	if last, ok := budget[clusterID]; ok && time.Since(last) < 5*time.Minute {
-		return false
+	if s.reportSyncError(ctx, cluster, err) {
+		s.logger.Error("cluster sync failing", "cluster_id", cluster.ID, "name", cluster.Name, "error", err)
+		return
 	}
-	budget[clusterID] = time.Now()
-	return true
+	if lasting, due := s.outages.remind(cluster.ID); due {
+		s.logger.Warn("cluster still failing to sync", "cluster_id", cluster.ID, "name", cluster.Name,
+			"for", lasting.Round(time.Second).String(), "error", err)
+		return
+	}
+	s.logger.Debug("cluster sync failed", "cluster_id", cluster.ID, "name", cluster.Name, "error", err)
+}
+
+// syncSucceeded records a pass of cluster that synced. One through another
+// member tells the feed so, once per outage; one through its own endpoint ends
+// the outage once it has stayed clear (outages.cleared) and tells the feed it
+// is over. Without an "error" in its details that entry reads as info.
+func (s *Syncer) syncSucceeded(ctx context.Context, cluster db.Cluster) {
+	if sub, lasting := s.outages.took(cluster.ID); sub != nil {
+		// A failover is told once it has lasted outageClearAfter: an endpoint
+		// that drops for a moment (pveproxy restarting in an upgrade) keeps the
+		// cache off it for a minute, and is no outage. A changed certificate
+		// needs the operator, so it is told at once.
+		if sub.action == "cluster_endpoint_failover" && lasting < outageClearAfter {
+			return
+		}
+		if s.outages.due(cluster.ID, sub.action, false) && s.writeClusterRow(ctx, cluster, sub.action, map[string]string{
+			"cluster_name":  cluster.Name,
+			"primary_url":   cluster.ApiUrl,
+			"failover_node": sub.member,
+			"error":         sub.reason,
+		}) {
+			s.outages.told(cluster.ID, sub.action, false)
+			s.logger.Warn("cluster syncing through another member", "cluster_id", cluster.ID, "name", cluster.Name,
+				"member", sub.member, "reason", sub.reason)
+		}
+		return
+	}
+	o, over := s.outages.cleared(cluster.ID)
+	if !over {
+		return
+	}
+	action := "cluster_endpoint_restored"
+	if o.failing {
+		action = "sync_restored"
+	}
+	lasted := o.clear.Sub(o.since).Round(time.Second).String()
+	if s.writeClusterRow(ctx, cluster, action, map[string]string{
+		"cluster_name": cluster.Name,
+		"after":        o.reported,
+		"lasted":       lasted,
+	}) {
+		s.outages.close(cluster.ID)
+		s.logger.Info("cluster sync restored", "cluster_id", cluster.ID, "name", cluster.Name,
+			"after", o.reported, "lasted", lasted)
+	}
+}
+
+// writeClusterRow files one system audit row about cluster and reports whether
+// it was written.
+func (s *Syncer) writeClusterRow(ctx context.Context, cluster db.Cluster, action string, details map[string]string) bool {
+	raw, _ := json.Marshal(details)
+	return audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
+		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
+		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
+		ResourceType: "cluster",
+		ResourceID:   cluster.ID.String(),
+		Action:       action,
+		Details:      raw,
+	}) == nil
 }
 
 // endpointFailureAction names the audit action for a primary-endpoint failure.
@@ -2039,13 +2136,20 @@ func (s *Syncer) reportEndpointSubstitution(ctx context.Context, cluster db.Clus
 		return
 	}
 
+	// A host the cache just failed to reach is offline to it for a minute,
+	// whatever the node table says, so it is to this report too.
+	held := s.cache.HeldUnreachable(cluster.ID)
 	endpoints := make([]proxmox.NodeEndpoint, 0, len(nodes))
 	for _, n := range nodes {
+		status := n.Status
+		if held[strings.ToLower(n.Address)] {
+			status = "offline"
+		}
 		endpoints = append(endpoints, proxmox.NodeEndpoint{
 			Name:           n.Name,
 			Address:        n.Address,
 			SSLFingerprint: n.SslFingerprint,
-			Status:         n.Status,
+			Status:         status,
 		})
 	}
 
@@ -2070,8 +2174,10 @@ func (s *Syncer) reportEndpointSubstitution(ctx context.Context, cluster db.Clus
 	s.reportEndpointFailover(ctx, cluster, chosen.ViaNode, action, reason)
 }
 
-// reportEndpointFailover records that the cluster's configured endpoint could
-// not be reached and the sync completed through another member instead.
+// reportEndpointFailover notes that this pass of cluster could not use its
+// configured endpoint and is syncing through another member instead; if the
+// pass succeeds, syncSucceeded tells the feed, once per outage. A pass that
+// still fails tells the failure alone.
 //
 // Not reported as a sync failure: nothing was lost, the data is current, and
 // the cluster is not degraded. It still reads as an error, in the audit log and
@@ -2079,49 +2185,25 @@ func (s *Syncer) reportEndpointSubstitution(ctx context.Context, cluster db.Clus
 // the endpoint the operator configured is broken and the cluster is running on
 // substitutes — a state that looks entirely healthy until the last usable
 // member goes too.
-func (s *Syncer) reportEndpointFailover(ctx context.Context, cluster db.Cluster, failoverNode, action, reason string) {
-	if !s.syncReportAllowed(cluster.ID, false) {
-		return
-	}
-
-	details, _ := json.Marshal(map[string]string{
-		"cluster_name":  cluster.Name,
-		"primary_url":   cluster.ApiUrl,
-		"failover_node": failoverNode,
-		"error":         reason,
-	})
-
-	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
-		ResourceType: "cluster",
-		ResourceID:   cluster.ID.String(),
-		Action:       action,
-		Details:      details,
-	})
+func (s *Syncer) reportEndpointFailover(_ context.Context, cluster db.Cluster, failoverNode, action, reason string) {
+	s.outages.substitute(cluster.ID, substitution{action: action, reason: reason, member: failoverNode})
 }
 
-// reportSyncError writes an audit log entry and publishes an event when a cluster sync fails.
-// Rate-limited to one report per cluster per 5 minutes to avoid flooding the audit log.
-func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) {
-	if !s.syncReportAllowed(cluster.ID, true) {
-		return
-	}
-
-	errMsg := syncErr.Error()
+// reportSyncError writes an audit log entry and publishes an event when a
+// cluster sync fails, once per outage and kind (outages.due); it reports
+// whether it wrote one. An entry that could not be written is tried again on
+// the next failed pass.
+func (s *Syncer) reportSyncError(ctx context.Context, cluster db.Cluster, syncErr error) bool {
 	action := endpointFailureAction(syncErr, "sync_failed")
-
-	details, _ := json.Marshal(map[string]string{
+	if !s.outages.due(cluster.ID, action, true) {
+		return false
+	}
+	if !s.writeClusterRow(ctx, cluster, action, map[string]string{
 		"cluster_name": cluster.Name,
-		"error":        errMsg,
-	})
-
-	_ = audit.Write(ctx, s.queries, s.eventPub, db.InsertAuditLogParams{
-		ClusterID:    pgtype.UUID{Bytes: cluster.ID, Valid: true},
-		UserID:       pgtype.UUID{Bytes: auth.SystemUserID, Valid: true},
-		ResourceType: "cluster",
-		ResourceID:   cluster.ID.String(),
-		Action:       action,
-		Details:      details,
-	})
+		"error":        syncErr.Error(),
+	}) {
+		return false
+	}
+	s.outages.told(cluster.ID, action, true)
+	return true
 }
