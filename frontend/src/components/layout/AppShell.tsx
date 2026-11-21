@@ -246,7 +246,10 @@ export function AppShell() {
         {/* 56px tall: the report viewer sizes its frame against it. Search is
               centred on the bar, not on the space left over. */}
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3 md:px-4">
-          <div className="flex min-w-0 items-center gap-2 md:flex-1">
+          {/* The title and version show only while this group has room for them,
+              by its own width (the window and the tree panel both change it):
+              squeezed to nothing, they spilled over the search box. */}
+          <div className="@container flex min-w-9 items-center gap-2 md:flex-1">
             {isMobile ? (
               <Button
                 variant="ghost"
@@ -262,11 +265,14 @@ export function AppShell() {
             ) : (
               <ShowTreeButton />
             )}
-            <span className="hidden truncate text-base font-semibold tracking-tight [font-stretch:112%] md:inline">
+            <span className="hidden truncate text-base font-semibold tracking-tight [font-stretch:112%] @min-[5rem]:inline">
               {appTitle}
             </span>
             {versionInfo?.version && (
-              <span className="hidden shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground md:inline">
+              <span
+                title={versionInfo.version}
+                className="hidden max-w-24 shrink-0 truncate rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground @min-[9rem]:inline"
+              >
                 {versionInfo.version}
               </span>
             )}
