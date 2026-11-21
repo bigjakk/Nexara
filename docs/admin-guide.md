@@ -2121,7 +2121,7 @@ A panel at the bottom of every page. Collapsed, it is one line: **Activity**, ho
 
 - **What it lists** — the 50 newest audit entries you may see (`view:audit`), plus up to 50 older entries for tasks still running or finished in the last hour, so a long disk move stays there however many entries come after it. A running task on an offline node is not kept this way.
 - **Order** — tasks Proxmox confirms are running come first in the default newest-first order; a sort you choose replaces that, and applies within what the panel holds.
-- **N errors** counts those entries whose Level reads `error`: failed tasks, and errors with no task behind them, such as a TLS fingerprint mismatch or a failed sync. A cluster that is down, or that Nexara reaches through another node because its configured endpoint is unusable, adds an entry every 5 minutes, so the count climbs while that lasts and falls only as newer entries push those out of the newest 50.
+- **N errors** counts those entries whose Level reads `error`: failed tasks, and errors with no task behind them, such as a TLS fingerprint mismatch or a failed sync. A cluster that is down, or that Nexara reaches through another node because its configured endpoint is unusable, adds one such entry when that starts (a failed sync on its second failed pass in a row, a failover once it has lasted two minutes), another if it turns from one into the other, and an info entry, **Sync restored** or **Cluster endpoint restored**, once it has synced through its own endpoint for two minutes. The error entries count until newer entries push them out of the newest 50.
 - **Rows** — click to expand with the task's log (`view:task`); double-click a task for its live view.
 
 ### A UPS's History
