@@ -13,6 +13,7 @@ import (
 
 	"github.com/bigjakk/nexara/internal/api/apischema"
 	db "github.com/bigjakk/nexara/internal/db/generated"
+	"github.com/bigjakk/nexara/internal/notifications"
 )
 
 // oidcConfigMirror is a local copy of the OIDC write body's declaration
@@ -50,6 +51,11 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 	}
 	confirmed := &db.OidcConfig{ID: uuid.New(), IssuerUrl: "https://10.0.0.5/realms/main", AllowPrivateAddress: true,
 		RedirectUri: "https://nexara.example.com/api/v1/auth/oidc/callback"}
+	// A configuration from before v1.18.0 keeps carrier-grade NAT (000157) while its
+	// issuer stays; a write that keeps it is the only one that leaves it set.
+	legacy := &db.OidcConfig{ID: uuid.New(), IssuerUrl: "https://100.64.0.9/realms/main", CgnatGrandfathered: true,
+		RedirectUri: "https://nexara.example.com/api/v1/auth/oidc/callback"}
+	keepsCGNAT := map[string]bool{"update from before v1.18.0, issuer kept": true}
 	for _, tc := range []struct {
 		name, method, path, body string
 		stored                   *db.OidcConfig
@@ -70,6 +76,9 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 			body("https://10.0.0.6/realms/main", true), confirmed, 422, false, "", 2},
 		{"update, a new issuer with linked accounts, confirmed", http.MethodPut, "/oidc/configs/" + confirmed.ID.String(),
 			strings.TrimSuffix(body("https://10.0.0.6/realms/main", true), "}") + `,"acknowledge_issuer_change":true}`, confirmed, 200, true, "", 2},
+		{"update from before v1.18.0, issuer kept", http.MethodPut, "/oidc/configs/" + legacy.ID.String(), body(legacy.IssuerUrl, false), legacy, 200, false, "", 0},
+		{"update from before v1.18.0, a new CGNAT issuer", http.MethodPut, "/oidc/configs/" + legacy.ID.String(),
+			body("https://100.64.0.10/realms/main", false), legacy, 422, false, "100.64.0.10", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -119,6 +128,9 @@ func TestOIDCConfigWrites_AskToConfirmAPrivateIssuer(t *testing.T) {
 			}
 			if wrote && store.oidcConfig.AllowPrivateAddress != tc.allowStored {
 				t.Errorf("allow_private_address stored %v, want %v", store.oidcConfig.AllowPrivateAddress, tc.allowStored)
+			}
+			if wrote && store.oidcConfig.CgnatGrandfathered != keepsCGNAT[tc.name] {
+				t.Errorf("cgnat_grandfathered stored %v, want %v", store.oidcConfig.CgnatGrandfathered, keepsCGNAT[tc.name])
 			}
 			if wrote && tc.allowStored {
 				if d := store.auditDetailsWritten(); len(d) != 1 || !strings.Contains(d[0], `"allow_private_address":true`) {
@@ -192,5 +204,16 @@ func TestJudgeOIDCDiscovery(t *testing.T) {
 			tc.advertised != nil && *got.AuthTimeAdvertised != *tc.advertised {
 			t.Errorf("%s: %+v, want pass %v, auth_time advertised %v", tc.name, got, tc.pass, tc.advertised)
 		}
+	}
+}
+
+// The sign-in configuration built from a stored row carries the row's issuer
+// allowance, the carrier-grade NAT of one from before v1.18.0 included: it is
+// what every contact with the provider dials with (auth.NewOIDCProvider).
+func TestBuildOIDCConfig_CarriesTheIssuerAllowance(t *testing.T) {
+	t.Parallel()
+	got, err := (&OIDCHandler{}).buildOIDCConfig(db.OidcConfig{IssuerUrl: "https://100.64.0.9/realms/main", CgnatGrandfathered: true})
+	if want := (notifications.Allowance{CGNAT: true}); err != nil || got.IssuerAllowance != want {
+		t.Errorf("issuer allowance %+v, %v; want %+v", got.IssuerAllowance, err, want)
 	}
 }

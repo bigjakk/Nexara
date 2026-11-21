@@ -599,6 +599,9 @@ func (s *epochStore) doQueryRow(name string, args []any, remember func(func())) 
 		cfg.Name, cfg.Enabled, cfg.IssuerUrl, cfg.ClientID = args[0].(string), args[1].(bool), args[2].(string), args[3].(string)
 		cfg.ClientSecretEncrypted, cfg.RedirectUri = args[4].(string), args[5].(string)
 		cfg.AllowPrivateAddress, cfg.RelaxedStepUp = args[14].(bool), args[15].(bool)
+		if name == "UpdateOIDCConfig" {
+			cfg.CgnatGrandfathered = args[16].(bool) // Create never sets it
+		}
 		was := s.oidcConfig
 		remember(func() { s.oidcConfig = was })
 		s.oidcConfig = &cfg

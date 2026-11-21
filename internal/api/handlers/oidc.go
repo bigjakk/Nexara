@@ -335,7 +335,8 @@ func (h *OIDCHandler) Create(c fiber.Ctx, p *apischema.Params) error {
 		return err
 	}
 
-	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL, req.AllowPrivateAddress, oidcIssuerResubmit)
+	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL,
+		notifications.Allowance{Private: req.AllowPrivateAddress}, oidcIssuerResubmit)
 	if err != nil {
 		return renderAddressPolicyError(c, err)
 	}
@@ -440,9 +441,14 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 
 	// The issuer is checked again on every write. A confirmation is kept while the
 	// issuer stays the same, so that editing anything else does not ask again; a new
-	// issuer is decided anew.
-	confirmed := req.AllowPrivateAddress || existing.AllowPrivateAddress && req.IssuerURL == existing.IssuerUrl
-	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL, confirmed, oidcIssuerResubmit)
+	// issuer is decided anew. So is the carrier-grade NAT a configuration from before
+	// v1.18.0 keeps (000157): kept with its issuer, never given to a new one.
+	sameIssuer := req.IssuerURL == existing.IssuerUrl
+	grandfathered := existing.CgnatGrandfathered && sameIssuer
+	allowPrivate, err := checkOIDCIssuer(c.Context(), req.IssuerURL, notifications.Allowance{
+		Private: req.AllowPrivateAddress || existing.AllowPrivateAddress && sameIssuer,
+		CGNAT:   grandfathered,
+	}, oidcIssuerResubmit)
 	if err != nil {
 		return renderAddressPolicyError(c, err)
 	}
@@ -538,6 +544,7 @@ func (h *OIDCHandler) Update(c fiber.Ctx, p *apischema.Params) error {
 		AllowedDomains:        allowedDomains,
 		AllowPrivateAddress:   allowPrivate,
 		RelaxedStepUp:         relaxed,
+		CgnatGrandfathered:    grandfathered,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update OIDC config")
@@ -613,7 +620,7 @@ func (h *OIDCHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
 	// Re-check the issuer before making the request, with the stored confirmation:
 	// an unconfirmed private address is the 422 a save answers, which the test cannot
 	// confirm itself; any other refusal is reported as the test's result.
-	if _, err := checkOIDCIssuer(c.Context(), cfg.IssuerUrl, cfg.AllowPrivateAddress, oidcIssuerSaveToConfirm); err != nil {
+	if _, err := checkOIDCIssuer(c.Context(), cfg.IssuerUrl, issuerAllowance(cfg), oidcIssuerSaveToConfirm); err != nil {
 		var pErr *addressPolicyError
 		if errors.As(err, &pErr) && !pErr.HardReject {
 			return renderAddressPolicyError(c, err)
@@ -627,7 +634,7 @@ func (h *OIDCHandler) TestConnection(c fiber.Ctx, p *apischema.Params) error {
 	// Try to fetch the OIDC discovery document using the address-checked client,
 	// which checks the address again at the dial.
 	discoveryURL := strings.TrimRight(cfg.IssuerUrl, "/") + "/.well-known/openid-configuration"
-	client := notifications.SafeHTTPClientAllowingPrivate(10*time.Second, cfg.AllowPrivateAddress)
+	client := notifications.SafeHTTPClientAllowing(10*time.Second, issuerAllowance(cfg))
 	resp, err := client.Get(discoveryURL) //nolint:gosec // URL comes from admin-configured issuer
 	if err != nil {
 		slog.Error("OIDC test connection failed", "config_id", id, "error", err)
@@ -1567,8 +1574,15 @@ func (h *OIDCHandler) buildOIDCConfig(cfg db.OidcConfig) (auth.OIDCConfig, error
 		GroupsClaim:      cfg.GroupsClaim,
 		AllowedDomains:   cfg.AllowedDomains,
 
-		AllowPrivateAddress: cfg.AllowPrivateAddress,
+		IssuerAllowance: issuerAllowance(cfg),
 	}, nil
+}
+
+// issuerAllowance is what a stored configuration's issuer may resolve to beyond
+// the public internet: its confirmation, and carrier-grade NAT for one from
+// before v1.18.0 (000157).
+func issuerAllowance(cfg db.OidcConfig) notifications.Allowance {
+	return notifications.Allowance{Private: cfg.AllowPrivateAddress, CGNAT: cfg.CgnatGrandfathered}
 }
 
 // confirmOIDCIssuerChange is the code the admin page keys on to warn that moving the
@@ -1715,15 +1729,15 @@ const (
 
 // checkOIDCIssuer checks the issuer URL of an OIDC configuration: https, a host, and
 // the address the host resolves to, by the notification channels' rule
-// (notifications.CheckTargetHost). It returns the confirmation to store — true only
-// for a private issuer the caller confirmed — or the refusal for
-// renderAddressPolicyError: a private address not confirmed (422
-// private_address_confirm_required, its address in details, with todo as the way
-// out), an address no configuration may use — loopback, link-local (the cloud
-// metadata addresses included), unspecified, or one with a zone — or a name that does
-// not resolve (400). Every contact with the provider checks it again at the dial
-// (auth.NewOIDCProvider).
-func checkOIDCIssuer(ctx context.Context, rawURL string, confirmed bool, todo string) (bool, error) {
+// (notifications.CheckTargetHost), with the addresses allow admits. It returns the
+// confirmation to store — true only for a private issuer the caller confirmed
+// (allow.Private) — or the refusal for renderAddressPolicyError: a private address not
+// admitted (422 private_address_confirm_required, its address in details, with todo
+// as the way out), an address no configuration may use — loopback, link-local (the
+// cloud metadata addresses included), unspecified, or one with a zone — or a name
+// that does not resolve (400). Every contact with the provider checks it again at the
+// dial (auth.NewOIDCProvider).
+func checkOIDCIssuer(ctx context.Context, rawURL string, allow notifications.Allowance, todo string) (bool, error) {
 	if !strings.HasPrefix(rawURL, "https://") {
 		return false, fiber.NewError(fiber.StatusBadRequest, "issuer_url must use https:// scheme")
 	}
@@ -1735,7 +1749,7 @@ func checkOIDCIssuer(ctx context.Context, rawURL string, confirmed bool, todo st
 	if host == "" {
 		return false, fiber.NewError(fiber.StatusBadRequest, "issuer_url must include a hostname")
 	}
-	private, err := notifications.CheckTargetHost(ctx, host, confirmed)
+	private, err := notifications.CheckTargetHost(ctx, host, allow)
 	var refused *notifications.TargetAddressError
 	switch {
 	case errors.As(err, &refused) && refused.Unreadable:
@@ -1751,7 +1765,7 @@ func checkOIDCIssuer(ctx context.Context, rawURL string, confirmed bool, todo st
 	case err != nil:
 		return false, fiber.NewError(fiber.StatusBadRequest, "cannot resolve issuer hostname")
 	}
-	return private && confirmed, nil
+	return private && allow.Private, nil
 }
 
 // errorMessage is err's message for the caller: a fiber error's own, else err's.

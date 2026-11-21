@@ -40,35 +40,38 @@ func TestSendErrorsKeepNoChannelSecret(t *testing.T) {
 }
 
 // TestCheckTargetIP is the address rule every send applies: a channel's
-// confirmation relaxes the private ranges alone; loopback, link-local (the
-// metadata address) and unspecified stay refused whatever it says.
+// confirmation relaxes the private ranges alone, and the carrier-grade NAT a
+// channel from before v1.18.0 keeps relaxes that range alone; loopback,
+// link-local (the metadata addresses) and unspecified stay refused whatever
+// either says.
 func TestCheckTargetIP(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		ip                   string
-		without, withAllow   bool // refused
-		overridableIfRefused bool
+		ip                            string
+		without, withAllow, withCGNAT bool // refused
+		overridableIfRefused          bool
 	}{
-		{"10.0.0.5", true, false, true},
-		{"172.16.0.9", true, false, true},
-		{"fd00::5", true, false, true},
-		{"127.0.0.1", true, true, false},
-		{"::1", true, true, false},
-		{"169.254.169.254", true, true, false},
-		{"fe80::1", true, true, false},
-		{"0.0.0.0", true, true, false},
-		{"::", true, true, false},
-		{"100.64.0.9", true, false, true},
-		{"100.100.100.200", true, true, false}, // Alibaba Cloud's metadata service, inside CGNAT
-		{"fd00:ec2::254", true, true, false},
-		{"fd20:ce::254", true, true, false},
-		{"203.0.113.10", false, false, false},
+		{"10.0.0.5", true, false, true, true},
+		{"172.16.0.9", true, false, true, true},
+		{"fd00::5", true, false, true, true},
+		{"127.0.0.1", true, true, true, false},
+		{"::1", true, true, true, false},
+		{"169.254.169.254", true, true, true, false},
+		{"fe80::1", true, true, true, false},
+		{"0.0.0.0", true, true, true, false},
+		{"::", true, true, true, false},
+		{"100.64.0.9", true, false, false, true},
+		{"100.100.100.200", true, true, true, false}, // Alibaba Cloud's metadata service, inside CGNAT
+		{"fd00:ec2::254", true, true, true, false},
+		{"fd20:ce::254", true, true, true, false},
+		{"203.0.113.10", false, false, false, false},
 	} {
 		ip := net.ParseIP(tt.ip)
-		errWithout, errWith := checkTargetIP(ip, false), checkTargetIP(ip, true)
-		if (errWithout != nil) != tt.without || (errWith != nil) != tt.withAllow {
-			t.Errorf("%s: refused %v without and %v with the allowance, want %v and %v",
-				tt.ip, errWithout, errWith, tt.without, tt.withAllow)
+		errWithout, errWith := checkTargetIP(ip, Allowance{}), checkTargetIP(ip, Allowance{Private: true})
+		errCGNAT := checkTargetIP(ip, Allowance{CGNAT: true})
+		if (errWithout != nil) != tt.without || (errWith != nil) != tt.withAllow || (errCGNAT != nil) != tt.withCGNAT {
+			t.Errorf("%s: refused %v without, %v with the confirmation and %v with CGNAT alone, want %v, %v and %v",
+				tt.ip, errWithout, errWith, errCGNAT, tt.without, tt.withAllow, tt.withCGNAT)
 		}
 		var te *TargetAddressError
 		if errors.As(errWithout, &te) && te.Overridable != tt.overridableIfRefused {
@@ -82,32 +85,54 @@ func TestCheckTargetIP(t *testing.T) {
 func TestSendTimeChecksReadTheChannelsAllowance(t *testing.T) {
 	t.Parallel()
 	allowed := ChannelContext(context.Background(), db.NotificationChannel{AllowPrivateAddress: true})
+	grandfathered := ChannelContext(context.Background(), db.NotificationChannel{CgnatGrandfathered: true})
 	refused := ChannelContext(context.Background(), db.NotificationChannel{})
+	// smtpSend goes through SendSMTPMessage with ctx cancelled, so a send whose
+	// address passes stops at the dial and contacts nothing: only a refused
+	// address comes back as a refusal.
+	smtpSend := func(host string) func(ctx context.Context) error {
+		return func(ctx context.Context) error {
+			c, cancel := context.WithCancel(ctx)
+			cancel()
+			var refusal *TargetAddressError
+			err := SendSMTPMessage(c, SMTPSendOptions{Host: host, To: []string{"ops@example.com"}, UseSTARTTLS: true})
+			if errors.As(err, &refusal) {
+				return err
+			}
+			return nil
+		}
+	}
 	for _, tt := range []struct {
-		name          string
-		check         func(ctx context.Context) error
-		allowedPasses bool
+		name                               string
+		check                              func(ctx context.Context) error
+		allowedPasses, grandfatheredPasses bool
 	}{
-		{"private URL", func(ctx context.Context) error { return validateExternalURL(ctx, "https://10.0.0.5/hook") }, true},
-		{"loopback URL", func(ctx context.Context) error { return validateExternalURL(ctx, "https://127.0.0.1/hook") }, false},
+		{"private URL", func(ctx context.Context) error { return validateExternalURL(ctx, "https://10.0.0.5/hook") }, true, false},
+		{"CGNAT URL", func(ctx context.Context) error { return validateExternalURL(ctx, "https://100.64.0.9/hook") }, true, true},
+		{"loopback URL", func(ctx context.Context) error { return validateExternalURL(ctx, "https://127.0.0.1/hook") }, false, false},
 		{"private dial", func(ctx context.Context) error {
-			return dialControl(privateAllowed(ctx))("tcp", "10.0.0.5:443", nil)
-		}, true},
+			return dialControl(allowanceFrom(ctx))("tcp", "10.0.0.5:443", nil)
+		}, true, false},
+		{"CGNAT dial", func(ctx context.Context) error {
+			return dialControl(allowanceFrom(ctx))("tcp", "100.64.0.9:443", nil)
+		}, true, true},
 		{"metadata dial", func(ctx context.Context) error {
-			return dialControl(privateAllowed(ctx))("tcp", "169.254.169.254:80", nil)
-		}, false},
+			return dialControl(allowanceFrom(ctx))("tcp", "169.254.169.254:80", nil)
+		}, false, false},
 		{"zoned loopback dial", func(ctx context.Context) error {
-			return dialControl(privateAllowed(ctx))("tcp", "[::1%1]:443", nil)
-		}, false},
-		{"private SMTP host", func(ctx context.Context) error {
-			return checkSMTPTarget([]string{"10.0.0.5"}, true, privateAllowed(ctx))
-		}, true},
+			return dialControl(allowanceFrom(ctx))("tcp", "[::1%1]:443", nil)
+		}, false, false},
+		{"private SMTP send", smtpSend("10.0.0.5"), true, false},
+		{"CGNAT SMTP send", smtpSend("100.64.0.9"), true, true},
 	} {
 		if err := tt.check(refused); err == nil {
 			t.Errorf("%s: passed on a channel never allowed", tt.name)
 		}
 		if err := tt.check(allowed); (err == nil) != tt.allowedPasses {
 			t.Errorf("%s on an allowed channel: %v, want passing %v", tt.name, err, tt.allowedPasses)
+		}
+		if err := tt.check(grandfathered); (err == nil) != tt.grandfatheredPasses {
+			t.Errorf("%s on a channel from before v1.18.0: %v, want passing %v", tt.name, err, tt.grandfatheredPasses)
 		}
 	}
 }

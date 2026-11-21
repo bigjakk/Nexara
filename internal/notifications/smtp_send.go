@@ -55,7 +55,7 @@ func SendSMTPMessage(ctx context.Context, opts SMTPSendOptions) error {
 		return fmt.Errorf("smtp: cannot resolve host: %w", err)
 	}
 
-	if err := checkSMTPTarget(ips, opts.UseSTARTTLS, privateAllowed(ctx)); err != nil {
+	if err := checkSMTPTarget(ips, opts.UseSTARTTLS, allowanceFrom(ctx)); err != nil {
 		return err
 	}
 
@@ -73,16 +73,16 @@ func SendSMTPMessage(ctx context.Context, opts SMTPSendOptions) error {
 }
 
 // checkSMTPTarget applies the address rule to an SMTP host's addresses. With
-// STARTTLS it is checkTargetIP's, a private address allowed only for a channel
-// the operator confirmed (ChannelContext); cleartext goes to loopback alone.
-func checkSMTPTarget(ips []string, useSTARTTLS, allowPrivate bool) error {
+// STARTTLS it is checkTargetIP's, with the channel's Allowance (ChannelContext);
+// cleartext goes to loopback alone.
+func checkSMTPTarget(ips []string, useSTARTTLS bool, allow Allowance) error {
 	for _, ipStr := range ips {
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
 			return fmt.Errorf("smtp: malformed resolved IP %q", ipStr)
 		}
 		if useSTARTTLS {
-			if err := checkTargetIP(ip, allowPrivate); err != nil {
+			if err := checkTargetIP(ip, allow); err != nil {
 				return fmt.Errorf("smtp: host resolves to %w", err)
 			}
 		} else if !ip.IsLoopback() {

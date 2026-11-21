@@ -50,24 +50,37 @@ func (e *TargetAddressError) Error() string {
 	return "a loopback, link-local or unspecified address, which no channel may use"
 }
 
+// Allowance is what a target may resolve to beyond the public internet.
+// Private is the operator's confirmation (allow_private_address): any private
+// address, carrier-grade NAT included. CGNAT is carrier-grade NAT space alone,
+// which a channel or OIDC configuration made before v1.18.0 keeps without a
+// confirmation (cgnat_grandfathered, migration 000157) until its target
+// changes: v1.17.2 took that range for public and refused every other private one.
+type Allowance struct {
+	Private bool
+	CGNAT   bool
+}
+
 // checkTargetIP is the rule every notification send applies to an address:
-// loopback, link-local (the cloud metadata address included) and unspecified
-// are refused always; a private address only unless allowPrivate, the
-// channel's confirmation (ChannelContext).
-func checkTargetIP(ip net.IP, allowPrivate bool) error {
+// loopback, link-local (the cloud metadata addresses included) and unspecified
+// are refused always; a private address unless allow.Private, the channel's
+// confirmation (ChannelContext), or, in carrier-grade NAT space, allow.CGNAT.
+func checkTargetIP(ip net.IP, allow Allowance) error {
 	switch {
 	case cloudMetadata(ip):
 		return &TargetAddressError{IP: ip.String(), Metadata: true}
 	case ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified():
 		return &TargetAddressError{IP: ip.String()}
-	case (ip.IsPrivate() || cgnat.Contains(ip)) && !allowPrivate:
+	case allow.Private || (allow.CGNAT && cgnat.Contains(ip)):
+		return nil
+	case ip.IsPrivate() || cgnat.Contains(ip):
 		return &TargetAddressError{IP: ip.String(), Overridable: true}
 	}
 	return nil
 }
 
 // cgnat is RFC 6598 carrier-grade NAT space, 100.64.0.0/10: not public, so it
-// needs a channel's confirmation as a private address does.
+// needs a channel's confirmation as a private address does (or Allowance.CGNAT).
 var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
 
 // cloudMetadata reports the cloud metadata services' addresses that sit in a
@@ -78,23 +91,23 @@ func cloudMetadata(ip net.IP) bool {
 		ip.Equal(net.ParseIP("100.100.100.200"))
 }
 
-type allowPrivateKey struct{}
+type allowanceKey struct{}
 
-// ChannelContext is ctx for a send through ch: it carries whether the
-// operator confirmed ch's private target (allow_private_address), which every
-// address check of the send reads. A send whose context did not come through
-// here refuses private addresses.
+// ChannelContext is ctx for a send through ch: it carries ch's Allowance (its
+// confirmation of a private target, and carrier-grade NAT for a channel made
+// before v1.18.0), which every address check of the send reads. A send whose
+// context did not come through here refuses private addresses.
 func ChannelContext(ctx context.Context, ch db.NotificationChannel) context.Context {
-	return context.WithValue(ctx, allowPrivateKey{}, ch.AllowPrivateAddress)
+	return context.WithValue(ctx, allowanceKey{}, Allowance{Private: ch.AllowPrivateAddress, CGNAT: ch.CgnatGrandfathered})
 }
 
-func privateAllowed(ctx context.Context) bool {
-	allowed, _ := ctx.Value(allowPrivateKey{}).(bool)
-	return allowed
+func allowanceFrom(ctx context.Context) Allowance {
+	allow, _ := ctx.Value(allowanceKey{}).(Allowance)
+	return allow
 }
 
 // validateExternalURL checks that a URL is http(s) and does not resolve to an
-// address checkTargetIP refuses, with the private allowance ctx carries.
+// address checkTargetIP refuses, with the Allowance ctx carries.
 func validateExternalURL(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -115,7 +128,7 @@ func validateExternalURL(ctx context.Context, rawURL string) error {
 	if err != nil {
 		return err
 	}
-	allow := privateAllowed(ctx)
+	allow := allowanceFrom(ctx)
 	for _, ip := range ips {
 		if err := checkTargetIP(ip, allow); err != nil {
 			return fmt.Errorf("URL resolves to %w", err)
@@ -170,24 +183,24 @@ func resolveTarget(ctx context.Context, host string) ([]net.IP, error) {
 // SafeHTTPClient returns an HTTP client that blocks connections to private IPs
 // and does not follow redirects. Exported for reuse in other packages (e.g. OIDC).
 func SafeHTTPClient(timeout time.Duration) *http.Client {
-	return safeHTTPClient(timeout, false)
+	return safeHTTPClient(timeout, Allowance{})
 }
 
-// SafeHTTPClientAllowingPrivate is SafeHTTPClient with a private address
-// (checkTargetIP) allowed when allowPrivate, the operator's confirmation of
-// the host it is for: an OIDC issuer on the LAN. Loopback, link-local,
-// unspecified and zoned addresses stay refused at every dial.
-func SafeHTTPClientAllowingPrivate(timeout time.Duration, allowPrivate bool) *http.Client {
-	return safeHTTPClient(timeout, allowPrivate)
+// SafeHTTPClientAllowing is SafeHTTPClient with the addresses allow admits
+// (checkTargetIP) for the host it is for: an OIDC issuer the operator confirmed
+// on the LAN, or one in carrier-grade NAT space from before v1.18.0. Loopback,
+// link-local, unspecified and zoned addresses stay refused at every dial.
+func SafeHTTPClientAllowing(timeout time.Duration, allow Allowance) *http.Client {
+	return safeHTTPClient(timeout, allow)
 }
 
 // targetHTTPClient is SafeHTTPClient for a send through a channel, with the
-// private allowance ctx carries (ChannelContext).
+// Allowance ctx carries (ChannelContext).
 func targetHTTPClient(ctx context.Context, timeout time.Duration) *http.Client {
-	return safeHTTPClient(timeout, privateAllowed(ctx))
+	return safeHTTPClient(timeout, allowanceFrom(ctx))
 }
 
-func safeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
+func safeHTTPClient(timeout time.Duration, allow Allowance) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -196,7 +209,7 @@ func safeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout: 10 * time.Second,
-				Control: dialControl(allowPrivate),
+				Control: dialControl(allow),
 			}).DialContext,
 		},
 	}
@@ -204,7 +217,7 @@ func safeHTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 
 // dialControl refuses, at connect time, an address checkTargetIP refuses: the
 // address actually dialled, whatever the name resolved to when it was checked.
-func dialControl(allowPrivate bool) func(string, string, syscall.RawConn) error {
+func dialControl(allow Allowance) func(string, string, syscall.RawConn) error {
 	return func(_ string, address string, _ syscall.RawConn) error {
 		host, _, err := net.SplitHostPort(address)
 		if err != nil {
@@ -214,7 +227,7 @@ func dialControl(allowPrivate bool) func(string, string, syscall.RawConn) error 
 		if err != nil {
 			return fmt.Errorf("connection blocked: %w", err)
 		}
-		if err := checkTargetIP(ip, allowPrivate); err != nil {
+		if err := checkTargetIP(ip, allow); err != nil {
 			return fmt.Errorf("connection blocked: the address is %w", err)
 		}
 		return nil
@@ -255,7 +268,7 @@ func CheckChannelTarget(ctx context.Context, channelType string, config json.Raw
 	if host == "" {
 		return false, nil
 	}
-	private, err = CheckTargetHost(ctx, host, allowPrivate)
+	private, err = CheckTargetHost(ctx, host, Allowance{Private: allowPrivate})
 	var refused *TargetAddressError
 	if err != nil && !errors.As(err, &refused) {
 		return false, nil // unresolvable passes; the send checks again
@@ -264,21 +277,22 @@ func CheckChannelTarget(ctx context.Context, channelType string, config json.Raw
 }
 
 // CheckTargetHost is CheckChannelTarget's check for a host named anywhere
-// else, an OIDC issuer's: private reports that host resolves to a private
-// address; err is a *TargetAddressError for an address refused (as
-// CheckChannelTarget's), or the resolver's error for a name that does not
-// resolve, which the caller decides about.
-func CheckTargetHost(ctx context.Context, host string, allowPrivate bool) (private bool, err error) {
+// else, an OIDC issuer's, with the addresses allow admits: private reports that
+// host resolves to a private address (carrier-grade NAT included); err is a
+// *TargetAddressError for an address refused (as CheckChannelTarget's), or the
+// resolver's error for a name that does not resolve, which the caller decides
+// about.
+func CheckTargetHost(ctx context.Context, host string, allow Allowance) (private bool, err error) {
 	ips, err := resolveTarget(ctx, host)
 	if err != nil {
 		return false, err
 	}
 	for _, ip := range ips {
 		var refused *TargetAddressError
-		if !errors.As(checkTargetIP(ip, false), &refused) {
+		if !errors.As(checkTargetIP(ip, Allowance{}), &refused) {
 			continue
 		}
-		if !refused.Overridable || !allowPrivate {
+		if errors.As(checkTargetIP(ip, allow), &refused) {
 			return refused.Overridable, refused
 		}
 		private = true

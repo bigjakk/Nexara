@@ -955,7 +955,8 @@ func TestCreateChannel_PrivateTargetNeedsConfirming(t *testing.T) {
 }
 
 // New settings on an update are checked as a create's are; an update that
-// keeps the settings keeps their allowance.
+// keeps the settings keeps their allowance, and so the carrier-grade NAT a
+// channel from before v1.18.0 keeps (000157), which new settings never get back.
 func TestUpdateChannel_PrivateTarget(t *testing.T) {
 	t.Parallel()
 	mirror := apischema.Properties{
@@ -966,17 +967,24 @@ func TestUpdateChannel_PrivateTarget(t *testing.T) {
 		"enabled":               {Type: apischema.Boolean, Optional: true},
 		"allow_private_address": {Type: apischema.Boolean, Optional: true, Default: false},
 	}
-	existing := db.NotificationChannel{ID: uuid.New(), ChannelType: "webhook", AllowPrivateAddress: true}
+	confirmed := db.NotificationChannel{ID: uuid.New(), ChannelType: "webhook", AllowPrivateAddress: true}
+	grandfathered := db.NotificationChannel{ID: uuid.New(), ChannelType: "webhook", CgnatGrandfathered: true}
 	for _, tt := range []struct {
-		name, body string
-		status     int
-		stored     bool
+		name, body         string
+		existing           db.NotificationChannel
+		status             int
+		stored, keepsCGNAT bool
 	}{
-		{"new private settings, not confirmed", `{"config":{"url":"https://10.0.0.5/hook"}}`, http.StatusUnprocessableEntity, false},
-		{"a rename", `{"name":"hook02"}`, http.StatusOK, true},
+		{"new private settings, not confirmed", `{"config":{"url":"https://10.0.0.5/hook"}}`, confirmed, http.StatusUnprocessableEntity, false, false},
+		{"a rename", `{"name":"hook02"}`, confirmed, http.StatusOK, true, false},
 		// The type picks which setting is the target, so the allowance goes.
-		{"a type change without config", `{"channel_type":"slack"}`, http.StatusOK, false},
+		{"a type change without config", `{"channel_type":"slack"}`, confirmed, http.StatusOK, false, false},
+		{"a rename from before v1.18.0", `{"name":"hook02"}`, grandfathered, http.StatusOK, false, true},
+		{"new CGNAT settings from before v1.18.0", `{"config":{"url":"https://100.64.0.10/hook"}}`, grandfathered, http.StatusUnprocessableEntity, false, false},
+		{"new public settings from before v1.18.0", `{"config":{"url":"https://203.0.113.10/hook"}}`, grandfathered, http.StatusOK, false, false},
+		{"a type change from before v1.18.0", `{"channel_type":"slack"}`, grandfathered, http.StatusOK, false, false},
 	} {
+		existing := tt.existing
 		dbtx := &auditRowsDBTX{rowFor: map[string]any{"GetNotificationChannel": existing, "UpdateNotificationChannel": existing},
 			execOK: map[string]bool{"InsertAuditLog": true}}
 		h := NewAlertHandler(db.New(dbtx), testEncryptionKey, nil, nil)
@@ -994,8 +1002,10 @@ func TestUpdateChannel_PrivateTarget(t *testing.T) {
 			return !strings.Contains(q.sql, "-- name: UpdateNotificationChannel ")
 		})
 		wrote := resp.StatusCode == http.StatusOK
-		if resp.StatusCode != tt.status || (len(updates) == 1) != wrote || (wrote && updates[0].args[5] != tt.stored) {
-			t.Errorf("%s: status %d, updates %v; want %d, allowance kept %v", tt.name, resp.StatusCode, updates, tt.status, tt.stored)
+		if resp.StatusCode != tt.status || (len(updates) == 1) != wrote ||
+			(wrote && (updates[0].args[5] != tt.stored || updates[0].args[6] != tt.keepsCGNAT)) {
+			t.Errorf("%s: status %d, updates %v; want %d, allowance kept %v, CGNAT kept %v",
+				tt.name, resp.StatusCode, updates, tt.status, tt.stored, tt.keepsCGNAT)
 		}
 	}
 }

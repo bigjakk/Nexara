@@ -1635,8 +1635,11 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 	configEncrypted := existing.ConfigEncrypted
 	// New settings are checked as a new channel's are, and the allowance is
 	// decided again for them; kept settings keep theirs — unless the type
-	// changes, which changes which setting is the target: that drops it.
+	// changes, which changes which setting is the target: that drops it. The
+	// carrier-grade NAT a channel from before v1.18.0 keeps (000157) goes the
+	// same way, and new settings never get it back.
 	allowPrivate := existing.AllowPrivateAddress && channelType == existing.ChannelType
+	grandfathered := existing.CgnatGrandfathered && channelType == existing.ChannelType && !p.Has("config")
 	if p.Has("config") {
 		config, cErr := channelConfigJSON(p)
 		if cErr != nil {
@@ -1668,6 +1671,7 @@ func (h *AlertHandler) UpdateChannel(c fiber.Ctx, p *apischema.Params) error {
 		ConfigEncrypted:     configEncrypted,
 		Enabled:             enabled,
 		AllowPrivateAddress: allowPrivate,
+		CgnatGrandfathered:  grandfathered,
 	})
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, "Failed to update channel")

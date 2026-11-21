@@ -472,7 +472,7 @@ func (q *Queries) GetNodeRecentMetrics(ctx context.Context, arg GetNodeRecentMet
 }
 
 const getNotificationChannel = `-- name: GetNotificationChannel :one
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels WHERE id = $1
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address, cgnat_grandfathered FROM notification_channels WHERE id = $1
 `
 
 func (q *Queries) GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error) {
@@ -488,12 +488,13 @@ func (q *Queries) GetNotificationChannel(ctx context.Context, id uuid.UUID) (Not
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.CgnatGrandfathered,
 	)
 	return i, err
 }
 
 const getNotificationChannelEnabled = `-- name: GetNotificationChannelEnabled :one
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels WHERE id = $1 AND enabled = true
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address, cgnat_grandfathered FROM notification_channels WHERE id = $1 AND enabled = true
 `
 
 func (q *Queries) GetNotificationChannelEnabled(ctx context.Context, id uuid.UUID) (NotificationChannel, error) {
@@ -509,6 +510,7 @@ func (q *Queries) GetNotificationChannelEnabled(ctx context.Context, id uuid.UUI
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.CgnatGrandfathered,
 	)
 	return i, err
 }
@@ -782,7 +784,7 @@ const insertNotificationChannel = `-- name: InsertNotificationChannel :one
 
 INSERT INTO notification_channels (name, channel_type, config_encrypted, enabled, created_by, allow_private_address)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address
+RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address, cgnat_grandfathered
 `
 
 type InsertNotificationChannelParams struct {
@@ -815,6 +817,7 @@ func (q *Queries) InsertNotificationChannel(ctx context.Context, arg InsertNotif
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.CgnatGrandfathered,
 	)
 	return i, err
 }
@@ -1517,7 +1520,7 @@ func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanc
 }
 
 const listNotificationChannels = `-- name: ListNotificationChannels :many
-SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address FROM notification_channels
+SELECT id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address, cgnat_grandfathered FROM notification_channels
 ORDER BY created_at DESC
 `
 
@@ -1540,6 +1543,7 @@ func (q *Queries) ListNotificationChannels(ctx context.Context) ([]NotificationC
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.AllowPrivateAddress,
+			&i.CgnatGrandfathered,
 		); err != nil {
 			return nil, err
 		}
@@ -1890,9 +1894,10 @@ func (q *Queries) UpdateMaintenanceWindow(ctx context.Context, arg UpdateMainten
 
 const updateNotificationChannel = `-- name: UpdateNotificationChannel :one
 UPDATE notification_channels
-SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6, updated_at = now()
+SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6,
+    cgnat_grandfathered = $7, updated_at = now()
 WHERE id = $1
-RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address
+RETURNING id, name, channel_type, config_encrypted, enabled, created_by, created_at, updated_at, allow_private_address, cgnat_grandfathered
 `
 
 type UpdateNotificationChannelParams struct {
@@ -1902,6 +1907,7 @@ type UpdateNotificationChannelParams struct {
 	ConfigEncrypted     string    `json:"-"`
 	Enabled             bool      `json:"enabled"`
 	AllowPrivateAddress bool      `json:"allow_private_address"`
+	CgnatGrandfathered  bool      `json:"cgnat_grandfathered"`
 }
 
 func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotificationChannelParams) (NotificationChannel, error) {
@@ -1912,6 +1918,7 @@ func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotif
 		arg.ConfigEncrypted,
 		arg.Enabled,
 		arg.AllowPrivateAddress,
+		arg.CgnatGrandfathered,
 	)
 	var i NotificationChannel
 	err := row.Scan(
@@ -1924,6 +1931,7 @@ func (q *Queries) UpdateNotificationChannel(ctx context.Context, arg UpdateNotif
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.AllowPrivateAddress,
+		&i.CgnatGrandfathered,
 	)
 	return i, err
 }

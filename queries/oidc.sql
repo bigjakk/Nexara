@@ -37,7 +37,8 @@ UPDATE oidc_configs SET
     auto_provision = $14,
     allowed_domains = $15,
     allow_private_address = $16,
-    relaxed_step_up = $17
+    relaxed_step_up = $17,
+    cgnat_grandfathered = $18
 WHERE id = $1
 RETURNING *;
 

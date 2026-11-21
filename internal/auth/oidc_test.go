@@ -68,7 +68,7 @@ func TestExchangeAndVerify_PostsTheCodeThroughTheProvidersClient(t *testing.T) {
 	p := &OIDCProvider{
 		oauth2Cfg: oauth2.Config{ClientID: "nexara", Endpoint: oauth2.Endpoint{TokenURL: srv.URL + "/token"}},
 		rdb:       rdb,
-		client:    notifications.SafeHTTPClientAllowingPrivate(5*time.Second, true),
+		client:    notifications.SafeHTTPClientAllowing(5*time.Second, notifications.Allowance{Private: true}),
 	}
 
 	_, err := p.ExchangeAndVerify(t.Context(), "idp-code", "state")

@@ -204,7 +204,8 @@ ORDER BY created_at DESC;
 
 -- name: UpdateNotificationChannel :one
 UPDATE notification_channels
-SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6, updated_at = now()
+SET name = $2, channel_type = $3, config_encrypted = $4, enabled = $5, allow_private_address = $6,
+    cgnat_grandfathered = $7, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

@@ -71,9 +71,11 @@ type OIDCConfig struct {
 	DisplayNameClaim string
 	GroupsClaim      string
 	AllowedDomains   []string
-	// AllowPrivateAddress is the operator's confirmation of an issuer on a private
-	// network address, which every contact with the provider then allows.
-	AllowPrivateAddress bool
+	// IssuerAllowance is what the issuer may resolve to beyond the public internet,
+	// which every contact with the provider then allows: the operator's confirmation
+	// of a private address, and carrier-grade NAT for a configuration from before
+	// v1.18.0.
+	IssuerAllowance notifications.Allowance
 }
 
 // OIDCUserInfo represents a user extracted from an OIDC ID token.
@@ -113,12 +115,12 @@ type OIDCProvider struct {
 // (or http.DefaultClient if none). Each of them gets the provider's client: the
 // notifications package's address-checked one, which checks every address it
 // dials — loopback, link-local, unspecified and zoned ones always refused, a
-// private one unless cfg.AllowPrivateAddress — against what the name resolves
-// to at that moment, and follows no redirect, so none can carry a request to
-// another host. Checking the issuer when it is saved is not enough: the name
-// can resolve elsewhere by the time a sign-in contacts it.
+// private one unless cfg.IssuerAllowance admits it — against what the name
+// resolves to at that moment, and follows no redirect, so none can carry a
+// request to another host. Checking the issuer when it is saved is not enough:
+// the name can resolve elsewhere by the time a sign-in contacts it.
 func NewOIDCProvider(ctx context.Context, cfg OIDCConfig, rdb *redis.Client) (*OIDCProvider, error) {
-	return NewOIDCProviderWithClient(ctx, cfg, rdb, notifications.SafeHTTPClientAllowingPrivate(15*time.Second, cfg.AllowPrivateAddress))
+	return NewOIDCProviderWithClient(ctx, cfg, rdb, notifications.SafeHTTPClientAllowing(15*time.Second, cfg.IssuerAllowance))
 }
 
 // NewOIDCProviderWithClient is NewOIDCProvider over client instead of the

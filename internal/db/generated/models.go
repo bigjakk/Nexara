@@ -826,6 +826,7 @@ type NotificationChannel struct {
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 	AllowPrivateAddress bool      `json:"allow_private_address"`
+	CgnatGrandfathered  bool      `json:"cgnat_grandfathered"`
 }
 
 type NotificationDlq struct {
@@ -892,6 +893,7 @@ type OidcConfig struct {
 	UpdatedAt             time.Time       `json:"updated_at"`
 	AllowPrivateAddress   bool            `json:"allow_private_address"`
 	RelaxedStepUp         bool            `json:"relaxed_step_up"`
+	CgnatGrandfathered    bool            `json:"cgnat_grandfathered"`
 }
 
 type PbsDatastoreMetric struct {

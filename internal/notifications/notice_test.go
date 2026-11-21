@@ -155,7 +155,7 @@ func TestSendsCarryTheChannelsAllowance(t *testing.T) {
 	allowed := make(chan bool, 2)
 	var fake *engineDB
 	e, fake, ch := newDispatchEngine(t, funcDispatcher(func(ctx context.Context, _ AlertPayload) error {
-		allowed <- privateAllowed(ctx)
+		allowed <- allowanceFrom(ctx).Private
 		return nil
 	}))
 	ch.AllowPrivateAddress = true
